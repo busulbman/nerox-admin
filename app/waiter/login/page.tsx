@@ -1,0 +1,125 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { signInWithEmailAndPassword } from 'firebase/auth'
+import { useRouter } from 'next/navigation'
+import { auth } from '@/lib/firebase'
+import { useAuth } from '@/components/AuthProvider'
+
+export default function WaiterLoginPage() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const { user, profile, loading } = useAuth()
+  const router = useRouter()
+
+  // Profil yüklendiğinde role'e göre yönlendir
+  useEffect(() => {
+    if (loading || !user) return
+    if (profile?.role === 'admin') {
+      router.replace('/dashboard')
+    } else if (profile?.role === 'waiter') {
+      if (profile.active === false) return // pasif garson login sayfasında kalır
+      router.replace('/waiter')
+    }
+  }, [user, profile, loading, router])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSubmitting(true)
+    setError('')
+    try {
+      await signInWithEmailAndPassword(auth, email, password)
+      // Yönlendirme useEffect tarafından yapılır
+    } catch {
+      setError('E-posta veya şifre hatalı.')
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) return null
+
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ background: '#faf7f4' }}
+    >
+      <div className="w-full max-w-sm">
+        {/* Logo area */}
+        <div className="text-center mb-8">
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-4"
+            style={{ background: '#3d2b1f' }}
+          >
+            ☕
+          </div>
+          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>
+            Varina Chocolate
+          </h1>
+          <p className="text-gray-400 text-sm mt-1">Garson Paneli</p>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label
+                className="block text-sm font-medium mb-1.5"
+                style={{ color: '#3d2b1f' }}
+              >
+                E-posta
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
+                placeholder="garson@varina.com"
+                required
+                autoComplete="username"
+              />
+            </div>
+            <div>
+              <label
+                className="block text-sm font-medium mb-1.5"
+                style={{ color: '#3d2b1f' }}
+              >
+                Şifre
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                <p className="text-red-600 text-sm">{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full font-bold py-3.5 rounded-xl disabled:opacity-50 text-base active:scale-95 transition-transform"
+              style={{ background: '#d4a017', color: '#3d2b1f' }}
+            >
+              {submitting ? 'Giriş yapılıyor...' : 'Giriş Yap'}
+            </button>
+          </form>
+        </div>
+
+        <p className="text-center mt-4">
+          <a href="/login" className="text-xs text-gray-400 hover:text-gray-600">
+            ← Admin girişi
+          </a>
+        </p>
+      </div>
+    </div>
+  )
+}

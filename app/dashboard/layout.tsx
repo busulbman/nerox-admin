@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { onSnapshot } from 'firebase/firestore'
+import { signOut } from 'firebase/auth'
 import { useAuth } from '@/components/AuthProvider'
-import { rc } from '@/lib/firebase'
-import { requestPermission, showNotification } from '@/lib/notifications'
+import { auth, rc } from '@/lib/firebase'
+import { requestPermission, showLocalNotification } from '@/lib/notifications'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
@@ -13,27 +14,33 @@ const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap'
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
-  const prevCallIds = useRef<Set<string>>(new Set())
-  const initialized = useRef(false)
 
+  const [sidebarOpen,  setSidebarOpen]  = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
+
+  const prevCallIds   = useRef<Set<string>>(new Set())
+  const initialized   = useRef(false)
+
+  // ─── Auth guard ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (loading) return
     if (!user) { router.replace('/login'); return }
     if (profile?.role === 'waiter') { router.replace('/waiter'); return }
   }, [user, profile, loading, router])
 
-  // Bildirim izni — admin/profil yok durumunda da çalışır
+  // ─── Notification permission ─────────────────────────────────────────────
   useEffect(() => {
     if (!user || profile?.role === 'waiter') return
     requestPermission()
   }, [user, profile])
 
-  // Yeni bekleyen çağrılarda bildirim gönder
+  // ─── Calls listener + notifications ──────────────────────────────────────
   useEffect(() => {
     if (!user || profile?.role === 'waiter') return
 
-    const unsub = onSnapshot(rc('calls'), (snap) => {
+    return onSnapshot(rc('calls'), (snap) => {
       const pendingDocs = snap.docs.filter((d) => d.data().durum === 'bekliyor')
+      setPendingCount(pendingDocs.length)
 
       if (initialized.current) {
         for (const d of pendingDocs) {
@@ -41,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             const data = d.data()
             const tableNum = data.tableNumber ?? data.tableId ?? '?'
             const tip = TIP_LABEL[data.tip as string] ?? (data.tip as string) ?? ''
-            showNotification(`🔔 Masa ${tableNum} Çağırıyor`, `${tip} talebi`, '/dashboard/calls')
+            showLocalNotification(`🔔 Masa ${tableNum} Çağırıyor`, `${tip} talebi`, '/dashboard/calls')
           }
         }
       }
@@ -49,9 +56,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       initialized.current = true
       prevCallIds.current = new Set(pendingDocs.map((d) => d.id))
     })
-
-    return unsub
   }, [user, profile])
+
+  async function handleLogout() {
+    await signOut(auth).catch(() => {})
+    router.replace('/login')
+  }
 
   if (loading) {
     return (
@@ -66,8 +76,64 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen" style={{ background: '#faf7f4' }}>
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      {/* ── Mobile top header ── */}
+      <header
+        className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14"
+        style={{ background: '#3d2b1f', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        {/* Hamburger */}
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="text-xl font-bold w-9 h-9 flex items-center justify-center rounded-lg"
+          style={{ color: '#d4a017', background: 'rgba(212,160,23,0.12)' }}
+          aria-label="Menüyü aç"
+        >
+          ☰
+        </button>
+
+        {/* Title */}
+        <p className="font-bold text-sm" style={{ color: '#d4a017' }}>Nerox Admin</p>
+
+        {/* Right actions */}
+        <div className="flex items-center gap-2">
+          {/* Notification bell */}
+          <div className="relative">
+            <button
+              onClick={() => router.push('/dashboard/calls')}
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-lg"
+              style={{ background: 'rgba(255,255,255,0.08)' }}
+              aria-label="Çağrılar"
+            >
+              🔔
+            </button>
+            {pendingCount > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-white font-bold animate-pulse"
+                style={{ background: '#ef4444', fontSize: '10px' }}
+              >
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
+          </div>
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            className="text-xs px-2.5 py-1.5 rounded-lg"
+            style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+          >
+            Çıkış
+          </button>
+        </div>
+      </header>
+
+      {/* ── Sidebar (handles its own mobile overlay) ── */}
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      {/* ── Main content ── */}
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        {children}
+      </main>
     </div>
   )
 }

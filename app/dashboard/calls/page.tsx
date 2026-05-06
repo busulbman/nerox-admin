@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { onSnapshot, updateDoc, serverTimestamp, doc, increment } from 'firebase/firestore'
 import { getCallTableLabel, normalizeWaiterCall } from '@/lib/firestore-models'
-import { rc, rd } from '@/lib/firebase'
+import { db, rc, rd } from '@/lib/firebase'
 import type { WaiterCall } from '@/lib/types'
 
 const TIP_CONFIG: Record<string, { label: string; icon: string; border: string; bg: string }> = {
@@ -51,6 +51,9 @@ export default function CallsPage() {
       ]
       if (call.tableId) {
         updates.push(updateDoc(rd('tables', call.tableId), { status: 'aktif', updatedAt: serverTimestamp() }))
+      }
+      if (call.waiterId) {
+        updates.push(updateDoc(doc(db, 'users', call.waiterId), { totalCalls: increment(1) }))
       }
       await Promise.all(updates)
     } catch (err) {

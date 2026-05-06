@@ -3,11 +3,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  collection, doc, getDocs, onSnapshot, orderBy, query,
+  collection, doc, getDocs, increment, onSnapshot, orderBy, query,
   runTransaction, serverTimestamp, updateDoc, where,
 } from 'firebase/firestore'
+import { ref as dbRef, set as dbSet, onValue as dbOnValue, onDisconnect as dbOnDisconnect } from 'firebase/database'
 import { signOut } from 'firebase/auth'
-import { auth, db, rd, RESTAURANT_ID } from '@/lib/firebase'
+import { auth, db, rd, rtdb, RESTAURANT_ID } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import CallCard from '@/components/waiter/CallCard'
 import {
@@ -99,11 +100,33 @@ export default function WaiterPage() {
     if (profile.active === false) { router.replace('/waiter/login'); return }
   }, [user, profile, loading, router])
 
-  // ─── Online status — true on mount, false on explicit logout only ────────
+  // ─── Online status + RTDB presence ──────────────────────────────────────
   useEffect(() => {
     if (!user || !profile || profile.role !== 'waiter') return
-    const userRef = doc(db, 'users', user.uid)
-    updateDoc(userRef, { isOnline: true, lastSeen: serverTimestamp() }).catch(() => {})
+
+    const uid         = user.uid
+    const firestoreRef = doc(db, 'users', uid)
+
+    // Set Firestore online immediately
+    updateDoc(firestoreRef, { isOnline: true, lastSeen: serverTimestamp() }).catch(() => {})
+
+    // RTDB presence — onDisconnect fires even when tab is forcibly closed
+    let unsubRtdb: (() => void) | undefined
+    try {
+      const presenceRef = dbRef(rtdb, `presence/${uid}`)
+      dbSet(presenceRef, true).catch(() => {})
+      dbOnDisconnect(presenceRef).set(false).catch(() => {})
+
+      // Mirror RTDB presence → Firestore isOnline
+      unsubRtdb = dbOnValue(presenceRef, (snapshot) => {
+        const isOnline = snapshot.val() === true
+        updateDoc(firestoreRef, { isOnline, lastSeen: serverTimestamp() }).catch(() => {})
+      })
+    } catch (err) {
+      console.error('RTDB presence error:', err)
+    }
+
+    return () => { unsubRtdb?.() }
   }, [user, profile])
 
   // ─── Calls listener ───────────────────────────────────────────────────────
@@ -214,6 +237,9 @@ export default function WaiterPage() {
           status: 'aktif', updatedAt: serverTimestamp(),
         }))
       }
+      if (call.waiterId) {
+        updates.push(updateDoc(doc(db, 'users', call.waiterId), { totalCalls: increment(1) }))
+      }
       await Promise.all(updates)
     } catch (err) {
       console.error('Çağrı tamamlama hatası:', err)
@@ -244,11 +270,15 @@ export default function WaiterPage() {
 
   async function handleLogout() {
     if (user) {
+      // Clear RTDB presence (cancels onDisconnect too)
+      try {
+        const presenceRef = dbRef(rtdb, `presence/${user.uid}`)
+        await dbSet(presenceRef, false)
+      } catch { /* ignore */ }
+      // Update Firestore directly
       try {
         await updateDoc(doc(db, 'users', user.uid), { isOnline: false, lastSeen: serverTimestamp() })
-      } catch {
-        // ignore — sign out regardless
-      }
+      } catch { /* ignore */ }
     }
     await signOut(auth).catch(() => {})
     router.replace('/waiter/login')

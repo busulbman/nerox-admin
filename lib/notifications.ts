@@ -6,13 +6,12 @@ export async function requestPermission(): Promise<boolean> {
   return result === 'granted'
 }
 
-export function showNotification(title: string, body: string, url = '/') {
+export function showLocalNotification(title: string, body: string, url = '/') {
   if (typeof window === 'undefined' || !('Notification' in window)) return
   if (Notification.permission !== 'granted') return
-  const n = new Notification(title, { body, icon: '/favicon.ico' })
-  n.onclick = () => {
-    window.focus()
-    window.location.href = url
-    n.close()
-  }
+  const n = new Notification(title, { body, icon: '/icon.png' })
+  n.onclick = () => { window.focus(); window.location.href = url; n.close() }
 }
+
+// Keep old name as alias for backward compatibility
+export const showNotification = showLocalNotification

@@ -68,7 +68,7 @@ export default function DashboardPage() {
       collection(db, 'users'),
       where('restaurantId', '==', RESTAURANT_ID),
       where('role', '==', 'waiter'),
-      where('active', '==', true)
+      where('isOnline', '==', true)
     ),
     (snap) => setActiveWaiters(snap.size)
   ), [])
@@ -238,28 +238,30 @@ export default function DashboardPage() {
         </section>
       </div>
 
-      {/* ── Demo veri ────────────────────────────────────────────────────── */}
-      <details className="bg-white rounded-xl border border-gray-100 p-5 max-w-md">
-        <summary className="cursor-pointer font-semibold text-sm select-none" style={{ color: BROWN }}>
-          🍫 Demo Veri Yükle
-        </summary>
-        <p className="text-gray-400 text-xs mt-3 mb-3">
-          5 kategori, 24 ürün ve demo çağrılar yükler. Yalnızca boş veritabanında çalışır.
-        </p>
-        {seedMsg && (
-          <p className="text-sm mb-3" style={{ color: seedMsg.startsWith('✓') ? '#16a34a' : '#ef4444' }}>
-            {seedMsg}
+      {/* ── Demo veri — sadece geliştirme ortamında ── */}
+      {process.env.NODE_ENV === 'development' && (
+        <details className="bg-white rounded-xl border border-gray-100 p-5 max-w-md">
+          <summary className="cursor-pointer font-semibold text-sm select-none" style={{ color: BROWN }}>
+            🍫 Demo Veri Yükle
+          </summary>
+          <p className="text-gray-400 text-xs mt-3 mb-3">
+            5 kategori, 24 ürün ve demo çağrılar yükler. Yalnızca boş veritabanında çalışır.
           </p>
-        )}
-        <button
-          onClick={handleSeed}
-          disabled={seeding}
-          className="font-semibold px-4 py-2 rounded-lg disabled:opacity-50 text-sm"
-          style={{ background: GOLD, color: BROWN }}
-        >
-          {seeding ? 'Yükleniyor...' : 'Yükle'}
-        </button>
-      </details>
+          {seedMsg && (
+            <p className="text-sm mb-3" style={{ color: seedMsg.startsWith('✓') ? '#16a34a' : '#ef4444' }}>
+              {seedMsg}
+            </p>
+          )}
+          <button
+            onClick={handleSeed}
+            disabled={seeding}
+            className="font-semibold px-4 py-2 rounded-lg disabled:opacity-50 text-sm"
+            style={{ background: GOLD, color: BROWN }}
+          >
+            {seeding ? 'Yükleniyor...' : 'Yükle'}
+          </button>
+        </details>
+      )}
     </div>
   )
 }

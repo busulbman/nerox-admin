@@ -1,6 +1,7 @@
 import { initializeApp, getApps, deleteApp } from 'firebase/app'
 import { getFirestore, collection, doc } from 'firebase/firestore'
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth'
+import { getDatabase } from 'firebase/database'
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,8 +13,9 @@ const firebaseConfig = {
 }
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]
-export const db = getFirestore(app)
+export const db   = getFirestore(app)
 export const auth = getAuth(app)
+export const rtdb = getDatabase(app)
 
 export const RESTAURANT_ID = 'varina'
 

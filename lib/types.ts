@@ -7,6 +7,7 @@ export interface UserProfile {
   active: boolean
   avgRating?: number
   totalCalls?: number
+  totalRatings?: number
   isOnline?: boolean
   lastSeen?: number
 }

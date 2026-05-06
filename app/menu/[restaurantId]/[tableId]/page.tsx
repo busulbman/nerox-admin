@@ -7,6 +7,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -563,6 +564,24 @@ export default function MenuPage() {
         status: ratingStatus,
         createdAt: serverTimestamp(),
       })
+
+      // Update waiter avgRating + totalRatings
+      if (liveCall.waiterId) {
+        try {
+          const waiterRef   = doc(db, 'users', liveCall.waiterId)
+          const waiterSnap  = await getDoc(waiterRef)
+          if (waiterSnap.exists()) {
+            const wd       = waiterSnap.data()
+            const oldCount = (wd.totalRatings as number) ?? 0
+            const oldAvg   = (wd.avgRating   as number) ?? 0
+            const newCount = oldCount + 1
+            const newAvg   = Math.round(((oldAvg * oldCount + ratingForm.waiterRating) / newCount) * 10) / 10
+            await updateDoc(waiterRef, { avgRating: newAvg, totalRatings: increment(1) })
+          }
+        } catch (err) {
+          console.error('Waiter rating update error:', err)
+        }
+      }
 
       setRatingSubmitted(true)
       window.setTimeout(() => {

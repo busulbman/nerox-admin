@@ -7,6 +7,8 @@ export interface UserProfile {
   active: boolean
   avgRating?: number
   totalCalls?: number
+  isOnline?: boolean
+  lastSeen?: number
 }
 
 export interface Category {
@@ -40,10 +42,32 @@ export interface WaiterCall {
   resolvedAt?: number
 }
 
+export type RatingStatus = 'approved' | 'suspicious'
+
+export interface Rating {
+  id: string
+  restaurantId: string
+  tableId: string
+  tableNumber: number
+  sessionId: string
+  callId: string | null
+  waiterId: string | null
+  waiterName: string | null
+  serviceRating: number
+  waiterRating: number
+  comment: string
+  status: RatingStatus
+  createdAt: number
+}
+
+export type TableStatus = 'boş' | 'aktif' | 'çağrı var' | 'hesap istendi' | 'temizlik' | 'kapalı'
+
 export interface Table {
   id: string
   number: number
-  status: 'boş' | 'aktif' | 'çağrı var' | 'hesap istendi' | 'temizlik'
+  status: TableStatus
   sessionId: string | null
   openedAt: number | null
+  createdAt: number | null
+  updatedAt: number | null
 }

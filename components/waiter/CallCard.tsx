@@ -1,3 +1,4 @@
+import { getCallTableLabel } from '@/lib/firestore-models'
 import type { WaiterCall } from '@/lib/types'
 
 const TIP_META: Record<string, { icon: string; label: string; accent: string; lightBg: string }> = {
@@ -69,10 +70,10 @@ export default function CallCard({ call, variant, onAccept, onComplete }: Props)
               className="text-3xl font-black tracking-tight"
               style={{ color: '#3d2b1f' }}
             >
-              Masa {call.tableId}
+              Masa {getCallTableLabel(call)}
             </p>
             {call.note ? (
-              <p className="text-sm text-gray-500 mt-1 italic">"{call.note}"</p>
+              <p className="text-sm text-gray-500 mt-1 italic">&quot;{call.note}&quot;</p>
             ) : null}
             {variant === 'active' && call.acceptedAt ? (
               <p className="text-xs text-gray-400 mt-1">

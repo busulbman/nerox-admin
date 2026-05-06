@@ -14,13 +14,11 @@ export default function LoginPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
 
-  // Profil yüklendiğinde role'e göre yönlendir
   useEffect(() => {
     if (loading || !user) return
     if (profile?.role === 'waiter') {
       router.replace('/waiter')
     } else {
-      // admin veya profil yoksa (ilk admin kurulumu) → dashboard
       router.replace('/dashboard')
     }
   }, [user, profile, loading, router])
@@ -31,9 +29,9 @@ export default function LoginPage() {
     setError('')
     try {
       await signInWithEmailAndPassword(auth, email, password)
-      // Yönlendirme useEffect tarafından yapılır (profil yüklenince)
     } catch {
       setError('E-posta veya şifre hatalı.')
+    } finally {
       setSubmitting(false)
     }
   }
@@ -58,6 +56,7 @@ export default function LoginPage() {
               className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
               placeholder="admin@varina.com"
               required
+              autoComplete="email"
             />
           </div>
           <div>
@@ -69,6 +68,7 @@ export default function LoginPage() {
               className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
               placeholder="••••••••"
               required
+              autoComplete="current-password"
             />
           </div>
           {error && <p className="text-red-500 text-sm">{error}</p>}

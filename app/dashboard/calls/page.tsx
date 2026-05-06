@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { query, where, onSnapshot, updateDoc } from 'firebase/firestore'
+import { onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore'
+import { getCallTableLabel, normalizeWaiterCall } from '@/lib/firestore-models'
 import { rc, rd } from '@/lib/firebase'
 import type { WaiterCall } from '@/lib/types'
 
@@ -30,7 +31,7 @@ export default function CallsPage() {
     // Get all non-completed calls client-side filtered
     const unsub = onSnapshot(rc('calls'), (snap) => {
       const list = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as WaiterCall))
+        .map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>))
         .filter((c) => c.durum !== 'tamamlandı')
         .sort((a, b) => a.createdAt - b.createdAt)
       setCalls(list)
@@ -43,8 +44,18 @@ export default function CallsPage() {
     return () => clearInterval(interval)
   }, [])
 
-  async function resolveCall(callId: string) {
-    await updateDoc(rd('calls', callId), { durum: 'tamamlandı', resolvedAt: Date.now() })
+  async function resolveCall(call: WaiterCall) {
+    try {
+      const updates: Promise<void>[] = [
+        updateDoc(rd('calls', call.id), { durum: 'tamamlandı', resolvedAt: serverTimestamp() }),
+      ]
+      if (call.tableId) {
+        updates.push(updateDoc(rd('tables', call.tableId), { status: 'aktif', updatedAt: serverTimestamp() }))
+      }
+      await Promise.all(updates)
+    } catch (err) {
+      console.error('Çağrı tamamlama hatası:', err)
+    }
   }
 
   return (
@@ -80,15 +91,15 @@ export default function CallsPage() {
                     )}
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-bold" style={{ color: '#3d2b1f' }}>#{call.tableId}</div>
+                    <div className="text-2xl font-bold" style={{ color: '#3d2b1f' }}>#{getCallTableLabel(call)}</div>
                     <div className="text-gray-400 text-xs">Masa</div>
                   </div>
                 </div>
-                {call.note && <p className="text-gray-500 text-sm italic">"{call.note}"</p>}
+                {call.note && <p className="text-gray-500 text-sm italic">&quot;{call.note}&quot;</p>}
                 <div className="flex items-center justify-between">
                   <span className="text-gray-400 text-xs">⏱ {elapsed(call.createdAt)} önce</span>
                   <button
-                    onClick={() => resolveCall(call.id)}
+                    onClick={() => resolveCall(call)}
                     className="text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors"
                     style={{ background: '#22c55e' }}
                   >

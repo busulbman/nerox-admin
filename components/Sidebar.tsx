@@ -10,6 +10,7 @@ const NAV = [
   { href: '/dashboard/menu', label: 'Menü', icon: '🍽️' },
   { href: '/dashboard/calls', label: 'Çağrılar', icon: '🔔' },
   { href: '/dashboard/tables', label: 'Masalar / QR', icon: '🪑' },
+  { href: '/dashboard/ratings', label: 'Yorumlar', icon: '⭐' },
   { href: '/dashboard/waiters', label: 'Garsonlar', icon: '👨‍🍳' },
 ]
 

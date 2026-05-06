@@ -1,123 +1,476 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
+import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
+import {
+  onSnapshot, runTransaction, serverTimestamp, writeBatch, doc,
+} from 'firebase/firestore'
+import { normalizeTable } from '@/lib/firestore-models'
+import { db, rc, rd, RESTAURANT_ID } from '@/lib/firebase'
+import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
-const GOLD = '#d4a017'
+const GOLD  = '#d4a017'
 
-interface QRItem {
-  tableNum: number
-  dataUrl: string
+const STATUS_META: Record<TableStatus, {
+  label: string; badgeBg: string; badgeText: string; border: string; cardBg: string; pulse?: boolean
+}> = {
+  boş:             { label: 'Boş',          badgeBg: '#f3f4f6', badgeText: '#6b7280', border: '#e5e7eb', cardBg: '#ffffff' },
+  aktif:           { label: 'Aktif',         badgeBg: '#dcfce7', badgeText: '#15803d', border: '#86efac', cardBg: '#f0fdf4' },
+  'çağrı var':     { label: 'Çağrı Var',    badgeBg: '#fef3c7', badgeText: '#a16207', border: '#fcd34d', cardBg: '#fffbeb', pulse: true },
+  'hesap istendi': { label: 'Hesap İstendi', badgeBg: '#ffedd5', badgeText: '#c2410c', border: '#fdba74', cardBg: '#fff7ed' },
+  temizlik:        { label: 'Temizlik',      badgeBg: '#dbeafe', badgeText: '#1d4ed8', border: '#93c5fd', cardBg: '#eff6ff' },
+  kapalı:          { label: 'Kapalı',        badgeBg: '#fee2e2', badgeText: '#b91c1c', border: '#fca5a5', cardBg: '#fff5f5' },
+}
+
+function formatOpenMinutes(openedAt: number): string {
+  return `${Math.max(0, Math.floor((Date.now() - openedAt) / 60000))} dk açık`
+}
+
+function createSessionId(): string {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Math.random().toString(16).slice(2)}-${Date.now()}`
+}
+
+type TableCallStatus = { id: string; tableId: string; tip: WaiterCall['tip']; durum: WaiterCall['durum'] }
+
+function getCallDrivenStatus(calls: TableCallStatus[]): Extract<TableStatus, 'çağrı var' | 'hesap istendi'> | null {
+  const active = calls.filter((c) => c.durum !== 'tamamlandı')
+  if (active.length === 0) return null
+  if (active.some((c) => c.tip === 'hesap')) return 'hesap istendi'
+  return 'çağrı var'
 }
 
 export default function TablesPage() {
-  const [count, setCount] = useState(10)
-  const [items, setItems] = useState<QRItem[]>([])
-  const [generating, setGenerating] = useState(false)
-  const printRef = useRef<HTMLDivElement>(null)
+  const router = useRouter()
+  const [count,         setCount]        = useState(10)
+  const [tables,        setTables]       = useState<Table[]>([])
+  const [qrMap,         setQrMap]        = useState<Record<string, string>>({})
+  const [callsByTable,  setCallsByTable] = useState<Record<string, TableCallStatus[]>>({})
+  const [creating,      setCreating]     = useState(false)
+  const [busyKey,       setBusyKey]      = useState<string | null>(null)
+  const [message,       setMessage]      = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null)
+  const [qrModalTable,  setQrModalTable] = useState<Table | null>(null)
+  const [pdfLoading,    setPdfLoading]   = useState(false)
+  const [, setTicker] = useState(0)
+  const origin = typeof window === 'undefined' ? '' : window.location.origin
 
-  async function generateQRs() {
-    setGenerating(true)
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    const results: QRItem[] = []
-    for (let i = 1; i <= count; i++) {
-      const url = `${origin}/menu/varina/${i}`
-      const dataUrl = await QRCode.toDataURL(url, {
-        width: 300,
-        margin: 2,
-        color: { dark: BROWN, light: '#fefaf3' },
+  useEffect(() => onSnapshot(rc('tables'), (snap) => {
+    setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
+  }), [])
+
+  useEffect(() => onSnapshot(rc('calls'), (snap) => {
+    const next: Record<string, TableCallStatus[]> = {}
+    snap.docs.forEach((d) => {
+      const data = d.data() as Partial<WaiterCall>
+      if (!data.tableId || !data.tip || !data.durum || data.durum === 'tamamlandı') return
+      const key = String(data.tableId)
+      next[key] = [...(next[key] ?? []), { id: d.id, tableId: key, tip: data.tip, durum: data.durum }]
+    })
+    setCallsByTable(next)
+  }), [])
+
+  useEffect(() => {
+    const t = window.setInterval(() => setTicker((n) => n + 1), 60_000)
+    return () => window.clearInterval(t)
+  }, [])
+
+  // Build QR map whenever tables or origin changes
+  useEffect(() => {
+    if (!origin || tables.length === 0) return
+    let cancelled = false
+    Promise.all(
+      tables.map(async (t) => {
+        const url = `${origin}/menu/${RESTAURANT_ID}/${t.number}`
+        const dataUrl = await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: BROWN, light: '#ffffff' } })
+        return [t.id, dataUrl] as const
       })
-      results.push({ tableNum: i, dataUrl })
-    }
-    setItems(results)
-    setGenerating(false)
+    ).then((entries) => {
+      if (!cancelled) setQrMap(Object.fromEntries(entries))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [origin, tables])
+
+  function getTableLink(tableNumber: number) {
+    return `${origin || ''}/menu/${RESTAURANT_ID}/${tableNumber}`
   }
 
-  function handlePrint() {
-    window.print()
+  function getEffectiveStatus(table: Table): TableStatus {
+    if (table.status === 'temizlik' || table.status === 'kapalı' || table.status === 'boş') return table.status
+    const calls = callsByTable[String(table.id)] ?? callsByTable[String(table.number)] ?? []
+    return getCallDrivenStatus(calls) ?? table.status
   }
+
+  // ─── Table action handlers ────────────────────────────────────────────────
+
+  async function handleOpenTable(tableId: string) {
+    setBusyKey(`open-${tableId}`)
+    setMessage(null)
+    const newSessionId = createSessionId()
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(rd('tables', tableId))
+        if (!snap.exists()) throw new Error('Masa bulunamadı.')
+        const t = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
+        if (t.status !== 'boş') throw new Error(`Masa "${STATUS_META[t.status]?.label ?? t.status}" durumunda, açılamaz.`)
+        tx.update(rd('tables', tableId), {
+          status: 'aktif' satisfies TableStatus,
+          sessionId: newSessionId,
+          openedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      })
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Masa açılamadı.' })
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  async function handleCloseTable(tableId: string) {
+    setBusyKey(`close-${tableId}`)
+    setMessage(null)
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(rd('tables', tableId))
+        if (!snap.exists()) throw new Error('Masa bulunamadı.')
+        tx.update(rd('tables', tableId), {
+          status: 'temizlik' satisfies TableStatus,
+          sessionId: null,
+          updatedAt: serverTimestamp(),
+        })
+      })
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Masa kapatılamadı.' })
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  async function handlePaymentReceived(tableId: string) {
+    setBusyKey(`pay-${tableId}`)
+    setMessage(null)
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(rd('tables', tableId))
+        if (!snap.exists()) throw new Error('Masa bulunamadı.')
+        tx.update(rd('tables', tableId), {
+          status: 'temizlik' satisfies TableStatus,
+          sessionId: null,
+          updatedAt: serverTimestamp(),
+        })
+      })
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Güncelleme başarısız.' })
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  async function handleMarkCleaned(tableId: string) {
+    setBusyKey(`clean-${tableId}`)
+    setMessage(null)
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(rd('tables', tableId))
+        if (!snap.exists()) throw new Error('Masa bulunamadı.')
+        tx.update(rd('tables', tableId), {
+          status: 'boş' satisfies TableStatus,
+          sessionId: null,
+          openedAt: null,
+          updatedAt: serverTimestamp(),
+        })
+      })
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Güncelleme başarısız.' })
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  async function handleCreateTables() {
+    const safeCount = Math.max(1, Math.min(100, Math.floor(count || 0)))
+    setCreating(true)
+    setMessage(null)
+    try {
+      const existingNumbers = new Set(tables.map((t) => t.number))
+      const batch = writeBatch(db)
+      let created = 0
+      for (let n = 1; n <= safeCount; n++) {
+        if (existingNumbers.has(n)) continue
+        batch.set(rd('tables', String(n)), {
+          id: String(n), number: n,
+          status: 'boş' satisfies TableStatus,
+          sessionId: null, openedAt: null,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        })
+        created++
+      }
+      if (created > 0) {
+        await batch.commit()
+        setMessage({ tone: 'success', text: `${created} yeni masa oluşturuldu.` })
+      } else {
+        setMessage({ tone: 'info', text: 'İstenen aralıktaki tüm masalar zaten mevcut.' })
+      }
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Masalar oluşturulamadı.' })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  // ─── PDF download ─────────────────────────────────────────────────────────
+  async function handleDownloadPDF() {
+    if (tables.length === 0) return
+    setPdfLoading(true)
+    try {
+      const { jsPDF } = await import('jspdf')
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+
+      for (let i = 0; i < tables.length; i++) {
+        if (i > 0) pdf.addPage()
+        const table = tables[i]
+        const link = getTableLink(table.number)
+        const qrDataUrl = await QRCode.toDataURL(link, {
+          width: 600, margin: 2, color: { dark: BROWN, light: '#ffffff' },
+        })
+        const qrSize  = 120
+        const xOffset = (210 - qrSize) / 2
+        pdf.addImage(qrDataUrl, 'PNG', xOffset, 65, qrSize, qrSize)
+        pdf.setFontSize(20)
+        pdf.setTextColor(61, 43, 31)
+        pdf.text(`Masa ${table.number}`, 105, 200, { align: 'center' })
+        pdf.setFontSize(13)
+        pdf.setTextColor(120, 90, 60)
+        pdf.text('Varina Chocolate', 105, 212, { align: 'center' })
+      }
+
+      pdf.save('varina-qr-kodlar.pdf')
+    } catch (err) {
+      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'PDF oluşturulamadı.' })
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  // ─── QR PNG download for single table ────────────────────────────────────
+  function handleDownloadSingleQR(table: Table) {
+    const dataUrl = qrMap[table.id]
+    if (!dataUrl) return
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = `masa-${table.number}-qr.png`
+    a.click()
+  }
+
+  const inputCls =
+    'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
 
   return (
     <>
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          #qr-print-area { display: block !important; }
-          #qr-print-area .no-print { display: none !important; }
-        }
-      `}</style>
+      <div className="p-6 md:p-8">
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div>
+            <h1 className="font-bold text-2xl" style={{ color: BROWN }}>Masa Yönetimi / QR</h1>
+            <p className="text-gray-400 text-sm mt-0.5">{tables.length} masa kayıtlı</p>
+          </div>
+          <button
+            onClick={handleDownloadPDF}
+            disabled={tables.length === 0 || pdfLoading}
+            className="font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50 shrink-0"
+            style={{ background: BROWN, color: '#fff' }}
+          >
+            {pdfLoading ? 'Hazırlanıyor...' : '⬇ PDF İndir'}
+          </button>
+        </div>
 
-      <div className="p-8" id="qr-print-area">
-        <div className="no-print">
-          <h1 className="font-bold text-2xl mb-1" style={{ color: BROWN }}>QR Kod Yönetimi</h1>
-          <p className="text-gray-400 text-sm mb-8">Her masa için QR kod oluştur ve PDF olarak indir</p>
-
-          <div className="bg-white rounded-xl border border-gray-100 p-6 mb-8 flex items-end gap-4 max-w-sm">
-            <div className="flex-1">
-              <label className="block text-sm font-medium mb-1" style={{ color: BROWN }}>Masa Sayısı</label>
+        {/* Create tables form */}
+        <div className="bg-white rounded-xl border border-gray-100 p-6 mb-8">
+          <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+            <div className="w-full max-w-xs">
+              <label className="block text-sm font-medium mb-1" style={{ color: BROWN }}>Masa sayısı</label>
               <input
-                type="number"
-                min={1}
-                max={100}
-                value={count}
-                onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value))))}
-                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
+                type="number" min={1} max={100} value={count}
+                onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                className={inputCls}
               />
             </div>
             <button
-              onClick={generateQRs}
-              disabled={generating}
-              className="font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50 shrink-0"
+              onClick={handleCreateTables}
+              disabled={creating}
+              className="font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50"
               style={{ background: GOLD, color: BROWN }}
             >
-              {generating ? 'Oluşturuluyor...' : 'QR Oluştur'}
+              {creating ? 'Oluşturuluyor...' : 'Masaları Oluştur'}
             </button>
           </div>
+          {message && (
+            <p className="text-sm mt-4" style={{ color: message.tone === 'success' ? '#16a34a' : message.tone === 'error' ? '#dc2626' : '#6b7280' }}>
+              {message.text}
+            </p>
+          )}
         </div>
 
-        {items.length > 0 && (
-          <>
-            <div className="no-print flex items-center justify-between mb-6">
-              <p className="text-sm text-gray-500">{items.length} masa için QR kod hazır</p>
-              <button
-                onClick={handlePrint}
-                className="font-semibold px-5 py-2.5 rounded-lg text-sm"
-                style={{ background: BROWN, color: '#fff' }}
-              >
-                🖨️ Tümünü PDF İndir
-              </button>
-            </div>
+        {/* Table grid */}
+        {tables.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-100 p-16 text-center text-gray-400 text-sm">
+            Önce masa sayısını girip masaları oluşturun.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-5">
+            {tables.map((table) => {
+              const effectiveStatus = getEffectiveStatus(table)
+              const meta = STATUS_META[effectiveStatus]
+              const openDuration = effectiveStatus === 'aktif' && table.openedAt ? formatOpenMinutes(table.openedAt) : null
+              const busy = busyKey !== null
 
-            <div
-              ref={printRef}
-              className="grid gap-4"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}
-            >
-              {items.map((item) => (
+              return (
                 <div
-                  key={item.tableNum}
-                  className="bg-white rounded-xl border border-gray-100 p-5 flex flex-col items-center gap-3 text-center"
-                  style={{ breakInside: 'avoid' }}
+                  key={table.id}
+                  className="rounded-2xl border-2 p-5"
+                  style={{ borderColor: meta.border, background: meta.cardBg }}
                 >
-                  <img src={item.dataUrl} alt={`Masa ${item.tableNum} QR`} className="w-40 h-40" />
-                  <div>
-                    <p className="font-bold text-lg" style={{ color: BROWN }}>Masa {item.tableNum}</p>
-                    <p className="text-gray-400 text-xs mt-0.5">Varina Chocolate</p>
-                    <p className="text-gray-300 text-xs mt-0.5 break-all">/menu/varina/{item.tableNum}</p>
+                  {/* Card header */}
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <h2 className="font-bold text-xl" style={{ color: BROWN }}>Masa {table.number}</h2>
+                      {openDuration && <p className="text-sm mt-0.5" style={{ color: '#4b5563' }}>{openDuration}</p>}
+                    </div>
+                    <span
+                      className={`text-xs font-semibold px-3 py-1 rounded-full ${meta.pulse ? 'animate-pulse' : ''}`}
+                      style={{ background: meta.badgeBg, color: meta.badgeText }}
+                    >
+                      {meta.label}
+                    </span>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex flex-wrap gap-2">
+                    {effectiveStatus === 'boş' && (
+                      <ActionBtn
+                        label={busyKey === `open-${table.id}` ? 'Açılıyor...' : 'Aç'}
+                        color="#22c55e"
+                        busy={busy}
+                        onClick={() => handleOpenTable(table.id)}
+                      />
+                    )}
+                    {effectiveStatus === 'aktif' && (
+                      <ActionBtn
+                        label={busyKey === `close-${table.id}` ? 'Kapatılıyor...' : 'Masayı Kapat'}
+                        color="#f59e0b"
+                        busy={busy}
+                        onClick={() => handleCloseTable(table.id)}
+                      />
+                    )}
+                    {effectiveStatus === 'çağrı var' && (
+                      <ActionBtn
+                        label="Çağrıyı Gör →"
+                        color="#a16207"
+                        busy={false}
+                        onClick={() => router.push('/dashboard/calls')}
+                      />
+                    )}
+                    {effectiveStatus === 'hesap istendi' && (
+                      <ActionBtn
+                        label={busyKey === `pay-${table.id}` ? 'İşleniyor...' : 'Ödeme Alındı'}
+                        color="#10b981"
+                        busy={busy}
+                        onClick={() => handlePaymentReceived(table.id)}
+                      />
+                    )}
+                    {effectiveStatus === 'temizlik' && (
+                      <ActionBtn
+                        label={busyKey === `clean-${table.id}` ? 'Kaydediliyor...' : 'Temizlendi'}
+                        color="#3b82f6"
+                        busy={busy}
+                        onClick={() => handleMarkCleaned(table.id)}
+                      />
+                    )}
+
+                    <button
+                      onClick={() => setQrModalTable(table)}
+                      className="font-semibold px-3 py-2 rounded-lg text-xs"
+                      style={{ background: '#f3f4f6', color: '#374151' }}
+                    >
+                      QR Göster
+                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {items.length === 0 && !generating && (
-          <div className="bg-white rounded-xl border border-gray-100 p-16 text-center text-gray-400 text-sm">
-            Masa sayısını girin ve "QR Oluştur" butonuna basın.
+              )
+            })}
           </div>
         )}
       </div>
+
+      {/* ── QR Modal ── */}
+      {qrModalTable && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setQrModalTable(null) }}
+        >
+          <div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl">
+            <h2 className="font-bold text-xl mb-1" style={{ color: BROWN }}>Masa {qrModalTable.number}</h2>
+            <p className="text-xs text-gray-400 mb-5">Varina Chocolate</p>
+
+            <div className="flex items-center justify-center mb-5">
+              {qrMap[qrModalTable.id] ? (
+                <Image
+                  src={qrMap[qrModalTable.id]}
+                  alt={`Masa ${qrModalTable.number} QR`}
+                  width={200}
+                  height={200}
+                  unoptimized
+                  className="rounded-xl"
+                />
+              ) : (
+                <div className="w-48 h-48 rounded-xl bg-gray-100 flex items-center justify-center">
+                  <p className="text-xs text-gray-400 animate-pulse">QR hazırlanıyor...</p>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-400 break-all mb-5">{getTableLink(qrModalTable.number)}</p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setQrModalTable(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{ background: '#f3f4f6', color: '#374151' }}
+              >
+                Kapat
+              </button>
+              <button
+                onClick={() => handleDownloadSingleQR(qrModalTable)}
+                disabled={!qrMap[qrModalTable.id]}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50"
+                style={{ background: BROWN, color: '#fff' }}
+              >
+                ⬇ İndir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+  )
+}
+
+function ActionBtn({
+  label, color, busy, onClick,
+}: {
+  label: string; color: string; busy: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={busy}
+      className="font-semibold px-4 py-2 rounded-lg text-sm text-white disabled:opacity-50"
+      style={{ background: color }}
+    >
+      {label}
+    </button>
   )
 }

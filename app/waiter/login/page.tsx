@@ -14,13 +14,12 @@ export default function WaiterLoginPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
 
-  // Profil yüklendiğinde role'e göre yönlendir
   useEffect(() => {
     if (loading || !user) return
     if (profile?.role === 'admin') {
       router.replace('/dashboard')
     } else if (profile?.role === 'waiter') {
-      if (profile.active === false) return // pasif garson login sayfasında kalır
+      if (profile.active === false) return
       router.replace('/waiter')
     }
   }, [user, profile, loading, router])
@@ -31,9 +30,9 @@ export default function WaiterLoginPage() {
     setError('')
     try {
       await signInWithEmailAndPassword(auth, email, password)
-      // Yönlendirme useEffect tarafından yapılır
     } catch {
       setError('E-posta veya şifre hatalı.')
+    } finally {
       setSubmitting(false)
     }
   }
@@ -46,7 +45,6 @@ export default function WaiterLoginPage() {
       style={{ background: '#faf7f4' }}
     >
       <div className="w-full max-w-sm">
-        {/* Logo area */}
         <div className="text-center mb-8">
           <div
             className="w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-4"
@@ -76,7 +74,7 @@ export default function WaiterLoginPage() {
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
                 placeholder="garson@varina.com"
                 required
-                autoComplete="username"
+                autoComplete="email"
               />
             </div>
             <div>

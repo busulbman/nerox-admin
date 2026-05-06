@@ -2,21 +2,31 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { onSnapshot } from 'firebase/firestore'
 import { signOut } from 'firebase/auth'
 import { useAuth } from '@/components/AuthProvider'
-import { auth, rc } from '@/lib/firebase'
+import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import { auth } from '@/lib/firebase'
 import { requestPermission, showLocalNotification } from '@/lib/notifications'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth()
+
+  return (
+    <OpenCallsProvider restaurantId={profile?.restaurantId ?? ''}>
+      <DashboardLayoutInner>{children}</DashboardLayoutInner>
+    </OpenCallsProvider>
+  )
+}
+
+function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
+  const { pendingCalls, pendingCount } = useOpenCalls()
   const router = useRouter()
 
   const [sidebarOpen,  setSidebarOpen]  = useState(false)
-  const [pendingCount, setPendingCount] = useState(0)
 
   const prevCallIds   = useRef<Set<string>>(new Set())
   const initialized   = useRef(false)
@@ -34,29 +44,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     requestPermission()
   }, [user, profile])
 
-  // ─── Calls listener + notifications ──────────────────────────────────────
+  // ─── Notifications from shared open-calls stream ─────────────────────────
   useEffect(() => {
     if (!user || profile?.role === 'waiter') return
 
-    return onSnapshot(rc('calls'), (snap) => {
-      const pendingDocs = snap.docs.filter((d) => d.data().durum === 'bekliyor')
-      setPendingCount(pendingDocs.length)
-
-      if (initialized.current) {
-        for (const d of pendingDocs) {
-          if (!prevCallIds.current.has(d.id)) {
-            const data = d.data()
-            const tableNum = data.tableNumber ?? data.tableId ?? '?'
-            const tip = TIP_LABEL[data.tip as string] ?? (data.tip as string) ?? ''
-            showLocalNotification(`🔔 Masa ${tableNum} Çağırıyor`, `${tip} talebi`, '/dashboard/calls')
-          }
+    if (initialized.current) {
+      for (const call of pendingCalls) {
+        if (!prevCallIds.current.has(call.id)) {
+          const tableNum = call.tableNumber || call.tableId || '?'
+          const tip = TIP_LABEL[call.tip] ?? call.tip
+          showLocalNotification(`🔔 Masa ${tableNum} Çağırıyor`, `${tip} talebi`, '/dashboard/calls')
         }
       }
+    }
 
-      initialized.current = true
-      prevCallIds.current = new Set(pendingDocs.map((d) => d.id))
-    })
-  }, [user, profile])
+    initialized.current = true
+    prevCallIds.current = new Set(pendingCalls.map((call) => call.id))
+  }, [pendingCalls, profile, user])
 
   async function handleLogout() {
     await signOut(auth).catch(() => {})

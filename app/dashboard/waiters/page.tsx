@@ -1,14 +1,34 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { collection, onSnapshot, setDoc, updateDoc, deleteDoc, doc, query, where } from 'firebase/firestore'
-import { db, createFirebaseUser, RESTAURANT_ID } from '@/lib/firebase'
-import type { UserProfile } from '@/lib/types'
+import { useEffect, useState } from 'react'
+import { deleteDoc, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
+import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
+import { getCallCompletedAt, normalizeRating, normalizeWaiterCall } from '@/lib/firestore-models'
+import {
+  getRestaurantRecentCompletedCallsQuery,
+  getRestaurantRecentRatingsQuery,
+  getRestaurantWaiterUsersQuery,
+} from '@/lib/firestore-queries'
+import { createFirebaseUser, db, RESTAURANT_ID } from '@/lib/firebase'
+import type { Rating, UserProfile, WaiterCall } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
-const GOLD  = '#d4a017'
+const GOLD = '#d4a017'
+const MEDALS = ['🥇', '🥈', '🥉'] as const
 
 type WaiterForm = { name: string; email: string; password: string }
+type WaiterPerformance = {
+  waiter: UserProfile
+  rank: number
+  avgWaiterRating: number | null
+  totalRatings: number
+  todayCompletedCalls: number
+  totalCompletedCalls: number
+  avgResponseMs: number | null
+  latestComment: string | null
+  recentComments: string[]
+}
+
 const EMPTY_FORM: WaiterForm = { name: '', email: '', password: '' }
 
 function tsToMs(ts: unknown): number {
@@ -17,6 +37,17 @@ function tsToMs(ts: unknown): number {
   if (typeof (ts as { toMillis?: unknown }).toMillis === 'function') return (ts as { toMillis(): number }).toMillis()
   if (typeof (ts as { toDate?: unknown }).toDate === 'function') return (ts as { toDate(): Date }).toDate().getTime()
   return 0
+}
+
+function getTodayStartTs() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+function averageNumber(values: number[]): number | null {
+  if (values.length === 0) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
 function formatLastSeen(ts: unknown): string {
@@ -30,35 +61,77 @@ function formatLastSeen(ts: unknown): string {
   return `${Math.floor(h / 24)} gün önce`
 }
 
+function formatRating(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(1)} ★`
+}
+
+function formatResponseTime(ms: number | null): string {
+  if (ms === null) return '—'
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds} sn`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return seconds === 0 ? `${minutes} dk` : `${minutes} dk ${seconds} sn`
+}
+
+function truncateComment(value: string, max = 88): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
 const inputCls =
   'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
 
 export default function WaitersPage() {
-  const [waiters,    setWaiters]    = useState<UserProfile[]>([])
-  const [form,       setForm]       = useState<WaiterForm>(EMPTY_FORM)
-  const [adding,     setAdding]     = useState(false)
-  const [addError,   setAddError]   = useState('')
-  const [showForm,   setShowForm]   = useState(false)
+  const [waiters, setWaiters] = useState<UserProfile[]>([])
+  const [ratings, setRatings] = useState<Rating[]>([])
+  const [recentCompletedCalls, setRecentCompletedCalls] = useState<WaiterCall[]>([])
 
-  // Edit modal
+  const [form, setForm] = useState<WaiterForm>(EMPTY_FORM)
+  const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState('')
+  const [showForm, setShowForm] = useState(false)
+
   const [editingWaiter, setEditingWaiter] = useState<UserProfile | null>(null)
-  const [editName,      setEditName]      = useState('')
-  const [editEmail,     setEditEmail]     = useState('')
-  const [editSaving,    setEditSaving]    = useState(false)
-  const [editError,     setEditError]     = useState('')
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
-  // Delete
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  useEffect(() => {
-    const q = query(
-      collection(db, 'users'),
-      where('restaurantId', '==', RESTAURANT_ID),
-      where('role', '==', 'waiter')
+  async function loadWaiters() {
+    logFirestoreRead('dashboard/waiters', RESTAURANT_ID)
+    const snap = await getDocs(getRestaurantWaiterUsersQuery(RESTAURANT_ID))
+    setWaiters(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile)))
+  }
+
+  async function loadRatings() {
+    logFirestoreRead('dashboard/waiters ratings', RESTAURANT_ID)
+    const snap = await getDocs(getRestaurantRecentRatingsQuery(RESTAURANT_ID))
+    setRatings(snap.docs.map((d) => normalizeRating(d.id, d.data() as Record<string, unknown>)))
+  }
+
+  async function loadRecentCompletedCalls() {
+    logFirestoreRead('dashboard/waiters completed calls', RESTAURANT_ID)
+    const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID))
+    setRecentCompletedCalls(
+      snap.docs.map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
     )
-    return onSnapshot(q, (snap) => {
-      setWaiters(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile)))
-    })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAll() {
+      await Promise.all([loadWaiters(), loadRatings(), loadRecentCompletedCalls()])
+      if (cancelled) return
+    }
+
+    void loadAll()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   async function handleAdd() {
@@ -66,9 +139,12 @@ export default function WaitersPage() {
       setAddError('İsim, geçerli e-posta ve en az 6 karakterli şifre gerekli.')
       return
     }
+
     setAdding(true)
     setAddError('')
+
     try {
+      logFirestoreWrite('dashboard/create waiter', form.email.trim())
       const uid = await createFirebaseUser(form.email.trim(), form.password)
       await setDoc(doc(db, 'users', uid), {
         uid,
@@ -83,6 +159,7 @@ export default function WaitersPage() {
       })
       setForm(EMPTY_FORM)
       setShowForm(false)
+      await loadWaiters()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Hata oluştu.'
       setAddError(msg.includes('email-already-in-use') ? 'Bu e-posta zaten kayıtlı.' : msg)
@@ -91,18 +168,20 @@ export default function WaitersPage() {
     }
   }
 
-  async function toggleActive(w: UserProfile) {
+  async function toggleActive(waiter: UserProfile) {
     try {
-      await updateDoc(doc(db, 'users', w.uid), { active: !w.active })
+      logFirestoreWrite('dashboard/toggle waiter active', waiter.uid)
+      await updateDoc(doc(db, 'users', waiter.uid), { active: !waiter.active })
+      await loadWaiters()
     } catch (err) {
       console.error('Durum güncelleme hatası:', err)
     }
   }
 
-  function openEdit(w: UserProfile) {
-    setEditingWaiter(w)
-    setEditName(w.name)
-    setEditEmail(w.email)
+  function openEdit(waiter: UserProfile) {
+    setEditingWaiter(waiter)
+    setEditName(waiter.name)
+    setEditEmail(waiter.email)
     setEditError('')
   }
 
@@ -112,13 +191,17 @@ export default function WaitersPage() {
       setEditError('İsim ve e-posta zorunludur.')
       return
     }
+
     setEditSaving(true)
     setEditError('')
+
     try {
+      logFirestoreWrite('dashboard/edit waiter', editingWaiter.uid)
       await updateDoc(doc(db, 'users', editingWaiter.uid), {
         name: editName.trim(),
         email: editEmail.trim(),
       })
+      await loadWaiters()
       setEditingWaiter(null)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Güncelleme başarısız.')
@@ -127,11 +210,15 @@ export default function WaitersPage() {
     }
   }
 
-  async function handleDelete(w: UserProfile) {
-    if (!window.confirm(`${w.name} adlı garsonu silmek istediğinizden emin misiniz?\nFirestore kaydı silinir.`)) return
-    setDeletingId(w.uid)
+  async function handleDelete(waiter: UserProfile) {
+    if (!window.confirm(`${waiter.name} adlı garsonu silmek istediğinizden emin misiniz?\nFirestore kaydı silinir.`)) return
+
+    setDeletingId(waiter.uid)
+
     try {
-      await deleteDoc(doc(db, 'users', w.uid))
+      logFirestoreWrite('dashboard/delete waiter', waiter.uid)
+      await deleteDoc(doc(db, 'users', waiter.uid))
+      await loadWaiters()
     } catch (err) {
       console.error('Garson silme hatası:', err)
     } finally {
@@ -139,39 +226,104 @@ export default function WaitersPage() {
     }
   }
 
+  const todayStart = getTodayStartTs()
+  const rankedWaiters = waiters
+    .map((waiter) => {
+      const waiterRatings = ratings
+        .filter((rating) => rating.waiterId === waiter.uid)
+        .sort((a, b) => b.createdAt - a.createdAt)
+
+      const completedCalls = recentCompletedCalls.filter((call) => call.waiterId === waiter.uid)
+      const todayCompletedCalls = completedCalls.filter((call) => getCallCompletedAt(call) >= todayStart)
+      const responseTimes = completedCalls
+        .filter((call) => call.acceptedAt && call.createdAt)
+        .map((call) => call.acceptedAt! - call.createdAt)
+
+      const recentComments = waiterRatings
+        .map((rating) => rating.comment.trim())
+        .filter(Boolean)
+        .slice(0, 2)
+
+      return {
+        waiter,
+        rank: 0,
+        avgWaiterRating: averageNumber(waiterRatings.map((rating) => rating.waiterRating)),
+        totalRatings: waiterRatings.length,
+        todayCompletedCalls: todayCompletedCalls.length,
+        totalCompletedCalls: waiter.totalCalls ?? completedCalls.length,
+        avgResponseMs: averageNumber(responseTimes),
+        latestComment: recentComments[0] ?? null,
+        recentComments,
+      } satisfies WaiterPerformance
+    })
+    .sort((left, right) => {
+      const ratingDiff = (right.avgWaiterRating ?? -1) - (left.avgWaiterRating ?? -1)
+      if (ratingDiff !== 0) return ratingDiff
+
+      const commentDiff = right.totalRatings - left.totalRatings
+      if (commentDiff !== 0) return commentDiff
+
+      const completionDiff = right.totalCompletedCalls - left.totalCompletedCalls
+      if (completionDiff !== 0) return completionDiff
+
+      return left.waiter.name.localeCompare(right.waiter.name, 'tr')
+    })
+    .map((entry, index) => ({ ...entry, rank: index + 1 }))
+
+  const topThree = rankedWaiters.slice(0, 3)
+  const teamAverage = averageNumber(rankedWaiters.map((waiter) => waiter.avgWaiterRating).filter((value): value is number => value !== null))
+  const totalComments = rankedWaiters.reduce((sum, waiter) => sum + waiter.totalRatings, 0)
+  const onlineCount = waiters.filter((waiter) => waiter.isOnline).length
+
   return (
     <>
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-8 space-y-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h1 className="font-bold text-2xl" style={{ color: BROWN }}>Garson Yönetimi</h1>
-            <p className="text-gray-400 text-sm mt-0.5">{waiters.length} garson kayıtlı</p>
+            <p className="text-gray-400 text-sm mt-0.5">
+              Canlı performans sıralaması, yorumlar ve çağrı tamamlama verileri.
+            </p>
           </div>
           <button
-            onClick={() => { setShowForm(!showForm); setAddError(''); setForm(EMPTY_FORM) }}
-            className="font-semibold px-5 py-2.5 rounded-lg text-sm"
+            onClick={() => {
+              setShowForm(!showForm)
+              setAddError('')
+              setForm(EMPTY_FORM)
+            }}
+            className="font-semibold px-5 py-2.5 rounded-xl text-sm shrink-0"
             style={{ background: GOLD, color: BROWN }}
           >
             {showForm ? 'İptal' : '+ Garson Ekle'}
           </button>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <OverviewCard label="Toplam Garson" value={String(waiters.length)} sub={`${onlineCount} çevrimiçi`} />
+          <OverviewCard label="Takım Ortalaması" value={formatRating(teamAverage)} sub={`${totalComments} toplam değerlendirme`} />
+          <OverviewCard
+            label="Bugün Tamamlanan"
+            value={String(rankedWaiters.reduce((sum, waiter) => sum + waiter.todayCompletedCalls, 0))}
+            sub="garson bazlı tamamlanan çağrı"
+          />
+        </div>
+
         {showForm && (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6 max-w-lg">
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 max-w-lg shadow-[0_12px_30px_rgba(0,0,0,0.04)]">
             <h2 className="font-semibold mb-1" style={{ color: BROWN }}>Yeni Garson</h2>
             <p className="text-gray-400 text-xs mb-4">
               Firebase Auth kullanıcısı oluşturulur ve role = &quot;waiter&quot; atanır.
             </p>
             <div className="space-y-3">
-              <input className={inputCls} placeholder="Ad Soyad *" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
-              <input type="email" className={inputCls} placeholder="E-posta *" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
-              <input type="password" className={inputCls} placeholder="Şifre (min. 6 karakter) *" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
+              <input className={inputCls} placeholder="Ad Soyad *" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              <input type="email" className={inputCls} placeholder="E-posta *" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
+              <input type="password" className={inputCls} placeholder="Şifre (min. 6 karakter) *" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
             </div>
             {addError && <p className="text-red-500 text-sm mt-3">{addError}</p>}
             <button
               onClick={handleAdd}
               disabled={adding}
-              className="mt-4 font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50"
+              className="mt-4 font-semibold px-5 py-2.5 rounded-xl text-sm disabled:opacity-50"
               style={{ background: GOLD, color: BROWN }}
             >
               {adding ? 'Oluşturuluyor...' : 'Garson Oluştur'}
@@ -179,95 +331,238 @@ export default function WaitersPage() {
           </div>
         )}
 
-        {waiters.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-gray-400 text-sm">
+        {rankedWaiters.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 p-14 text-center text-gray-400 text-sm">
             Henüz garson eklenmemiş.
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-gray-500 font-semibold">
-                  <th className="text-left px-6 py-3">Garson</th>
-                  <th className="text-left px-6 py-3 hidden md:table-cell">E-posta</th>
-                  <th className="text-center px-4 py-3">Puan</th>
-                  <th className="text-center px-4 py-3">Çağrı</th>
-                  <th className="text-center px-4 py-3">Durum</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {waiters.map((w) => (
-                  <tr key={w.uid} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative shrink-0">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                            style={{ background: w.active ? BROWN : '#9ca3af' }}
-                          >
-                            {w.name.charAt(0).toUpperCase()}
+          <>
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="font-bold text-xl" style={{ color: BROWN }}>Performans Sıralaması</h2>
+                  <p className="text-sm text-gray-400 mt-1">İlk 3 garson yorum puanı ve hizmet performansına göre öne çıkarılır.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+                {topThree.map((entry, index) => (
+                  <div
+                    key={entry.waiter.uid}
+                    className="rounded-[28px] border p-6 shadow-[0_18px_36px_rgba(61,43,31,0.08)]"
+                    style={{
+                      background: index === 0 ? 'linear-gradient(180deg, #fff7dc 0%, #ffffff 100%)' : '#ffffff',
+                      borderColor: index === 0 ? '#f5d67b' : '#efe7dc',
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-3xl">{MEDALS[index]}</span>
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.24em] text-gray-400">Sıra #{entry.rank}</p>
+                            <h3 className="text-xl font-bold mt-1" style={{ color: BROWN }}>{entry.waiter.name}</h3>
                           </div>
-                          <span
-                            className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
-                            style={{ background: w.isOnline ? '#22c55e' : '#ef4444' }}
-                          />
                         </div>
-                        <div>
-                          <p className="font-medium" style={{ color: BROWN }}>{w.name}</p>
-                          <p className="text-xs mt-0.5" style={{ color: w.isOnline ? '#16a34a' : '#9ca3af' }}>
-                            {w.isOnline
-                              ? 'Çevrimiçi'
-                              : w.lastSeen
-                                ? formatLastSeen(w.lastSeen)
-                                : 'Görülmedi'}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <StatusBadge active={entry.waiter.active} />
+                          <OnlineBadge online={!!entry.waiter.isOnline} />
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">Ort. puan</p>
+                        <p className="text-2xl font-black" style={{ color: GOLD }}>{formatRating(entry.avgWaiterRating)}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-5">
+                      <MetricTile label="Toplam yorum" value={String(entry.totalRatings)} />
+                      <MetricTile label="Bugün tamamlanan" value={String(entry.todayCompletedCalls)} />
+                      <MetricTile label="Toplam çağrı" value={String(entry.totalCompletedCalls)} />
+                      <MetricTile label="Ort. cevap" value={formatResponseTime(entry.avgResponseMs)} />
+                    </div>
+
+                    <div className="mt-5 rounded-2xl px-4 py-4" style={{ background: '#faf7f4' }}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Son yorum özeti</p>
+                      <p className="text-sm leading-6 mt-2" style={{ color: entry.latestComment ? '#4b5563' : '#9ca3af' }}>
+                        {entry.latestComment ? truncateComment(entry.latestComment, 120) : 'Henüz yorum yok.'}
+                      </p>
+                      {entry.recentComments.length > 1 && (
+                        <p className="text-xs text-gray-400 mt-2">
+                          + {truncateComment(entry.recentComments[1], 56)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="font-bold text-xl" style={{ color: BROWN }}>Tüm Garsonlar</h2>
+                  <p className="text-sm text-gray-400 mt-1">Sıralama; ortalama puan, yorum sayısı ve tamamlanan çağrı adedine göre yapılır.</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden shadow-[0_12px_30px_rgba(0,0,0,0.04)]">
+                <div className="hidden xl:grid xl:grid-cols-[72px_1.5fr_120px_120px_150px_140px_120px_1.7fr_140px] gap-3 px-6 py-4 border-b border-gray-100 text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">
+                  <span>Sıra</span>
+                  <span>Garson</span>
+                  <span>Ortalama</span>
+                  <span>Yorum</span>
+                  <span>Tamamlanan</span>
+                  <span>Cevap</span>
+                  <span>Durum</span>
+                  <span>Son yorum</span>
+                  <span className="text-right">Aksiyon</span>
+                </div>
+
+                <div className="divide-y divide-gray-100">
+                  {rankedWaiters.map((entry) => (
+                    <div key={entry.waiter.uid} className="px-5 py-5 xl:px-6">
+                      <div className="xl:hidden space-y-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold shrink-0"
+                              style={{ background: entry.waiter.active ? BROWN : '#9ca3af' }}
+                            >
+                              {entry.waiter.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: '#faf7f4', color: BROWN }}>
+                                  #{entry.rank}
+                                </span>
+                                {entry.rank <= 3 && <span className="text-xl leading-none">{MEDALS[entry.rank - 1]}</span>}
+                                <p className="font-semibold truncate" style={{ color: BROWN }}>{entry.waiter.name}</p>
+                              </div>
+                              <p className="text-xs text-gray-400 mt-1">
+                                {entry.waiter.isOnline ? 'Çevrimiçi' : formatLastSeen(entry.waiter.lastSeen)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-400">Puan</p>
+                            <p className="font-bold" style={{ color: GOLD }}>{formatRating(entry.avgWaiterRating)}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <MetricTile label="Toplam yorum" value={String(entry.totalRatings)} />
+                          <MetricTile label="Tamamlanan" value={`${entry.todayCompletedCalls} / ${entry.totalCompletedCalls}`} />
+                          <MetricTile label="Ort. cevap" value={formatResponseTime(entry.avgResponseMs)} />
+                          <div className="rounded-2xl px-4 py-3" style={{ background: '#faf7f4' }}>
+                            <p className="text-xs text-gray-400 mb-1">Durum</p>
+                            <div className="flex flex-wrap gap-2">
+                              <StatusBadge active={entry.waiter.active} />
+                              <OnlineBadge online={!!entry.waiter.isOnline} />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl px-4 py-3" style={{ background: '#faf7f4' }}>
+                          <p className="text-xs text-gray-400 mb-1">Son yorum</p>
+                          <p className="text-sm leading-6" style={{ color: entry.latestComment ? '#4b5563' : '#9ca3af' }}>
+                            {entry.latestComment ? truncateComment(entry.latestComment) : 'Henüz yorum yok.'}
                           </p>
                         </div>
+
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            onClick={() => toggleActive(entry.waiter)}
+                            className="text-xs font-semibold px-3 py-2 rounded-full"
+                            style={entry.waiter.active ? { background: '#dcfce7', color: '#15803d' } : { background: '#f3f4f6', color: '#6b7280' }}
+                          >
+                            {entry.waiter.active ? 'Aktif' : 'Pasif'}
+                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openEdit(entry.waiter)}
+                              className="text-gray-500 hover:text-blue-500 text-xs px-3 py-2 rounded-xl hover:bg-blue-50 transition-colors"
+                            >
+                              Düzenle
+                            </button>
+                            <button
+                              onClick={() => handleDelete(entry.waiter)}
+                              disabled={deletingId === entry.waiter.uid}
+                              className="text-gray-500 hover:text-red-500 text-xs px-3 py-2 rounded-xl hover:bg-red-50 disabled:opacity-50 transition-colors"
+                            >
+                              {deletingId === entry.waiter.uid ? 'Siliniyor...' : 'Sil'}
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 text-gray-500 hidden md:table-cell">{w.email}</td>
-                    <td className="px-4 py-4 text-center font-medium" style={{ color: GOLD }}>
-                      {(w.avgRating ?? 0) > 0 ? `${w.avgRating!.toFixed(1)} ★` : '—'}
-                    </td>
-                    <td className="px-4 py-4 text-center text-gray-600">{w.totalCalls ?? 0}</td>
-                    <td className="px-4 py-4 text-center">
-                      <button
-                        onClick={() => toggleActive(w)}
-                        className="text-xs font-semibold px-3 py-1 rounded-full"
-                        style={w.active
-                          ? { background: '#dcfce7', color: '#15803d' }
-                          : { background: '#f3f4f6', color: '#6b7280' }
-                        }
-                      >
-                        {w.active ? 'Aktif' : 'Pasif'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2 justify-end">
-                        <button
-                          onClick={() => openEdit(w)}
-                          className="text-gray-400 hover:text-blue-500 text-xs px-2 py-1 rounded hover:bg-blue-50 transition-colors"
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          onClick={() => handleDelete(w)}
-                          disabled={deletingId === w.uid}
-                          className="text-gray-400 hover:text-red-500 text-xs px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
-                        >
-                          {deletingId === w.uid ? '...' : '🗑️'}
-                        </button>
+
+                      <div className="hidden xl:grid xl:grid-cols-[72px_1.5fr_120px_120px_150px_140px_120px_1.7fr_140px] gap-3 items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: '#faf7f4', color: BROWN }}>
+                            #{entry.rank}
+                          </span>
+                          {entry.rank <= 3 && <span className="text-lg">{MEDALS[entry.rank - 1]}</span>}
+                        </div>
+
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-bold shrink-0"
+                            style={{ background: entry.waiter.active ? BROWN : '#9ca3af' }}
+                          >
+                            {entry.waiter.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate" style={{ color: BROWN }}>{entry.waiter.name}</p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {entry.waiter.isOnline ? 'Çevrimiçi' : formatLastSeen(entry.waiter.lastSeen)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="font-semibold" style={{ color: GOLD }}>{formatRating(entry.avgWaiterRating)}</div>
+                        <div className="text-gray-600">{entry.totalRatings}</div>
+                        <div className="text-gray-600">{entry.todayCompletedCalls} / {entry.totalCompletedCalls}</div>
+                        <div className="text-gray-600">{formatResponseTime(entry.avgResponseMs)}</div>
+                        <div className="flex flex-col gap-2">
+                          <StatusBadge active={entry.waiter.active} />
+                          <OnlineBadge online={!!entry.waiter.isOnline} />
+                        </div>
+                        <p className="text-sm leading-6" style={{ color: entry.latestComment ? '#4b5563' : '#9ca3af' }}>
+                          {entry.latestComment ? truncateComment(entry.latestComment) : 'Henüz yorum yok.'}
+                        </p>
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => toggleActive(entry.waiter)}
+                            className="text-xs font-semibold px-3 py-2 rounded-full"
+                            style={entry.waiter.active ? { background: '#dcfce7', color: '#15803d' } : { background: '#f3f4f6', color: '#6b7280' }}
+                          >
+                            {entry.waiter.active ? 'Aktif' : 'Pasif'}
+                          </button>
+                          <button
+                            onClick={() => openEdit(entry.waiter)}
+                            className="text-gray-500 hover:text-blue-500 text-xs px-3 py-2 rounded-xl hover:bg-blue-50 transition-colors"
+                          >
+                            Düzenle
+                          </button>
+                          <button
+                            onClick={() => handleDelete(entry.waiter)}
+                            disabled={deletingId === entry.waiter.uid}
+                            className="text-gray-500 hover:text-red-500 text-xs px-3 py-2 rounded-xl hover:bg-red-50 disabled:opacity-50 transition-colors"
+                          >
+                            {deletingId === entry.waiter.uid ? 'Siliniyor...' : 'Sil'}
+                          </button>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </>
         )}
       </div>
 
-      {/* ── Edit modal ── */}
       {editingWaiter && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -279,20 +574,11 @@ export default function WaitersPage() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold mb-1 text-gray-500">Ad Soyad</label>
-                <input
-                  className={inputCls}
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                />
+                <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1 text-gray-500">E-posta</label>
-                <input
-                  type="email"
-                  className={inputCls}
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                />
+                <input type="email" className={inputCls} value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
                 <p className="text-xs text-gray-400 mt-1">
                   Not: E-posta değişikliği yalnızca Firestore kaydını günceller.
                 </p>
@@ -320,5 +606,46 @@ export default function WaitersPage() {
         </div>
       )}
     </>
+  )
+}
+
+function OverviewCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="rounded-2xl bg-white border border-gray-100 px-5 py-5 shadow-[0_12px_30px_rgba(0,0,0,0.04)]">
+      <p className="text-xs uppercase tracking-[0.18em] text-gray-400">{label}</p>
+      <p className="text-2xl font-black mt-2" style={{ color: BROWN }}>{value}</p>
+      <p className="text-sm text-gray-400 mt-1">{sub}</p>
+    </div>
+  )
+}
+
+function MetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl px-4 py-3" style={{ background: '#faf7f4' }}>
+      <p className="text-xs text-gray-400 mb-1">{label}</p>
+      <p className="text-lg font-bold" style={{ color: BROWN }}>{value}</p>
+    </div>
+  )
+}
+
+function StatusBadge({ active }: { active: boolean }) {
+  return (
+    <span
+      className="text-xs font-semibold px-3 py-1 rounded-full inline-flex items-center"
+      style={active ? { background: '#dcfce7', color: '#15803d' } : { background: '#f3f4f6', color: '#6b7280' }}
+    >
+      {active ? 'Aktif' : 'Pasif'}
+    </span>
+  )
+}
+
+function OnlineBadge({ online }: { online: boolean }) {
+  return (
+    <span
+      className="text-xs font-semibold px-3 py-1 rounded-full inline-flex items-center"
+      style={online ? { background: '#ecfeff', color: '#0f766e' } : { background: '#f9fafb', color: '#9ca3af' }}
+    >
+      {online ? 'Çevrimiçi' : 'Çevrimdışı'}
+    </span>
   )
 }

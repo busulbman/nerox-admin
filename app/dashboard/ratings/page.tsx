@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { onSnapshot } from 'firebase/firestore'
+import { getDocs } from 'firebase/firestore'
+import { logFirestoreRead } from '@/lib/firestore-debug'
+import { getRestaurantRecentRatingsQuery } from '@/lib/firestore-queries'
 import { normalizeRating } from '@/lib/firestore-models'
-import { rc } from '@/lib/firebase'
+import { RESTAURANT_ID } from '@/lib/firebase'
 import type { Rating } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -48,15 +50,24 @@ export default function RatingsPage() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
 
   useEffect(() => {
-    const unsub = onSnapshot(rc('ratings'), (snap) => {
+    let cancelled = false
+
+    async function loadRatings() {
+      logFirestoreRead('dashboard/ratings', RESTAURANT_ID)
+      const snap = await getDocs(getRestaurantRecentRatingsQuery(RESTAURANT_ID))
+      if (cancelled) return
       const nextRatings = snap.docs
         .map((doc) => normalizeRating(doc.id, doc.data() as Record<string, unknown>))
         .sort((a, b) => b.createdAt - a.createdAt)
 
       setRatings(nextRatings)
-    })
+    }
 
-    return unsub
+    void loadRatings()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const waiterOptions = Array.from(

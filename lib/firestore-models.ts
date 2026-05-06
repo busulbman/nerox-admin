@@ -12,6 +12,10 @@ function isCallStatus(value: unknown): value is WaiterCall['durum'] {
   return value === 'bekliyor' || value === 'kabul edildi' || value === 'tamamlandı'
 }
 
+export function isOpenWaiterCallStatus(value: unknown): value is Extract<WaiterCall['durum'], 'bekliyor' | 'kabul edildi'> {
+  return value === 'bekliyor' || value === 'kabul edildi'
+}
+
 function isRatingStatus(value: unknown): value is RatingStatus {
   return value === 'approved' || value === 'suspicious'
 }
@@ -52,6 +56,8 @@ export function normalizeTable(id: string, data: Record<string, unknown>): Table
     status: isTableStatus(data.status) ? data.status : 'boş',
     sessionId: typeof data.sessionId === 'string' ? data.sessionId : null,
     openedAt: toMillis(data.openedAt),
+    lastPaymentCompletedAt: toMillis(data.lastPaymentCompletedAt),
+    lastPaymentWaiterName: typeof data.lastPaymentWaiterName === 'string' ? data.lastPaymentWaiterName : null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   }
@@ -63,6 +69,8 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
     typeof data.tableNumber === 'number' && Number.isFinite(data.tableNumber)
       ? data.tableNumber
       : Number.parseInt(tableId, 10)
+
+  const completedAt = toMillis(data.completedAt) ?? toMillis(data.resolvedAt) ?? undefined
 
   return {
     id,
@@ -77,7 +85,8 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
     note: typeof data.note === 'string' ? data.note : undefined,
     createdAt: toMillis(data.createdAt) ?? 0,
     acceptedAt: toMillis(data.acceptedAt) ?? undefined,
-    resolvedAt: toMillis(data.resolvedAt) ?? undefined,
+    completedAt,
+    resolvedAt: completedAt,
   }
 }
 
@@ -107,4 +116,8 @@ export function normalizeRating(id: string, data: Record<string, unknown>): Rati
 
 export function getCallTableLabel(call: Pick<WaiterCall, 'tableId' | 'tableNumber'>): string {
   return call.tableNumber > 0 ? String(call.tableNumber) : call.tableId
+}
+
+export function getCallCompletedAt(call: Pick<WaiterCall, 'createdAt' | 'completedAt' | 'resolvedAt'>): number {
+  return call.completedAt ?? call.resolvedAt ?? call.createdAt
 }

@@ -2,12 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { collection, onSnapshot, query, where } from 'firebase/firestore'
+import { collection, getDocs, limit, query, where } from 'firebase/firestore'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { db, rc, RESTAURANT_ID } from '@/lib/firebase'
-import { normalizeWaiterCall, normalizeTable, getCallTableLabel } from '@/lib/firestore-models'
+import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import { db, RESTAURANT_ID } from '@/lib/firebase'
+import { logFirestoreRead } from '@/lib/firestore-debug'
+import { getCallTableLabel, normalizeWaiterCall, normalizeTable } from '@/lib/firestore-models'
+import { getRestaurantRecentCompletedCallsQuery, getRestaurantTablesQuery } from '@/lib/firestore-queries'
 import type { WaiterCall, Table } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -43,8 +46,9 @@ function buildHourlyData(calls: WaiterCall[]) {
 }
 
 export default function DashboardPage() {
+  const { pendingCalls } = useOpenCalls()
   const router = useRouter()
-  const [calls,            setCalls]            = useState<WaiterCall[]>([])
+  const [completedCalls,   setCompletedCalls]   = useState<WaiterCall[]>([])
   const [tables,           setTables]           = useState<Table[]>([])
   const [activeWaiters,    setActiveWaiters]    = useState(0)
   const [, setTick] = useState(0)
@@ -52,37 +56,77 @@ export default function DashboardPage() {
   const [seeding,  setSeeding]  = useState(false)
   const [seedMsg,  setSeedMsg]  = useState('')
 
-  // Calls listener
-  useEffect(() => onSnapshot(rc('calls'), (snap) => {
-    setCalls(snap.docs.map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>)))
-  }), [])
+  useEffect(() => {
+    let cancelled = false
 
-  // Tables listener
-  useEffect(() => onSnapshot(rc('tables'), (snap) => {
-    setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)))
-  }), [])
+    async function loadCompletedCalls() {
+      const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID))
+      if (cancelled) return
+      setCompletedCalls(snap.docs.map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>)))
+    }
+
+    void loadCompletedCalls()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTables() {
+      logFirestoreRead('dashboard/tables', RESTAURANT_ID)
+      const snap = await getDocs(getRestaurantTablesQuery(RESTAURANT_ID))
+      if (cancelled) return
+      setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)))
+    }
+
+    void loadTables()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Active waiters count
-  useEffect(() => onSnapshot(
-    query(
-      collection(db, 'users'),
-      where('restaurantId', '==', RESTAURANT_ID),
-      where('role', '==', 'waiter'),
-      where('isOnline', '==', true)
-    ),
-    (snap) => setActiveWaiters(snap.size)
-  ), [])
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadActiveWaiters() {
+      logFirestoreRead('dashboard/online waiters', RESTAURANT_ID)
+      const snap = await getDocs(
+        query(
+          collection(db, 'users'),
+          where('restaurantId', '==', RESTAURANT_ID),
+          where('role', '==', 'waiter'),
+          where('isOnline', '==', true),
+          limit(50)
+        )
+      )
+      if (cancelled) return
+      setActiveWaiters(snap.size)
+    }
+
+    void loadActiveWaiters()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // 1-minute tick for elapsed times
   useEffect(() => {
+    if (pendingCalls.length === 0) return
+
     const t = setInterval(() => setTick((n) => n + 1), 60_000)
     return () => clearInterval(t)
-  }, [])
+  }, [pendingCalls.length])
 
   // ─── Derived data ─────────────────────────────────────────────────────────
   const todayStart     = getTodayStart()
-  const pendingCalls   = calls.filter((c) => c.durum === 'bekliyor').sort((a, b) => a.createdAt - b.createdAt)
-  const todayCompleted = calls.filter((c) => c.durum === 'tamamlandı' && c.createdAt >= todayStart)
+  const sortedPendingCalls = [...pendingCalls].sort((a, b) => a.createdAt - b.createdAt)
+  const todayCompleted = completedCalls.filter((c) => c.createdAt >= todayStart)
   const activeTables   = tables.filter((t) => ['aktif', 'çağrı var', 'hesap istendi'].includes(t.status)).length
 
   // Top waiter
@@ -95,13 +139,13 @@ export default function DashboardPage() {
   const topWaiter = [...waiterMap.values()].sort((a, b) => b.count - a.count)[0] ?? null
 
   // Avg response time (createdAt → acceptedAt)
-  const rTimes = calls.filter((c) => c.acceptedAt && c.createdAt).map((c) => (c.acceptedAt! - c.createdAt) / 1000)
+  const rTimes = completedCalls.filter((c) => c.acceptedAt && c.createdAt).map((c) => (c.acceptedAt! - c.createdAt) / 1000)
   const avgResponse = rTimes.length > 0 ? rTimes.reduce((a, b) => a + b, 0) / rTimes.length : null
   const fmtAvg = avgResponse === null ? '—' : avgResponse < 60 ? `${Math.round(avgResponse)}s` : `${Math.round(avgResponse / 60)}dk`
 
   const occupancy    = tables.length > 0 ? Math.round((activeTables / tables.length) * 100) : 0
-  const hourlyData   = buildHourlyData(calls)
-  const top5Pending  = pendingCalls.slice(0, 5)
+  const hourlyData   = buildHourlyData(completedCalls)
+  const top5Pending  = sortedPendingCalls.slice(0, 5)
 
   async function handleSeed() {
     setSeeding(true); setSeedMsg('')

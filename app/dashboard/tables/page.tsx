@@ -5,10 +5,13 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
 import {
-  onSnapshot, runTransaction, serverTimestamp, writeBatch, doc,
+  onSnapshot, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
+import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
-import { db, rc, rd, RESTAURANT_ID } from '@/lib/firebase'
+import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
+import { db, rd, RESTAURANT_ID } from '@/lib/firebase'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -44,11 +47,11 @@ function getCallDrivenStatus(calls: TableCallStatus[]): Extract<TableStatus, 'ç
 }
 
 export default function TablesPage() {
+  const { openCalls } = useOpenCalls()
   const router = useRouter()
   const [count,         setCount]        = useState(10)
   const [tables,        setTables]       = useState<Table[]>([])
   const [qrMap,         setQrMap]        = useState<Record<string, string>>({})
-  const [callsByTable,  setCallsByTable] = useState<Record<string, TableCallStatus[]>>({})
   const [creating,      setCreating]     = useState(false)
   const [busyKey,       setBusyKey]      = useState<string | null>(null)
   const [message,       setMessage]      = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null)
@@ -57,25 +60,26 @@ export default function TablesPage() {
   const [, setTicker] = useState(0)
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
-  useEffect(() => onSnapshot(rc('tables'), (snap) => {
-    setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
-  }), [])
-
-  useEffect(() => onSnapshot(rc('calls'), (snap) => {
-    const next: Record<string, TableCallStatus[]> = {}
-    snap.docs.forEach((d) => {
-      const data = d.data() as Partial<WaiterCall>
-      if (!data.tableId || !data.tip || !data.durum || data.durum === 'tamamlandı') return
-      const key = String(data.tableId)
-      next[key] = [...(next[key] ?? []), { id: d.id, tableId: key, tip: data.tip, durum: data.durum }]
+  useEffect(() => {
+    logFirestoreRead('dashboard/tables listener', RESTAURANT_ID)
+    return onSnapshot(getRestaurantTablesQuery(RESTAURANT_ID), (snap) => {
+      setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
     })
-    setCallsByTable(next)
-  }), [])
+  }, [])
+
+  const callsByTable = openCalls.reduce<Record<string, TableCallStatus[]>>((acc, call) => {
+    if (!call.tableId) return acc
+    const key = String(call.tableId)
+    acc[key] = [...(acc[key] ?? []), { id: call.id, tableId: key, tip: call.tip, durum: call.durum }]
+    return acc
+  }, {})
 
   useEffect(() => {
+    if (!tables.some((table) => table.status === 'aktif' && table.openedAt)) return
+
     const t = window.setInterval(() => setTicker((n) => n + 1), 60_000)
     return () => window.clearInterval(t)
-  }, [])
+  }, [tables])
 
   // Build QR map whenever tables or origin changes
   useEffect(() => {
@@ -110,6 +114,7 @@ export default function TablesPage() {
     setMessage(null)
     const newSessionId = createSessionId()
     try {
+      logFirestoreWrite('dashboard/open table', { tableId, sessionId: newSessionId })
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(rd('tables', tableId))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
@@ -119,6 +124,8 @@ export default function TablesPage() {
           status: 'aktif' satisfies TableStatus,
           sessionId: newSessionId,
           openedAt: serverTimestamp(),
+          lastPaymentCompletedAt: null,
+          lastPaymentWaiterName: null,
           updatedAt: serverTimestamp(),
         })
       })
@@ -133,37 +140,22 @@ export default function TablesPage() {
     setBusyKey(`close-${tableId}`)
     setMessage(null)
     try {
+      logFirestoreWrite('dashboard/close table', tableId)
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(rd('tables', tableId))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
         tx.update(rd('tables', tableId), {
           status: 'temizlik' satisfies TableStatus,
           sessionId: null,
+          openedAt: null,
+          lastPaymentCompletedAt: null,
+          lastPaymentWaiterName: null,
           updatedAt: serverTimestamp(),
         })
       })
     } catch (err) {
+      console.error('Masa kapat hatası:', err)
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Masa kapatılamadı.' })
-    } finally {
-      setBusyKey(null)
-    }
-  }
-
-  async function handlePaymentReceived(tableId: string) {
-    setBusyKey(`pay-${tableId}`)
-    setMessage(null)
-    try {
-      await runTransaction(db, async (tx) => {
-        const snap = await tx.get(rd('tables', tableId))
-        if (!snap.exists()) throw new Error('Masa bulunamadı.')
-        tx.update(rd('tables', tableId), {
-          status: 'temizlik' satisfies TableStatus,
-          sessionId: null,
-          updatedAt: serverTimestamp(),
-        })
-      })
-    } catch (err) {
-      setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Güncelleme başarısız.' })
     } finally {
       setBusyKey(null)
     }
@@ -173,6 +165,7 @@ export default function TablesPage() {
     setBusyKey(`clean-${tableId}`)
     setMessage(null)
     try {
+      logFirestoreWrite('dashboard/mark cleaned', tableId)
       await runTransaction(db, async (tx) => {
         const snap = await tx.get(rd('tables', tableId))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
@@ -180,6 +173,8 @@ export default function TablesPage() {
           status: 'boş' satisfies TableStatus,
           sessionId: null,
           openedAt: null,
+          lastPaymentCompletedAt: null,
+          lastPaymentWaiterName: null,
           updatedAt: serverTimestamp(),
         })
       })
@@ -195,6 +190,7 @@ export default function TablesPage() {
     setCreating(true)
     setMessage(null)
     try {
+      logFirestoreWrite('dashboard/create tables', safeCount)
       const existingNumbers = new Set(tables.map((t) => t.number))
       const batch = writeBatch(db)
       let created = 0
@@ -204,6 +200,8 @@ export default function TablesPage() {
           id: String(n), number: n,
           status: 'boş' satisfies TableStatus,
           sessionId: null, openedAt: null,
+          lastPaymentCompletedAt: null,
+          lastPaymentWaiterName: null,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
         })
         created++
@@ -267,6 +265,15 @@ export default function TablesPage() {
 
   const inputCls =
     'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
+
+  function formatCompletedPayment(ts: number) {
+    return new Intl.DateTimeFormat('tr-TR', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(ts)
+  }
 
   return (
     <>
@@ -346,6 +353,16 @@ export default function TablesPage() {
                     </span>
                   </div>
 
+                  {table.lastPaymentCompletedAt && (
+                    <div
+                      className="mb-4 rounded-xl px-3 py-2 text-sm"
+                      style={{ background: '#ecfdf5', color: '#166534', border: '1px solid #86efac' }}
+                    >
+                      Hesap tamamlandı • {formatCompletedPayment(table.lastPaymentCompletedAt)}
+                      {table.lastPaymentWaiterName ? ` • ${table.lastPaymentWaiterName}` : ''}
+                    </div>
+                  )}
+
                   {/* Action buttons */}
                   <div className="flex flex-wrap gap-2">
                     {effectiveStatus === 'boş' && (
@@ -374,10 +391,10 @@ export default function TablesPage() {
                     )}
                     {effectiveStatus === 'hesap istendi' && (
                       <ActionBtn
-                        label={busyKey === `pay-${table.id}` ? 'İşleniyor...' : 'Ödeme Alındı'}
-                        color="#10b981"
-                        busy={busy}
-                        onClick={() => handlePaymentReceived(table.id)}
+                        label="Çağrıyı Gör →"
+                        color="#c2410c"
+                        busy={false}
+                        onClick={() => router.push('/dashboard/calls')}
                       />
                     )}
                     {effectiveStatus === 'temizlik' && (

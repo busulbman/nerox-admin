@@ -40,6 +40,7 @@ export interface WaiterCall {
   note?: string
   createdAt: number
   acceptedAt?: number
+  completedAt?: number
   resolvedAt?: number
 }
 
@@ -69,6 +70,8 @@ export interface Table {
   status: TableStatus
   sessionId: string | null
   openedAt: number | null
+  lastPaymentCompletedAt?: number | null
+  lastPaymentWaiterName?: string | null
   createdAt: number | null
   updatedAt: number | null
 }

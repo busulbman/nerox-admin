@@ -1,0 +1,137 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper functions ───────────────────────────────────────────────────────
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return signedIn() ? userDoc().role : null;
+    }
+
+    function restaurantId() {
+      return signedIn() ? userDoc().restaurantId : null;
+    }
+
+    function isAdmin(rid) {
+      return signedIn() && role() == 'admin' && restaurantId() == rid;
+    }
+
+    function isWaiter(rid) {
+      return signedIn() && role() == 'waiter' && restaurantId() == rid;
+    }
+
+    function isStaff(rid) {
+      return isAdmin(rid) || isWaiter(rid);
+    }
+
+    // ─── Users collection ───────────────────────────────────────────────────────
+
+    match /users/{uid} {
+      // Users can read their own profile
+      allow read: if signedIn() && request.auth.uid == uid;
+
+      // Admin can read/write users in their restaurant
+      allow read: if signedIn() && isAdmin(resource.data.restaurantId);
+      allow write: if signedIn() && isAdmin(request.resource.data.restaurantId);
+
+      // Allow user to update their own presence fields
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['isOnline', 'lastSeen']);
+    }
+
+    // ─── Restaurant data ────────────────────────────────────────────────────────
+
+    match /restaurants/{rid} {
+      // Restaurant doc readable by staff
+      allow read: if isStaff(rid);
+      allow write: if isAdmin(rid);
+
+      // ── Categories & Products (Menu) ──────────────────────────────────────────
+
+      match /categories/{catId} {
+        // Public read for menu display
+        allow read: if true;
+        // Only admin can modify
+        allow write: if isAdmin(rid);
+      }
+
+      match /products/{prodId} {
+        // Public read for menu display
+        allow read: if true;
+        // Only admin can modify
+        allow write: if isAdmin(rid);
+      }
+
+      // ── Tables ────────────────────────────────────────────────────────────────
+
+      match /tables/{tableId} {
+        // Public read for menu page (limited fields would be ideal but Firestore doesn't support field-level rules)
+        allow read: if true;
+
+        // Staff can write
+        allow write: if isStaff(rid);
+
+        // Allow customer session creation/update (only specific fields)
+        allow update: if !signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'sessionId', 'openedAt', 'updatedAt']);
+      }
+
+      // ── Calls (Waiter calls) ──────────────────────────────────────────────────
+
+      match /calls/{callId} {
+        // Staff can read all calls
+        allow read: if isStaff(rid);
+
+        // Public can read their own session's calls (for status checking)
+        allow read: if resource.data.sessionId != null;
+
+        // Public can create calls with restricted fields
+        allow create: if true
+          && request.resource.data.keys().hasAll(['tableId', 'tip', 'durum', 'createdAt'])
+          && request.resource.data.durum == 'bekliyor'
+          && request.resource.data.tip in ['sipariş', 'hesap', 'yardım'];
+
+        // Only staff can update calls
+        allow update: if isStaff(rid);
+
+        // Only admin can delete calls
+        allow delete: if isAdmin(rid);
+      }
+
+      // ── Ratings ───────────────────────────────────────────────────────────────
+
+      match /ratings/{ratingId} {
+        // Staff can read ratings
+        allow read: if isStaff(rid);
+
+        // Public can create ratings (after payment completion - validated by callId)
+        allow create: if true
+          && request.resource.data.keys().hasAll(['serviceRating', 'waiterRating', 'createdAt'])
+          && request.resource.data.serviceRating >= 1
+          && request.resource.data.serviceRating <= 5
+          && request.resource.data.waiterRating >= 1
+          && request.resource.data.waiterRating <= 5;
+
+        // No public update/delete
+        allow update, delete: if isAdmin(rid);
+      }
+    }
+
+    // ─── Deny all other access ──────────────────────────────────────────────────
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

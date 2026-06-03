@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { collection, onSnapshot, query, where } from 'firebase/firestore'
+import { getDocs } from 'firebase/firestore'
+import { logFirestoreRead } from '@/lib/firestore-debug'
+import { getRestaurantActiveWaitersQuery } from '@/lib/firestore-queries'
 import { db, RESTAURANT_ID } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import type { UserProfile } from '@/lib/types'
@@ -46,14 +48,12 @@ export default function LeaderboardPage() {
   }, [user, profile, loading, router])
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'users'),
-      where('restaurantId', '==', RESTAURANT_ID),
-      where('role', '==', 'waiter'),
-      where('active', '==', true)
-    )
+    let cancelled = false
 
-    return onSnapshot(q, (snap) => {
+    async function loadWaiters() {
+      logFirestoreRead('waiter/leaderboard', RESTAURANT_ID)
+      const snap = await getDocs(getRestaurantActiveWaitersQuery(RESTAURANT_ID))
+      if (cancelled) return
       const list = snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile))
       list.sort((a, b) => {
         const callDiff = (b.totalCalls ?? 0) - (a.totalCalls ?? 0)
@@ -62,7 +62,13 @@ export default function LeaderboardPage() {
       })
       setWaiters(list)
       setDataLoading(false)
-    })
+    }
+
+    void loadWaiters()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   if (loading || !profile || profile.role !== 'waiter') {

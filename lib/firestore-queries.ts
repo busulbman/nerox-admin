@@ -58,6 +58,16 @@ export function getRestaurantWaiterUsersQuery(restaurantId: string) {
   )
 }
 
+export function getRestaurantActiveWaitersQuery(restaurantId: string) {
+  return query(
+    collection(db, 'users'),
+    where('restaurantId', '==', restaurantId),
+    where('role', '==', 'waiter'),
+    where('active', '==', true),
+    limit(50)
+  )
+}
+
 export function getSessionOpenCallsQuery(restaurantId: string, sessionId: string, max = DEFAULT_CALL_LIMIT) {
   return query(
     collection(db, 'restaurants', restaurantId, 'calls'),

@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
 import {
-  onSnapshot, runTransaction, serverTimestamp, writeBatch,
+  getDocs, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -60,11 +60,14 @@ export default function TablesPage() {
   const [, setTicker] = useState(0)
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
+  async function loadTables() {
+    logFirestoreRead('dashboard/tables', RESTAURANT_ID)
+    const snap = await getDocs(getRestaurantTablesQuery(RESTAURANT_ID))
+    setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
+  }
+
   useEffect(() => {
-    logFirestoreRead('dashboard/tables listener', RESTAURANT_ID)
-    return onSnapshot(getRestaurantTablesQuery(RESTAURANT_ID), (snap) => {
-      setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
-    })
+    void loadTables()
   }, [])
 
   const callsByTable = openCalls.reduce<Record<string, TableCallStatus[]>>((acc, call) => {
@@ -129,6 +132,7 @@ export default function TablesPage() {
           updatedAt: serverTimestamp(),
         })
       })
+      void loadTables()
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Masa açılamadı.' })
     } finally {
@@ -153,6 +157,7 @@ export default function TablesPage() {
           updatedAt: serverTimestamp(),
         })
       })
+      void loadTables()
     } catch (err) {
       console.error('Masa kapat hatası:', err)
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Masa kapatılamadı.' })
@@ -178,6 +183,7 @@ export default function TablesPage() {
           updatedAt: serverTimestamp(),
         })
       })
+      void loadTables()
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'Güncelleme başarısız.' })
     } finally {
@@ -209,6 +215,7 @@ export default function TablesPage() {
       if (created > 0) {
         await batch.commit()
         setMessage({ tone: 'success', text: `${created} yeni masa oluşturuldu.` })
+        void loadTables()
       } else {
         setMessage({ tone: 'info', text: 'İstenen aralıktaki tüm masalar zaten mevcut.' })
       }

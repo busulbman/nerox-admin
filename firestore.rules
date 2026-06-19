@@ -17,16 +17,16 @@ service cloud.firestore {
       return signedIn() ? userDoc().role : null;
     }
 
-    function restaurantId() {
+    function userRestaurantId() {
       return signedIn() ? userDoc().restaurantId : null;
     }
 
     function isAdmin(rid) {
-      return signedIn() && role() == 'admin' && restaurantId() == rid;
+      return signedIn() && role() == 'admin' && userRestaurantId() == rid;
     }
 
     function isWaiter(rid) {
-      return signedIn() && role() == 'waiter' && restaurantId() == rid;
+      return signedIn() && role() == 'waiter' && userRestaurantId() == rid;
     }
 
     function isStaff(rid) {
@@ -75,16 +75,34 @@ service cloud.firestore {
       // ── Tables ────────────────────────────────────────────────────────────────
 
       match /tables/{tableId} {
-        // Public read for menu page (limited fields would be ideal but Firestore doesn't support field-level rules)
+        // Public read for menu page
         allow read: if true;
 
-        // Staff can write
+        // Staff can do any write
         allow write: if isStaff(rid);
 
-        // Allow customer session creation/update (only specific fields)
+        // Customer: open session on empty table (boş -> aktif)
         allow update: if !signedIn()
+          && resource.data.status == 'boş'
+          && request.resource.data.status == 'aktif'
+          && request.resource.data.sessionId is string
+          && request.resource.data.sessionId.size() > 0
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'sessionId', 'openedAt', 'updatedAt']);
+
+        // Customer: update table status for call (aktif -> çağrı var, aktif -> hesap istendi)
+        allow update: if !signedIn()
+          && resource.data.status == 'aktif'
+          && request.resource.data.status in ['çağrı var', 'hesap istendi']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt']);
+
+        // Customer: update table status for call from existing call states
+        allow update: if !signedIn()
+          && resource.data.status in ['çağrı var', 'hesap istendi']
+          && request.resource.data.status in ['çağrı var', 'hesap istendi']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt']);
       }
 
       // ── Calls (Waiter calls) ──────────────────────────────────────────────────
@@ -93,20 +111,22 @@ service cloud.firestore {
         // Staff can read all calls
         allow read: if isStaff(rid);
 
-        // Public can read their own session's calls (for status checking)
-        allow read: if resource.data.sessionId != null;
+        // Public can read calls (for session status checking)
+        allow read: if true;
 
-        // Public can create calls with restricted fields
-        allow create: if true
-          && request.resource.data.keys().hasAll(['tableId', 'tip', 'durum', 'createdAt'])
-          && request.resource.data.durum == 'bekliyor'
-          && request.resource.data.tip in ['sipariş', 'hesap', 'yardım'];
-
-        // Only staff can update calls
-        allow update: if isStaff(rid);
-
-        // Only admin can delete calls
+        // Staff can do any write
+        allow create, update: if isStaff(rid);
         allow delete: if isAdmin(rid);
+
+        // Customer: create new call with restricted fields
+        allow create: if !signedIn()
+          && request.resource.data.tableId is string
+          && request.resource.data.sessionId is string
+          && request.resource.data.tip in ['sipariş', 'hesap', 'yardım']
+          && request.resource.data.durum == 'bekliyor'
+          && request.resource.data.waiterId == null
+          && request.resource.data.waiterName == null
+          && request.resource.data.keys().hasAll(['tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip', 'durum', 'createdAt', 'waiterId', 'waiterName', 'note']);
       }
 
       // ── Ratings ───────────────────────────────────────────────────────────────
@@ -115,16 +135,20 @@ service cloud.firestore {
         // Staff can read ratings
         allow read: if isStaff(rid);
 
-        // Public can create ratings (after payment completion - validated by callId)
-        allow create: if true
-          && request.resource.data.keys().hasAll(['serviceRating', 'waiterRating', 'createdAt'])
+        // Staff can do any write
+        allow write: if isAdmin(rid);
+
+        // Customer: create rating after payment
+        allow create: if !signedIn()
+          && request.resource.data.serviceRating is int
           && request.resource.data.serviceRating >= 1
           && request.resource.data.serviceRating <= 5
+          && request.resource.data.waiterRating is int
           && request.resource.data.waiterRating >= 1
-          && request.resource.data.waiterRating <= 5;
-
-        // No public update/delete
-        allow update, delete: if isAdmin(rid);
+          && request.resource.data.waiterRating <= 5
+          && request.resource.data.status in ['approved', 'suspicious']
+          && request.resource.data.comment is string
+          && request.resource.data.keys().hasAll(['restaurantId', 'tableId', 'tableNumber', 'sessionId', 'callId', 'waiterId', 'waiterName', 'serviceRating', 'waiterRating', 'comment', 'status', 'createdAt']);
       }
     }
 

@@ -12,10 +12,19 @@ import Sidebar from '@/components/Sidebar'
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { profile } = useAuth()
+  const { user, profile, loading } = useAuth()
+
+  // Don't render OpenCallsProvider until auth is ready and we have a restaurantId
+  if (loading || !user || !profile?.restaurantId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
+        <p className="text-sm" style={{ color: 'rgba(61,43,31,0.4)' }}>Yükleniyor...</p>
+      </div>
+    )
+  }
 
   return (
-    <OpenCallsProvider restaurantId={profile?.restaurantId ?? ''}>
+    <OpenCallsProvider restaurantId={profile.restaurantId}>
       <DashboardLayoutInner>{children}</DashboardLayoutInner>
     </OpenCallsProvider>
   )
@@ -23,7 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
 function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
-  const { pendingCalls, pendingCount } = useOpenCalls()
+  const { pendingCalls, pendingCount, connectionLost } = useOpenCalls()
   const router = useRouter()
 
   const [sidebarOpen,  setSidebarOpen]  = useState(false)
@@ -136,6 +145,14 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
       {/* ── Main content ── */}
       <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        {connectionLost && (
+          <div
+            className="px-4 py-2 text-center text-sm"
+            style={{ background: '#fef3c7', color: '#a16207' }}
+          >
+            Bağlantı koptu, yeniden bağlanılıyor...
+          </div>
+        )}
         {children}
       </main>
     </div>

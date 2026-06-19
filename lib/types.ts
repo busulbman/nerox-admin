@@ -27,6 +27,19 @@ export interface Product {
   available: boolean
 }
 
+export interface CartItem {
+  productId: string
+  name: string
+  price: number
+  quantity: number
+  customerName: string
+}
+
+export interface CustomerGroup {
+  total: number
+  items: CartItem[]
+}
+
 export interface WaiterCall {
   id: string
   tableId: string
@@ -42,6 +55,9 @@ export interface WaiterCall {
   acceptedAt?: number
   completedAt?: number
   resolvedAt?: number
+  items?: CartItem[]
+  totalPrice?: number
+  groupedByCustomer?: Record<string, CustomerGroup>
 }
 
 export type RatingStatus = 'approved' | 'suspicious'

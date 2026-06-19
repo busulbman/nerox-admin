@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "presence": {
+      "$restaurantId": {
+        "waiters": {
+          ".read": "auth != null",
+          "$waiterId": {
+            ".write": "auth != null && auth.uid == $waiterId"
+          }
+        }
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

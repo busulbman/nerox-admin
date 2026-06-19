@@ -16,8 +16,10 @@ import type { TableStatus, WaiterCall } from '@/lib/types'
 type SyncableTableStatus = Extract<TableStatus, 'aktif' | 'çağrı var' | 'hesap istendi'>
 
 export function getTableStatusFromOpenCalls(calls: WaiterCall[]): SyncableTableStatus {
-  if (calls.some((call) => call.tip === 'hesap')) return 'hesap istendi'
-  if (calls.length > 0) return 'çağrı var'
+  // Sadece bekliyor durumundaki çağrılar masa durumunu etkiler
+  const pending = calls.filter((call) => call.durum === 'bekliyor')
+  if (pending.some((call) => call.tip === 'hesap')) return 'hesap istendi'
+  if (pending.length > 0) return 'çağrı var'
   return 'aktif'
 }
 

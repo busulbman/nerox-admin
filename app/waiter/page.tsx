@@ -4,9 +4,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   collection, doc, getDocs, onSnapshot, orderBy, query,
-  runTransaction, serverTimestamp, updateDoc,
+  runTransaction, serverTimestamp, updateDoc, writeBatch,
 } from 'firebase/firestore'
-import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect } from 'firebase/database'
+import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
 import { auth, db, rd, rtdb, RESTAURANT_ID } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
@@ -22,7 +22,7 @@ import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import {
   getCallCompletedAt, getCallTableLabel, normalizeRating, normalizeTable, normalizeWaiterCall,
 } from '@/lib/firestore-models'
-import type { Category, Product, Rating, Table, WaiterCall } from '@/lib/types'
+import type { Category, Product, Rating, Table, TableStatus, WaiterCall } from '@/lib/types'
 import { requestPermission, showNotification } from '@/lib/notifications'
 
 type Section = 'pending' | 'active' | 'done'
@@ -89,6 +89,9 @@ export default function WaiterPage() {
   const [tablesBusy,   setTablesBusy]   = useState<string | null>(null)
   const [tablesMsg,    setTablesMsg]    = useState('')
 
+  // Connection status for resilience
+  const [connectionLost, setConnectionLost] = useState(false)
+
   const prevPendingIds    = useRef<Set<string>>(new Set())
   const callsInitialized  = useRef(false)
 
@@ -108,23 +111,32 @@ export default function WaiterPage() {
     if (profile.active === false) { router.replace('/waiter/login'); return }
   }, [user, profile, loading, router])
 
-  // ─── Online status + RTDB presence ──────────────────────────────────────
+  // ─── RTDB presence system ──────────────────────────────────────────────────
   useEffect(() => {
     if (!user || !profile || profile.role !== 'waiter') return
 
     const uid = user.uid
-    const firestoreRef = doc(db, 'users', uid)
+    const waiterName = profile.name
+    const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters/${uid}`)
+    const connectedRef = dbRef(rtdb, '.info/connected')
 
-    logFirestoreWrite('waiter/presence online', uid)
-    updateDoc(firestoreRef, { isOnline: true, lastSeen: serverTimestamp() }).catch(() => {})
+    const unsubscribe = onValue(connectedRef, (snap) => {
+      if (snap.val() !== true) return
 
-    try {
-      const presenceRef = dbRef(rtdb, `presence/${uid}`)
-      dbSet(presenceRef, true).catch(() => {})
-      dbOnDisconnect(presenceRef).set(false).catch(() => {})
-    } catch (err) {
-      console.error('RTDB presence error:', err)
-    }
+      dbOnDisconnect(presenceRef).set({
+        online: false,
+        name: waiterName,
+        lastSeen: rtdbServerTimestamp(),
+      }).then(() => {
+        dbSet(presenceRef, {
+          online: true,
+          name: waiterName,
+          lastSeen: rtdbServerTimestamp(),
+        })
+      }).catch((err) => console.error('RTDB presence error:', err))
+    })
+
+    return () => unsubscribe()
   }, [user, profile])
 
   async function fetchDoneCalls(waiterId: string, restaurantId: string) {
@@ -139,28 +151,69 @@ export default function WaiterPage() {
   useEffect(() => {
     if (!profile || profile.role !== 'waiter') return
 
-    logFirestoreRead('waiter/open calls listener', profile.restaurantId)
-    return onSnapshot(
-      getRestaurantOpenCallsQuery(profile.restaurantId),
-      (snap) => {
-        const all = snap.docs.map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>))
-        const pendingList = all.filter((c) => c.durum === 'bekliyor').sort((a, b) => a.createdAt - b.createdAt)
+    const currentProfile = profile
 
-        if (callsInitialized.current) {
-          const tips: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
-          for (const call of pendingList) {
-            if (!prevPendingIds.current.has(call.id)) {
-              showNotification('🔔 Yeni Çağrı!', `Masa ${getCallTableLabel(call)} — ${tips[call.tip] ?? call.tip}`, '/waiter')
-            }
+    function processSnapshot(snap: import('firebase/firestore').QuerySnapshot) {
+      setConnectionLost(false)
+      const all = snap.docs.map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>))
+      const pendingList = all.filter((c) => c.durum === 'bekliyor').sort((a, b) => a.createdAt - b.createdAt)
+
+      if (callsInitialized.current) {
+        const tips: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
+        for (const call of pendingList) {
+          if (!prevPendingIds.current.has(call.id)) {
+            showNotification('🔔 Yeni Çağrı!', `Masa ${getCallTableLabel(call)} — ${tips[call.tip] ?? call.tip}`, '/waiter')
           }
         }
-        callsInitialized.current = true
-        prevPendingIds.current = new Set(pendingList.map((c) => c.id))
-
-        setPending(pendingList)
-        setActive(all.filter((c) => c.durum === 'kabul edildi' && c.waiterId === profile.uid).sort((a, b) => a.createdAt - b.createdAt))
       }
+      callsInitialized.current = true
+      prevPendingIds.current = new Set(pendingList.map((c) => c.id))
+
+      setPending(pendingList)
+      setActive(all.filter((c) => c.durum === 'kabul edildi' && c.waiterId === currentProfile.uid).sort((a, b) => a.createdAt - b.createdAt))
+    }
+
+    function handleSnapshotError(error: Error) {
+      console.error('Firestore bağlantı hatası:', error)
+      setConnectionLost(true)
+    }
+
+    logFirestoreRead('waiter/open calls listener', currentProfile.restaurantId)
+    const unsubscribe = onSnapshot(
+      getRestaurantOpenCallsQuery(currentProfile.restaurantId),
+      processSnapshot,
+      handleSnapshotError
     )
+
+    // Visibility/focus handler: refetch when tab becomes active again
+    async function refetchOnWake() {
+      try {
+        logFirestoreRead('waiter/refetch on wake', currentProfile.restaurantId)
+        const snap = await getDocs(getRestaurantOpenCallsQuery(currentProfile.restaurantId))
+        processSnapshot(snap)
+      } catch (err) {
+        console.error('Çağrı yenileme hatası:', err)
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        void refetchOnWake()
+      }
+    }
+
+    function handleFocus() {
+      void refetchOnWake()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      unsubscribe()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [profile])
 
   // ─── Ratings listener ─────────────────────────────────────────────────────
@@ -269,9 +322,26 @@ export default function WaiterPage() {
   async function acceptCall(call: WaiterCall) {
     if (!profile) return
     logFirestoreWrite('waiter/accept call', { restaurantId: profile.restaurantId, callId: call.id })
-    await updateDoc(doc(db, 'restaurants', profile.restaurantId, 'calls', call.id), {
-      durum: 'kabul edildi', waiterId: profile.uid, waiterName: profile.name, acceptedAt: serverTimestamp(),
+
+    const batch = writeBatch(db)
+
+    // Update call status
+    batch.update(doc(db, 'restaurants', profile.restaurantId, 'calls', call.id), {
+      durum: 'kabul edildi',
+      waiterId: profile.uid,
+      waiterName: profile.name,
+      acceptedAt: serverTimestamp(),
     })
+
+    // Update table status to aktif (garson kabul etti, çağrı artık işleniyor)
+    if (call.tableId) {
+      batch.update(rd('tables', call.tableId), {
+        status: 'aktif' as TableStatus,
+        updatedAt: serverTimestamp(),
+      })
+    }
+
+    await batch.commit()
     setOpenSection('active')
   }
 
@@ -313,16 +383,15 @@ export default function WaiterPage() {
   }
 
   async function handleLogout() {
-    if (user) {
-      // Clear RTDB presence (cancels onDisconnect too)
+    if (user && profile) {
+      // Clear RTDB presence
       try {
-        const presenceRef = dbRef(rtdb, `presence/${user.uid}`)
-        await dbSet(presenceRef, false)
-      } catch { /* ignore */ }
-      // Update Firestore directly
-      try {
-        logFirestoreWrite('waiter/presence offline', user.uid)
-        await updateDoc(doc(db, 'users', user.uid), { isOnline: false, lastSeen: serverTimestamp() })
+        const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters/${user.uid}`)
+        await dbSet(presenceRef, {
+          online: false,
+          name: profile.name,
+          lastSeen: rtdbServerTimestamp(),
+        })
       } catch { /* ignore */ }
     }
     await signOut(auth).catch(() => {})
@@ -384,6 +453,16 @@ export default function WaiterPage() {
           )}
         </div>
       </header>
+
+      {/* ── Connection lost banner ── */}
+      {connectionLost && (
+        <div
+          className="px-4 py-2 text-center text-sm"
+          style={{ background: '#fef3c7', color: '#a16207' }}
+        >
+          Bağlantı koptu, yeniden bağlanılıyor...
+        </div>
+      )}
 
       {/* ── Tab content ── */}
       <div className="px-4 py-5 max-w-lg mx-auto">

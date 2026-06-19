@@ -3,11 +3,18 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getDocs } from 'firebase/firestore'
+import { ref as dbRef, onValue } from 'firebase/database'
 import { logFirestoreRead } from '@/lib/firestore-debug'
 import { getRestaurantActiveWaitersQuery } from '@/lib/firestore-queries'
-import { db, RESTAURANT_ID } from '@/lib/firebase'
+import { auth, rtdb, RESTAURANT_ID } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import type { UserProfile } from '@/lib/types'
+
+type PresenceData = {
+  online: boolean
+  name: string
+  lastSeen: number
+}
 
 const BROWN = '#3d2b1f'
 const GOLD = '#d4a017'
@@ -36,6 +43,7 @@ export default function LeaderboardPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
   const [waiters, setWaiters] = useState<UserProfile[]>([])
+  const [presence, setPresence] = useState<Record<string, PresenceData>>({})
   const [dataLoading, setDataLoading] = useState(true)
 
   useEffect(() => {
@@ -70,6 +78,28 @@ export default function LeaderboardPage() {
       cancelled = true
     }
   }, [])
+
+  // RTDB presence listener - only start after auth is ready
+  useEffect(() => {
+    if (!user || !profile || profile.role !== 'waiter') return
+
+    const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters`)
+    const unsubscribe = onValue(
+      presenceRef,
+      (snap) => {
+        const data = snap.val() as Record<string, PresenceData> | null
+        setPresence(data ?? {})
+      },
+      (error) => {
+        console.error('RTDB PRESENCE READ ERROR', {
+          path: `presence/${RESTAURANT_ID}/waiters`,
+          uid: auth.currentUser?.uid,
+          error,
+        })
+      }
+    )
+    return () => unsubscribe()
+  }, [user, profile])
 
   if (loading || !profile || profile.role !== 'waiter') {
     return (
@@ -153,14 +183,14 @@ export default function LeaderboardPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
-                      {(waiter.isOnline ?? false) ? (
+                      {presence[waiter.uid]?.online ? (
                         <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
                       ) : (
                         <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
                       )}
                       <p className="text-xs" style={{ color: isMe ? 'rgba(255,255,255,0.45)' : '#9ca3af' }}>
                         {(waiter.avgRating ?? 0) > 0 ? `${waiter.avgRating!.toFixed(1)} ★` : '—'}
-                        {!waiter.isOnline && waiter.lastSeen ? ` · ${formatLastSeen(waiter.lastSeen)}` : ''}
+                        {!presence[waiter.uid]?.online && presence[waiter.uid]?.lastSeen ? ` · ${formatLastSeen(presence[waiter.uid].lastSeen)}` : ''}
                       </p>
                     </div>
                   </div>

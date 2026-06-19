@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { deleteDoc, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
+import { ref as dbRef, onValue } from 'firebase/database'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { getCallCompletedAt, normalizeRating, normalizeWaiterCall } from '@/lib/firestore-models'
 import {
@@ -9,8 +10,15 @@ import {
   getRestaurantRecentRatingsQuery,
   getRestaurantWaiterUsersQuery,
 } from '@/lib/firestore-queries'
-import { createFirebaseUser, db, RESTAURANT_ID } from '@/lib/firebase'
+import { auth, createFirebaseUser, db, rtdb, RESTAURANT_ID } from '@/lib/firebase'
+import { useAuth } from '@/components/AuthProvider'
 import type { Rating, UserProfile, WaiterCall } from '@/lib/types'
+
+type PresenceData = {
+  online: boolean
+  name: string
+  lastSeen: number
+}
 
 const BROWN = '#3d2b1f'
 const GOLD = '#d4a017'
@@ -82,9 +90,11 @@ const inputCls =
   'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
 
 export default function WaitersPage() {
+  const { user, profile } = useAuth()
   const [waiters, setWaiters] = useState<UserProfile[]>([])
   const [ratings, setRatings] = useState<Rating[]>([])
   const [recentCompletedCalls, setRecentCompletedCalls] = useState<WaiterCall[]>([])
+  const [presence, setPresence] = useState<Record<string, PresenceData>>({})
 
   const [form, setForm] = useState<WaiterForm>(EMPTY_FORM)
   const [adding, setAdding] = useState(false)
@@ -133,6 +143,28 @@ export default function WaitersPage() {
       cancelled = true
     }
   }, [])
+
+  // RTDB presence listener - only start after auth is ready
+  useEffect(() => {
+    if (!user || !profile || profile.role !== 'admin') return
+
+    const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters`)
+    const unsubscribe = onValue(
+      presenceRef,
+      (snap) => {
+        const data = snap.val() as Record<string, PresenceData> | null
+        setPresence(data ?? {})
+      },
+      (error) => {
+        console.error('RTDB PRESENCE READ ERROR', {
+          path: `presence/${RESTAURANT_ID}/waiters`,
+          uid: auth.currentUser?.uid,
+          error,
+        })
+      }
+    )
+    return () => unsubscribe()
+  }, [user, profile])
 
   async function handleAdd() {
     if (!form.name.trim() || !form.email.trim() || form.password.length < 6) {
@@ -273,7 +305,7 @@ export default function WaitersPage() {
   const topThree = rankedWaiters.slice(0, 3)
   const teamAverage = averageNumber(rankedWaiters.map((waiter) => waiter.avgWaiterRating).filter((value): value is number => value !== null))
   const totalComments = rankedWaiters.reduce((sum, waiter) => sum + waiter.totalRatings, 0)
-  const onlineCount = waiters.filter((waiter) => waiter.isOnline).length
+  const onlineCount = waiters.filter((waiter) => presence[waiter.uid]?.online).length
 
   return (
     <>
@@ -366,7 +398,7 @@ export default function WaitersPage() {
                         </div>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <StatusBadge active={entry.waiter.active} />
-                          <OnlineBadge online={!!entry.waiter.isOnline} />
+                          <OnlineBadge online={!!presence[entry.waiter.uid]?.online} />
                         </div>
                       </div>
                       <div className="text-right">
@@ -440,7 +472,7 @@ export default function WaitersPage() {
                                 <p className="font-semibold truncate" style={{ color: BROWN }}>{entry.waiter.name}</p>
                               </div>
                               <p className="text-xs text-gray-400 mt-1">
-                                {entry.waiter.isOnline ? 'Çevrimiçi' : formatLastSeen(entry.waiter.lastSeen)}
+                                {presence[entry.waiter.uid]?.online ? 'Çevrimiçi' : formatLastSeen(presence[entry.waiter.uid]?.lastSeen)}
                               </p>
                             </div>
                           </div>
@@ -458,7 +490,7 @@ export default function WaitersPage() {
                             <p className="text-xs text-gray-400 mb-1">Durum</p>
                             <div className="flex flex-wrap gap-2">
                               <StatusBadge active={entry.waiter.active} />
-                              <OnlineBadge online={!!entry.waiter.isOnline} />
+                              <OnlineBadge online={!!presence[entry.waiter.uid]?.online} />
                             </div>
                           </div>
                         </div>
@@ -514,7 +546,7 @@ export default function WaitersPage() {
                           <div className="min-w-0">
                             <p className="font-semibold truncate" style={{ color: BROWN }}>{entry.waiter.name}</p>
                             <p className="text-xs text-gray-400 mt-1">
-                              {entry.waiter.isOnline ? 'Çevrimiçi' : formatLastSeen(entry.waiter.lastSeen)}
+                              {presence[entry.waiter.uid]?.online ? 'Çevrimiçi' : formatLastSeen(presence[entry.waiter.uid]?.lastSeen)}
                             </p>
                           </div>
                         </div>
@@ -525,7 +557,7 @@ export default function WaitersPage() {
                         <div className="text-gray-600">{formatResponseTime(entry.avgResponseMs)}</div>
                         <div className="flex flex-col gap-2">
                           <StatusBadge active={entry.waiter.active} />
-                          <OnlineBadge online={!!entry.waiter.isOnline} />
+                          <OnlineBadge online={!!presence[entry.waiter.uid]?.online} />
                         </div>
                         <p className="text-sm leading-6" style={{ color: entry.latestComment ? '#4b5563' : '#9ca3af' }}>
                           {entry.latestComment ? truncateComment(entry.latestComment) : 'Henüz yorum yok.'}

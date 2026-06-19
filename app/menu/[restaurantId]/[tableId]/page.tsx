@@ -22,7 +22,7 @@ import { getSessionOpenCallsQuery, getSessionPaymentCallsQuery } from '@/lib/fir
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
-import type { Category, Product, Table, WaiterCall } from '@/lib/types'
+import type { CartItem, Category, CustomerGroup, Product, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -96,6 +96,47 @@ function clearStoredSessionId(routeTableId: string, restaurantId: string, tableD
 
 function getRatingPromptKey(restaurantId: string, callId: string) {
   return `nerox:rating-prompted:${restaurantId}:${callId}`
+}
+
+function getCustomerNameKey(restaurantId: string, tableId: string, sessionId: string) {
+  return `nerox_customer_name_${restaurantId}_${tableId}_${sessionId}`
+}
+
+function getCartKey(restaurantId: string, tableId: string, sessionId: string) {
+  return `nerox_cart_${restaurantId}_${tableId}_${sessionId}`
+}
+
+function readCustomerName(restaurantId: string, tableId: string, sessionId: string): string | null {
+  return window.localStorage.getItem(getCustomerNameKey(restaurantId, tableId, sessionId))
+}
+
+function saveCustomerName(restaurantId: string, tableId: string, sessionId: string, name: string) {
+  window.localStorage.setItem(getCustomerNameKey(restaurantId, tableId, sessionId), name)
+}
+
+function readCart(restaurantId: string, tableId: string, sessionId: string): CartItem[] {
+  try {
+    const stored = window.localStorage.getItem(getCartKey(restaurantId, tableId, sessionId))
+    return stored ? JSON.parse(stored) : []
+  } catch {
+    return []
+  }
+}
+
+function saveCart(restaurantId: string, tableId: string, sessionId: string, cart: CartItem[]) {
+  window.localStorage.setItem(getCartKey(restaurantId, tableId, sessionId), JSON.stringify(cart))
+}
+
+function groupCartByCustomer(cart: CartItem[]): Record<string, CustomerGroup> {
+  const groups: Record<string, CustomerGroup> = {}
+  for (const item of cart) {
+    if (!groups[item.customerName]) {
+      groups[item.customerName] = { total: 0, items: [] }
+    }
+    groups[item.customerName].items.push(item)
+    groups[item.customerName].total += item.price * item.quantity
+  }
+  return groups
 }
 
 function hashString(value: string): number {
@@ -258,7 +299,17 @@ export default function MenuPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [detailQuantity, setDetailQuantity] = useState(1)
   const [favoriteIds, setFavoriteIds] = useState<Record<string, boolean>>({})
-  const [cartQuantities, setCartQuantities] = useState<Record<string, number>>({})
+
+  // Cart & Customer name
+  const [cart, setCart] = useState<CartItem[]>([])
+  const [customerName, setCustomerName] = useState<string | null>(null)
+  const [customerNameModal, setCustomerNameModal] = useState(false)
+  const [customerNameInput, setCustomerNameInput] = useState('')
+  const [cartDrawer, setCartDrawer] = useState(false)
+  const [splitModal, setSplitModal] = useState(false)
+  const [splitCount, setSplitCount] = useState(2)
+  const [orderSending, setOrderSending] = useState(false)
+  const [orderSent, setOrderSent] = useState(false)
 
   const [callModal, setCallModal] = useState(false)
   const [selectedTip, setSelectedTip] = useState<CallTip | null>(null)
@@ -468,6 +519,27 @@ export default function MenuPage() {
     }
   }, [restaurantId, tableId])
 
+  // Load customer name and cart from localStorage when session is ready
+  useEffect(() => {
+    if (!sessionId || !tableDocId) return
+
+    const storedName = readCustomerName(restaurantId, tableId, sessionId)
+    if (storedName) {
+      setCustomerName(storedName)
+    } else {
+      setCustomerNameModal(true)
+    }
+
+    const storedCart = readCart(restaurantId, tableId, sessionId)
+    setCart(storedCart)
+  }, [restaurantId, tableId, tableDocId, sessionId])
+
+  // Save cart to localStorage whenever it changes
+  useEffect(() => {
+    if (!sessionId || !tableDocId) return
+    saveCart(restaurantId, tableId, sessionId, cart)
+  }, [cart, restaurantId, tableId, tableDocId, sessionId])
+
   useEffect(() => {
     if (!lastSessionCallAt || getCooldownRemainingMs(lastSessionCallAt) <= 0) return
 
@@ -626,10 +698,60 @@ export default function MenuPage() {
   }
 
   function addToCart(product: Product, quantity: number) {
-    setCartQuantities((current) => ({
-      ...current,
-      [product.id]: (current[product.id] ?? 0) + quantity,
-    }))
+    if (!customerName) {
+      setCustomerNameModal(true)
+      return
+    }
+    setCart((current) => {
+      const existingIndex = current.findIndex(
+        (item) => item.productId === product.id && item.customerName === customerName
+      )
+      if (existingIndex >= 0) {
+        const updated = [...current]
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + quantity,
+        }
+        return updated
+      }
+      return [
+        ...current,
+        {
+          productId: product.id,
+          name: product.name,
+          price: product.price,
+          quantity,
+          customerName,
+        },
+      ]
+    })
+  }
+
+  function updateCartItemQuantity(productId: string, customerName: string, delta: number) {
+    setCart((current) => {
+      const index = current.findIndex(
+        (item) => item.productId === productId && item.customerName === customerName
+      )
+      if (index < 0) return current
+      const updated = [...current]
+      const newQty = updated[index].quantity + delta
+      if (newQty <= 0) {
+        updated.splice(index, 1)
+      } else {
+        updated[index] = { ...updated[index], quantity: newQty }
+      }
+      return updated
+    })
+  }
+
+  function removeCartItem(productId: string, customerName: string) {
+    setCart((current) => current.filter(
+      (item) => !(item.productId === productId && item.customerName === customerName)
+    ))
+  }
+
+  function clearCart() {
+    setCart([])
   }
 
   function handleQuickAdd(product: Product) {
@@ -641,6 +763,84 @@ export default function MenuPage() {
     addToCart(selectedProduct, detailQuantity)
     setSelectedProduct(null)
     setDetailQuantity(1)
+  }
+
+  function handleSaveCustomerName() {
+    const trimmed = customerNameInput.trim()
+    if (!trimmed || !sessionId) return
+    saveCustomerName(restaurantId, tableId, sessionId, trimmed)
+    setCustomerName(trimmed)
+    setCustomerNameModal(false)
+  }
+
+  async function sendOrder() {
+    if (cart.length === 0 || !tableDocId || !sessionId) return
+
+    setOrderSending(true)
+    setActionMessage(null)
+
+    try {
+      const tableRef = doc(db, 'restaurants', restaurantId, 'tables', tableDocId)
+      const liveTableSnap = await getDoc(tableRef)
+
+      if (!liveTableSnap.exists()) {
+        setActionMessage('Bu masa bulunamadı.')
+        return
+      }
+
+      const liveTable = normalizeTable(liveTableSnap.id, liveTableSnap.data() as Record<string, unknown>)
+
+      if (liveTable.sessionId !== sessionId) {
+        setActionMessage('Masa oturumu değişmiş. Sayfayı yenileyin.')
+        return
+      }
+
+      const grouped = groupCartByCustomer(cart)
+      const totalPrice = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
+      const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
+      const newCallRef = doc(callsCollection)
+      const batch = writeBatch(db)
+
+      batch.set(newCallRef, {
+        tableId: tableDocId,
+        tableNumber: table?.number ?? 0,
+        sessionId,
+        restaurantId,
+        tip: 'sipariş',
+        durum: 'bekliyor',
+        createdAt: serverTimestamp(),
+        waiterId: null,
+        waiterName: null,
+        note: '',
+        items: cart,
+        totalPrice,
+        groupedByCustomer: grouped,
+      })
+
+      if (liveTable.status === 'aktif') {
+        batch.update(tableRef, {
+          status: 'çağrı var',
+          updatedAt: serverTimestamp(),
+        })
+      }
+
+      logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: cart.length })
+      await batch.commit()
+
+      setLastSessionCallAt(Date.now())
+      setOrderSent(true)
+      setCart([])
+      setCartDrawer(false)
+
+      window.setTimeout(() => {
+        setOrderSent(false)
+      }, 3000)
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Sipariş gönderilemedi.')
+    } finally {
+      setOrderSending(false)
+    }
   }
 
   async function sendCall() {
@@ -859,8 +1059,9 @@ export default function MenuPage() {
 
   const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.name]))
 
-  const cartCount = Object.values(cartQuantities).reduce((sum, qty) => sum + qty, 0)
-  const cartTotal = products.reduce((sum, product) => sum + (cartQuantities[product.id] ?? 0) * product.price, 0)
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const cartGrouped = groupCartByCustomer(cart)
 
   const hasActiveRequest = sessionCalls.some((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
   const latestCallAt = sessionCalls[0]?.createdAt ?? paymentCalls[0]?.createdAt ?? lastSessionCallAt
@@ -968,6 +1169,7 @@ export default function MenuPage() {
 
               <div className="relative flex justify-end">
                 <button
+                  onClick={() => setCartDrawer(true)}
                   className="h-10 w-10 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] flex items-center justify-center text-[#3d2b1f]"
                   aria-label="Sepet"
                 >
@@ -982,10 +1184,23 @@ export default function MenuPage() {
             </div>
 
             <div className="mt-4 rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
-              <p className="text-sm text-[#888888]">Masa {displayTableLabel} • Hoş geldiniz</p>
-              <p className="text-[13px] mt-1 text-[#3d2b1f]/80">
-                Günün favorilerini keşfedin, tek dokunuşla garson çağırın.
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-[#888888]">Masa {displayTableLabel} • Hoş geldiniz</p>
+                  <p className="text-[13px] mt-1 text-[#3d2b1f]/80">
+                    {customerName ? `👋 ${customerName}` : 'Günün favorilerini keşfedin'}
+                  </p>
+                </div>
+                {customerName && (
+                  <button
+                    onClick={() => { setCustomerNameInput(customerName); setCustomerNameModal(true) }}
+                    className="text-xs px-3 py-1.5 rounded-full"
+                    style={{ background: '#f3f4f6', color: '#6b7280' }}
+                  >
+                    Değiştir
+                  </button>
+                )}
+              </div>
             </div>
 
             {categories.length > 0 && (

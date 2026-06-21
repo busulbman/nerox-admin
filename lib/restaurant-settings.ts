@@ -2,12 +2,13 @@ import type { RestaurantGeneralSettings } from '@/lib/types'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
-export const DEFAULT_BUSINESS_NAME = 'Varina Chocolate'
+export const DEFAULT_BUSINESS_NAME = 'İşletme'
 export const DEFAULT_PRIMARY_COLOR = '#3d2b1f'
 export const DEFAULT_ACCENT_COLOR = '#d4a017'
 
 export const EMPTY_RESTAURANT_GENERAL_SETTINGS: RestaurantGeneralSettings = {
   businessName: '',
+  slug: '',
   logoUrl: '',
   primaryColor: DEFAULT_PRIMARY_COLOR,
   updatedAt: null,
@@ -28,6 +29,23 @@ export function isValidRestaurantThemeColor(value: string) {
   return HEX_COLOR_PATTERN.test(value.trim())
 }
 
+export function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+export function isValidSlug(slug: string): boolean {
+  return /^[a-z0-9]+$/.test(slug) && slug.length >= 2 && slug.length <= 30
+}
+
 export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGeneralSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return { ...EMPTY_RESTAURANT_GENERAL_SETTINGS }
@@ -35,6 +53,7 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
 
   const data = value as Record<string, unknown>
   const businessName = typeof data.businessName === 'string' ? data.businessName.trim() : ''
+  const slug = typeof data.slug === 'string' ? data.slug.trim().toLowerCase() : ''
   const logoUrl = typeof data.logoUrl === 'string' ? data.logoUrl.trim() : ''
   const primaryColor =
     typeof data.primaryColor === 'string' && isValidRestaurantThemeColor(data.primaryColor)
@@ -43,6 +62,7 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
 
   return {
     businessName,
+    slug,
     logoUrl,
     primaryColor,
     updatedAt: toMillis(data.updatedAt),

@@ -9,6 +9,7 @@ import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCall
 import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { auth } from '@/lib/firebase'
 import { requestPermission, showLocalNotification } from '@/lib/notifications'
+import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
@@ -36,8 +37,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const { pendingCalls, pendingCount, connectionLost } = useOpenCalls()
-  const { primaryColor, textColor } = useRestaurantSettingsContext()
+  const { settings, primaryColor, textColor } = useRestaurantSettingsContext()
   const router = useRouter()
+  const businessName = resolveRestaurantBusinessName(settings)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -103,7 +105,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
           <Menu size={20} />
         </button>
 
-        <p className="font-bold text-sm" style={{ color: textColor }}>Nerox Admin</p>
+        <p className="font-bold text-sm" style={{ color: textColor }}>{businessName} Admin</p>
 
         <div className="flex items-center gap-2">
           <div className="relative">

@@ -53,7 +53,7 @@ export default function WaiterLoginPage() {
             ☕
           </div>
           <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>
-            Varina Chocolate
+            Garson Girişi
           </h1>
           <p className="text-gray-400 text-sm mt-1">Garson Paneli</p>
         </div>
@@ -72,7 +72,7 @@ export default function WaiterLoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
-                placeholder="garson@varina.com"
+                placeholder="garson@isletme.com"
                 required
                 autoComplete="email"
               />

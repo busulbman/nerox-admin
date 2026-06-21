@@ -7,11 +7,14 @@ import QRCode from 'qrcode'
 import {
   getDocs, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
+import { useAuth } from '@/components/AuthProvider'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
 import { db, rd, RESTAURANT_ID } from '@/lib/firebase'
+import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -49,6 +52,8 @@ function getCallDrivenStatus(calls: TableCallStatus[]): Extract<TableStatus, 'ç
 }
 
 export default function TablesPage() {
+  const { profile } = useAuth()
+  const { settings } = useRestaurantSettingsContext()
   const { openCalls } = useOpenCalls()
   const router = useRouter()
   const [count,         setCount]        = useState(10)
@@ -61,6 +66,10 @@ export default function TablesPage() {
   const [pdfLoading,    setPdfLoading]   = useState(false)
   const [, setTicker] = useState(0)
   const origin = typeof window === 'undefined' ? '' : window.location.origin
+
+  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const menuSlug = settings?.slug || restaurantId
+  const businessName = resolveRestaurantBusinessName(settings)
 
   // Delete mode state
   const [selectMode, setSelectMode] = useState(false)
@@ -110,7 +119,7 @@ export default function TablesPage() {
     let cancelled = false
     Promise.all(
       tables.map(async (t) => {
-        const url = `${origin}/menu/${RESTAURANT_ID}/${t.number}`
+        const url = `${origin}/menu/${menuSlug}/${t.number}`
         const dataUrl = await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: BROWN, light: '#ffffff' } })
         return [t.id, dataUrl] as const
       })
@@ -118,10 +127,10 @@ export default function TablesPage() {
       if (!cancelled) setQrMap(Object.fromEntries(entries))
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [origin, tables])
+  }, [origin, tables, menuSlug])
 
   function getTableLink(tableNumber: number) {
-    return `${origin || ''}/menu/${RESTAURANT_ID}/${tableNumber}`
+    return `${origin || ''}/menu/${menuSlug}/${tableNumber}`
   }
 
   function getEffectiveStatus(table: Table): TableStatus {
@@ -269,10 +278,10 @@ export default function TablesPage() {
         pdf.text(`Masa ${table.number}`, 105, 200, { align: 'center' })
         pdf.setFontSize(13)
         pdf.setTextColor(120, 90, 60)
-        pdf.text('Varina Chocolate', 105, 212, { align: 'center' })
+        pdf.text(businessName, 105, 212, { align: 'center' })
       }
 
-      pdf.save('varina-qr-kodlar.pdf')
+      pdf.save(`${menuSlug}-qr-kodlar.pdf`)
     } catch (err) {
       setMessage({ tone: 'error', text: err instanceof Error ? err.message : 'PDF oluşturulamadı.' })
     } finally {
@@ -575,7 +584,7 @@ export default function TablesPage() {
         >
           <div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl">
             <h2 className="font-bold text-xl mb-1" style={{ color: BROWN }}>Masa {qrModalTable.number}</h2>
-            <p className="text-xs text-gray-400 mb-5">Varina Chocolate</p>
+            <p className="text-xs text-gray-400 mb-5">{businessName}</p>
 
             <div className="flex items-center justify-center mb-5">
               {qrMap[qrModalTable.id] ? (

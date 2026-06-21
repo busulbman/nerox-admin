@@ -16,10 +16,11 @@ import type { TableStatus, WaiterCall } from '@/lib/types'
 type SyncableTableStatus = Extract<TableStatus, 'aktif' | 'çağrı var' | 'hesap istendi'>
 type CompleteCallActor = {
   uid: string
+  name: string
+  role: 'admin' | 'waiter'
 }
 
 export function getTableStatusFromOpenCalls(calls: WaiterCall[]): SyncableTableStatus {
-  // Sadece bekliyor durumundaki çağrılar masa durumunu etkiler
   const pending = calls.filter((call) => call.durum === 'bekliyor')
   if (pending.some((call) => call.tip === 'hesap')) return 'hesap istendi'
   if (pending.length > 0) return 'çağrı var'
@@ -40,7 +41,7 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
     return
   }
 
-  if (actor) {
+  if (actor?.role === 'waiter') {
     if (liveCall.durum !== 'kabul edildi') {
       throw new Error('Bu çağrı tamamlanacak durumda değil.')
     }
@@ -53,14 +54,27 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
   const batch = writeBatch(db)
   const completionTimestamp = serverTimestamp()
 
-  batch.update(callRef, {
+  const completedByName = actor?.name ?? liveCall.waiterName ?? 'İşletme'
+  const completedByRole = actor?.role ?? (liveCall.waiterId ? 'waiter' : 'admin')
+
+  const callUpdate: Record<string, unknown> = {
     durum: 'tamamlandı',
     status: 'completed',
     completedAt: completionTimestamp,
     resolvedAt: completionTimestamp,
-  })
+    completedById: actor?.uid ?? liveCall.waiterId ?? null,
+    completedByName,
+    completedByRole,
+  }
 
-  const creditedWaiterId = actor?.uid ?? liveCall.waiterId
+  if (!liveCall.waiterId && actor) {
+    callUpdate.waiterId = actor.uid
+    callUpdate.waiterName = actor.name || 'İşletme'
+  }
+
+  batch.update(callRef, callUpdate)
+
+  const creditedWaiterId = actor?.role === 'waiter' ? actor.uid : liveCall.waiterId
 
   if (creditedWaiterId) {
     batch.update(doc(db, 'users', creditedWaiterId), {
@@ -104,7 +118,7 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
           ...(liveCall.tip === 'hesap'
             ? {
                 lastPaymentCompletedAt: completionTimestamp,
-                lastPaymentWaiterName: liveCall.waiterName ?? null,
+                lastPaymentWaiterName: completedByName,
               }
             : {}),
           updatedAt: serverTimestamp(),

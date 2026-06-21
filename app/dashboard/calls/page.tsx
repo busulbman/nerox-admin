@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { deleteDoc, doc, getDocs, writeBatch } from 'firebase/firestore'
+import { useAuth } from '@/components/AuthProvider'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import { completeRestaurantCall } from '@/lib/call-sync'
@@ -45,6 +46,7 @@ function formatDuration(ms: number): string {
 }
 
 export default function CallsPage() {
+  const { user, profile } = useAuth()
   const { openCalls } = useOpenCalls()
   const [tab, setTab] = useState<CallsTab>('open')
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([])
@@ -85,8 +87,14 @@ export default function CallsPage() {
   async function resolveCall(call: WaiterCall) {
     setBusyId(call.id)
     try {
+      const actor = user && profile ? {
+        uid: user.uid,
+        name: profile.name || 'İşletme',
+        role: profile.role as 'admin' | 'waiter',
+      } : undefined
+
       logFirestoreWrite('dashboard/complete call', { restaurantId: call.restaurantId || RESTAURANT_ID, callId: call.id })
-      await completeRestaurantCall(call.restaurantId || RESTAURANT_ID, call)
+      await completeRestaurantCall(call.restaurantId || RESTAURANT_ID, call, actor)
     } catch (err) {
       console.error('Çağrı tamamlama hatası:', err)
     } finally {

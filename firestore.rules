@@ -51,7 +51,7 @@ service cloud.firestore {
         && request.resource.data.durum == 'tamamlandı'
         && request.resource.data.status == 'completed'
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['durum', 'status', 'completedAt', 'resolvedAt']);
+            .hasOnly(['durum', 'status', 'completedAt', 'resolvedAt', 'completedById', 'completedByName', 'completedByRole']);
     }
 
     function isNonNegativeNumber(value) {

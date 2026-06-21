@@ -68,7 +68,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         style={{ background: primaryColor }}
       >
         <div className="md:hidden flex items-center justify-between px-5 pt-4 pb-1">
-          <p className="font-bold text-base" style={{ color: textColor }}>Nerox Admin</p>
+          <p className="font-bold text-base" style={{ color: textColor }}>{businessName} Admin</p>
           <button
             onClick={onClose}
             className="p-1 rounded-lg transition-colors"
@@ -91,8 +91,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               />
             )}
             <div>
-              <p className="font-bold text-lg" style={{ color: textColor }}>Nerox Admin</p>
-              <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>{businessName}</p>
+              <p className="font-bold text-lg" style={{ color: textColor }}>{businessName} Admin</p>
+              <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>Yönetim Paneli</p>
             </div>
           </div>
         </div>

@@ -2,15 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { Upload, Trash2 } from 'lucide-react'
+import { Upload, Trash2, Link as LinkIcon } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { db, RESTAURANT_ID } from '@/lib/firebase'
 import {
   DEFAULT_BUSINESS_NAME,
   DEFAULT_PRIMARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
+  generateSlug,
   getContrastColor,
   isValidRestaurantThemeColor,
+  isValidSlug,
 } from '@/lib/restaurant-settings'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import type { RestaurantGeneralSettings } from '@/lib/types'
@@ -27,6 +29,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const [suggestedSlug, setSuggestedSlug] = useState('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const formInitialized = useRef(false)
@@ -37,6 +40,14 @@ export default function SettingsPage() {
       formInitialized.current = true
     }
   }, [settings, settingsLoading])
+
+  useEffect(() => {
+    if (form.businessName && !form.slug) {
+      setSuggestedSlug(generateSlug(form.businessName))
+    } else {
+      setSuggestedSlug('')
+    }
+  }, [form.businessName, form.slug])
 
   async function uploadToImgBB(file: File): Promise<string | null> {
     if (!IMGBB_API_KEY) {
@@ -97,11 +108,28 @@ export default function SettingsPage() {
     }
   }
 
+  function handleSlugChange(value: string) {
+    const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '')
+    setForm((current) => ({ ...current, slug: normalized }))
+  }
+
+  function applySuggestedSlug() {
+    if (suggestedSlug) {
+      setForm((current) => ({ ...current, slug: suggestedSlug }))
+    }
+  }
+
   async function handleSave() {
     const trimmedPrimary = form.primaryColor.trim()
+    const trimmedSlug = form.slug.trim().toLowerCase()
 
     if (trimmedPrimary && !isValidRestaurantThemeColor(trimmedPrimary)) {
       setMessage({ tone: 'error', text: 'Ana renk geçerli bir hex renk olmalı. Örnek: #3d2b1f' })
+      return
+    }
+
+    if (trimmedSlug && !isValidSlug(trimmedSlug)) {
+      setMessage({ tone: 'error', text: 'Slug sadece küçük harf ve rakam içermeli (2-30 karakter).' })
       return
     }
 
@@ -113,12 +141,25 @@ export default function SettingsPage() {
         doc(db, 'restaurants', restaurantId, 'settings', 'general'),
         {
           businessName: form.businessName.trim(),
+          slug: trimmedSlug,
           logoUrl: form.logoUrl.trim(),
           primaryColor: trimmedPrimary || DEFAULT_PRIMARY_COLOR,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       )
+
+      if (trimmedSlug) {
+        await setDoc(
+          doc(db, 'restaurants', restaurantId),
+          {
+            name: form.businessName.trim(),
+            slug: trimmedSlug,
+          },
+          { merge: true }
+        )
+      }
+
       setMessage({ tone: 'success', text: 'Ayarlar kaydedildi.' })
     } catch (error) {
       console.error('Settings save error:', error)
@@ -131,6 +172,7 @@ export default function SettingsPage() {
   const previewColor = form.primaryColor || DEFAULT_PRIMARY_COLOR
   const previewTextColor = getContrastColor(previewColor)
   const previewBusinessName = form.businessName.trim() || DEFAULT_BUSINESS_NAME
+  const menuLink = form.slug ? `/menu/${form.slug}/1` : `/menu/${restaurantId}/1`
 
   const inputCls =
     'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#3d2b1f] focus:ring-1 focus:ring-[#3d2b1f]'
@@ -176,8 +218,38 @@ export default function SettingsPage() {
                 className={inputCls}
                 value={form.businessName}
                 onChange={(event) => setForm((current) => ({ ...current, businessName: event.target.value }))}
-                placeholder={`Varsayılan: ${DEFAULT_BUSINESS_NAME}`}
+                placeholder="Örnek: Mrs.Simone"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
+                Kısa Link (Slug)
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">/menu/</span>
+                  <input
+                    className={`${inputCls} pl-14`}
+                    value={form.slug}
+                    onChange={(event) => handleSlugChange(event.target.value)}
+                    placeholder="mrssimone"
+                  />
+                </div>
+                {suggestedSlug && !form.slug && (
+                  <button
+                    type="button"
+                    onClick={applySuggestedSlug}
+                    className="px-3 py-2.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 whitespace-nowrap"
+                    style={{ color: '#3d2b1f' }}
+                  >
+                    {suggestedSlug}
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                QR menü linkiniz: <span className="font-mono">{menuLink}</span>
+              </p>
             </div>
 
             <div>
@@ -294,15 +366,21 @@ export default function SettingsPage() {
                 )}
                 <div>
                   <p className="font-bold text-lg" style={{ color: previewTextColor }}>
-                    {previewBusinessName}
+                    {previewBusinessName} Admin
                   </p>
-                  <p className="text-sm" style={{ color: `${previewTextColor}80` }}>Admin Panel</p>
+                  <p className="text-sm" style={{ color: `${previewTextColor}80` }}>Yönetim Paneli</p>
                 </div>
               </div>
             </div>
 
             <div className="p-5 bg-[#faf7f4]">
-              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">Butonlar</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">QR Menü Linki</p>
+              <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-gray-100">
+                <LinkIcon size={14} className="text-gray-400" />
+                <code className="text-xs text-gray-600 flex-1 truncate">{menuLink}</code>
+              </div>
+
+              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3 mt-5">Butonlar</p>
               <div className="flex gap-3 flex-wrap">
                 <button
                   className="rounded-xl px-4 py-2.5 text-sm font-semibold"
@@ -316,19 +394,6 @@ export default function SettingsPage() {
                 >
                   Outline Buton
                 </button>
-              </div>
-
-              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3 mt-5">Navigasyon</p>
-              <div className="flex gap-2">
-                <span
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                  style={{ background: `${previewColor}20`, color: previewColor }}
-                >
-                  Aktif Sayfa
-                </span>
-                <span className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500">
-                  Pasif Sayfa
-                </span>
               </div>
             </div>
           </div>

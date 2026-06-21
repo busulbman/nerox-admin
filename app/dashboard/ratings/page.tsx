@@ -446,7 +446,7 @@ function RatingCard({
               Masa {rating.tableNumber > 0 ? rating.tableNumber : rating.tableId}
             </p>
             <p className="text-sm text-gray-500 mt-0.5">
-              {rating.waiterName ?? 'Garson bilgisi yok'}
+              {rating.waiterName || 'İşletme'}
             </p>
           </div>
         </div>

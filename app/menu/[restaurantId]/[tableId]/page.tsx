@@ -23,6 +23,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { getSessionOpenCallsQuery, getSessionPaymentCallsQuery } from '@/lib/firestore-queries'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
+import { resolveRestaurantBySlugOrId } from '@/lib/restaurant-resolver'
 import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
 import {
   DEFAULT_MENU_PRIMARY_COLOR,
@@ -278,8 +279,12 @@ async function fetchSessionActivity(restaurantId: string, tableDocId: string, se
 
 export default function MenuPage() {
   const params = useParams<{ restaurantId: string; tableId: string }>()
-  const { restaurantId, tableId } = params
+  const { restaurantId: slugOrId, tableId } = params
   useAuth()
+
+  const [resolvedRestaurantId, setResolvedRestaurantId] = useState<string | null>(null)
+  const [restaurantNotFound, setRestaurantNotFound] = useState(false)
+
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
@@ -287,6 +292,8 @@ export default function MenuPage() {
   const [menuPrimaryColorOverride, setMenuPrimaryColorOverride] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
+
+  const restaurantId = resolvedRestaurantId || slugOrId
 
   const [tableDocId, setTableDocId] = useState<string | null>(null)
   const [table, setTable] = useState<Table | null>(null)
@@ -334,13 +341,38 @@ export default function MenuPage() {
   })
 
   useEffect(() => {
+    let cancelled = false
+
+    async function resolveRestaurant() {
+      const resolved = await resolveRestaurantBySlugOrId(slugOrId)
+      if (cancelled) return
+
+      if (resolved) {
+        setResolvedRestaurantId(resolved.id)
+        setRestaurantNotFound(false)
+      } else {
+        setRestaurantNotFound(true)
+        setLoading(false)
+      }
+    }
+
+    void resolveRestaurant()
+
+    return () => {
+      cancelled = true
+    }
+  }, [slugOrId])
+
+  useEffect(() => {
+    if (!resolvedRestaurantId) return
+
     async function loadMenu() {
-      logFirestoreRead('menu/products + categories + settings', restaurantId)
+      logFirestoreRead('menu/products + categories + settings', resolvedRestaurantId)
       const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'restaurants', restaurantId, 'categories'), orderBy('order', 'asc'))),
-        getDocs(collection(db, 'restaurants', restaurantId, 'products')),
-        getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'menu')),
-        getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'general')),
+        getDocs(query(collection(db, 'restaurants', resolvedRestaurantId, 'categories'), orderBy('order', 'asc'))),
+        getDocs(collection(db, 'restaurants', resolvedRestaurantId, 'products')),
+        getDoc(doc(db, 'restaurants', resolvedRestaurantId, 'settings', 'menu')),
+        getDoc(doc(db, 'restaurants', resolvedRestaurantId, 'settings', 'general')),
       ])
 
       const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
@@ -363,7 +395,7 @@ export default function MenuPage() {
     }
 
     void loadMenu()
-  }, [restaurantId])
+  }, [resolvedRestaurantId])
 
   useEffect(() => {
     let cancelled = false
@@ -1013,7 +1045,11 @@ export default function MenuPage() {
         return
       }
 
-      const ratingStatus = liveCall.waiterId && liveCall.waiterName ? 'approved' : 'suspicious'
+      const hasCompleter = !!(liveCall.waiterId || liveCall.completedById)
+      const ratingStatus = hasCompleter ? 'approved' : 'suspicious'
+
+      const effectiveWaiterId = liveCall.waiterId ?? liveCall.completedById ?? null
+      const effectiveWaiterName = liveCall.waiterName ?? liveCall.completedByName ?? 'İşletme'
 
       logFirestoreWrite('menu/submit rating', { restaurantId, callId: liveCall.id })
       await setDoc(ratingRef, {
@@ -1022,8 +1058,8 @@ export default function MenuPage() {
         tableNumber: table?.number ?? liveCall.tableNumber,
         sessionId,
         callId: liveCall.id,
-        waiterId: liveCall.waiterId ?? null,
-        waiterName: liveCall.waiterName ?? null,
+        waiterId: effectiveWaiterId,
+        waiterName: effectiveWaiterName,
         serviceRating: ratingForm.serviceRating,
         waiterRating: ratingForm.waiterRating,
         comment: ratingForm.comment.trim(),
@@ -1124,6 +1160,18 @@ export default function MenuPage() {
     sending ||
     !!derivedAccessMessage ||
     !!selectedTipLockMessage
+
+  if (restaurantNotFound) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#fafafa]">
+        <div className="text-center text-[#3d2b1f] px-6">
+          <div className="text-4xl mb-3">🔍</div>
+          <p className="font-semibold text-lg mb-2">İşletme Bulunamadı</p>
+          <p className="text-sm text-gray-500">Bu link geçersiz veya işletme mevcut değil.</p>
+        </div>
+      </div>
+    )
+  }
 
   if (loading) {
     return (

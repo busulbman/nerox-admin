@@ -37,9 +37,16 @@ export interface MenuThemeSettings {
 
 export interface RestaurantGeneralSettings {
   businessName: string
+  slug: string
   logoUrl: string
   primaryColor: string
   updatedAt?: number | null
+}
+
+export interface Restaurant {
+  id: string
+  name: string
+  slug: string
 }
 
 export interface CartItem {

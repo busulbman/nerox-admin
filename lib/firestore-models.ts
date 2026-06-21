@@ -113,6 +113,10 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
           : 'completed'
       : undefined
 
+  const completedByRole = data.completedByRole === 'admin' || data.completedByRole === 'waiter'
+    ? data.completedByRole
+    : undefined
+
   return {
     id,
     tableId,
@@ -130,6 +134,9 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
     status: lifecycleStatus,
     waiterId: typeof data.waiterId === 'string' ? data.waiterId : undefined,
     waiterName: typeof data.waiterName === 'string' ? data.waiterName : undefined,
+    completedById: typeof data.completedById === 'string' ? data.completedById : undefined,
+    completedByName: typeof data.completedByName === 'string' ? data.completedByName : undefined,
+    completedByRole,
     customerName: typeof data.customerName === 'string' ? data.customerName : undefined,
     note: typeof data.note === 'string' ? data.note : undefined,
     createdAt: toMillis(data.createdAt) ?? 0,

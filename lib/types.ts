@@ -66,6 +66,9 @@ export interface WaiterCall {
   status?: 'open' | 'accepted' | 'completed'
   waiterId?: string
   waiterName?: string
+  completedById?: string
+  completedByName?: string
+  completedByRole?: 'admin' | 'waiter'
   customerName?: string
   note?: string
   createdAt: number

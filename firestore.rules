@@ -243,9 +243,8 @@ service cloud.firestore {
         // Staff can do any write
         allow write: if isAdmin(rid);
 
-        // Customer: create rating after payment
-        allow create: if !signedIn()
-          && request.resource.data.serviceRating is int
+        // Public rating create (QR menu customers, signed-in or not)
+        allow create: if request.resource.data.serviceRating is int
           && request.resource.data.serviceRating >= 1
           && request.resource.data.serviceRating <= 5
           && request.resource.data.waiterRating is int

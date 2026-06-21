@@ -9,6 +9,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -17,6 +18,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
+import { ShoppingBag } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { getSessionOpenCallsQuery, getSessionPaymentCallsQuery } from '@/lib/firestore-queries'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -63,7 +65,6 @@ const CLEANING_MESSAGE = 'Bu masa şu anda hazırlanıyor. Lütfen garsondan yar
 const ACTIVE_HELP_REQUEST_MESSAGE = 'Zaten aktif yardım talebiniz var. Garsonunuz geliyor, lütfen bekleyin.'
 const ACTIVE_PAYMENT_REQUEST_MESSAGE = 'Hesap talebiniz zaten iletildi. Lütfen garsonunuzu bekleyin.'
 const SESSION_CLOSED_MESSAGE = 'Bu masa oturumu kapatıldı. Lütfen garsondan yardım isteyin.'
-const STAFF_RATING_MESSAGE = 'Personel hesabı ile müşteri puanlaması gönderilemez.'
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
 
 function createSessionId(): string {
@@ -278,7 +279,7 @@ async function fetchSessionActivity(restaurantId: string, tableDocId: string, se
 export default function MenuPage() {
   const params = useParams<{ restaurantId: string; tableId: string }>()
   const { restaurantId, tableId } = params
-  const { user, profile, loading: authLoading } = useAuth()
+  useAuth()
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
@@ -299,7 +300,6 @@ export default function MenuPage() {
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [detailQuantity, setDetailQuantity] = useState(1)
-  const [favoriteIds, setFavoriteIds] = useState<Record<string, boolean>>({})
 
   // Cart & Customer name
   const [cart, setCart] = useState<CartItem[]>([])
@@ -598,6 +598,27 @@ export default function MenuPage() {
     }
   }, [restaurantId, sessionId, tableDocId])
 
+  // Real-time listener for payment calls to auto-open rating modal
+  useEffect(() => {
+    if (!sessionId) return
+
+    const paymentCallsQuery = query(
+      collection(db, 'restaurants', restaurantId, 'calls'),
+      where('sessionId', '==', sessionId),
+      where('tip', '==', 'hesap')
+    )
+
+    const unsubscribe = onSnapshot(paymentCallsQuery, (snapshot) => {
+      const calls = snapshot.docs
+        .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
+        .sort((a, b) => b.createdAt - a.createdAt)
+
+      setPaymentCalls(calls)
+    })
+
+    return () => unsubscribe()
+  }, [restaurantId, sessionId])
+
   const completedPaymentCall =
     paymentCalls.find((call) => call.tip === 'hesap' && call.durum === 'tamamlandı' && call.sessionId === sessionId) ?? null
 
@@ -672,10 +693,6 @@ export default function MenuPage() {
   function openProduct(product: Product) {
     setSelectedProduct(product)
     setDetailQuantity(1)
-  }
-
-  function toggleFavorite(productId: string) {
-    setFavoriteIds((current) => ({ ...current, [productId]: !current[productId] }))
   }
 
   function adjustDetailQuantity(direction: 'inc' | 'dec') {
@@ -965,11 +982,6 @@ export default function MenuPage() {
       return
     }
 
-    if (profile?.role === 'admin' || profile?.role === 'waiter') {
-      setRatingMessage(STAFF_RATING_MESSAGE)
-      return
-    }
-
     setRatingSending(true)
     setRatingMessage(null)
 
@@ -1077,15 +1089,12 @@ export default function MenuPage() {
     (table.status === 'aktif' || table.status === 'çağrı var' || table.status === 'hesap istendi') &&
     !sessionMatchesTable
   const isSessionClosed = !!table && table.status === 'boş' && !!sessionId && table.sessionId !== sessionId
-  const isStaffUser = profile?.role === 'admin' || profile?.role === 'waiter'
   const ratingSubmitDisabled =
     ratingSending ||
     ratingSubmitted ||
     !activeRatingCall ||
     !ratingForm.serviceRating ||
-    !ratingForm.waiterRating ||
-    isStaffUser ||
-    (authLoading && !!user)
+    !ratingForm.waiterRating
 
   const derivedAccessMessage =
     accessMessage ??
@@ -1171,7 +1180,7 @@ export default function MenuPage() {
                   className="h-10 w-10 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] flex items-center justify-center text-[#3d2b1f]"
                   aria-label="Sepet"
                 >
-                  <span className="text-lg">👜</span>
+                  <ShoppingBag size={20} />
                 </button>
                 {cartCount > 0 && (
                   <span
@@ -1188,8 +1197,8 @@ export default function MenuPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-[#888888]">Masa {displayTableLabel} • Hoş geldiniz</p>
-                  <p className="text-[13px] mt-1 text-[#3d2b1f]/80">
-                    {customerName ? `👋 ${customerName}` : 'Günün favorilerini keşfedin'}
+                  <p className="text-[14px] mt-1 font-semibold" style={{ color: '#3d2b1f' }}>
+                    {customerName ? customerName.toUpperCase() : 'Günün favorilerini keşfedin'}
                   </p>
                 </div>
                 {customerName && (
@@ -1249,7 +1258,6 @@ export default function MenuPage() {
               {visibleProducts.map((product, index) => {
                 const categoryName = categoryNames[product.categoryId] ?? ''
                 const meta = getProductMeta(product, categoryName)
-                const isFavorite = !!favoriteIds[product.id]
 
                 return (
                   <div
@@ -1265,30 +1273,14 @@ export default function MenuPage() {
                     }}
                     className="text-left rounded-[24px] bg-white overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.08)] active:scale-[0.98] transition-transform cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#d4a017]/40"
                   >
-                    <div className="relative">
-                      <MenuProductImage
-                        key={`${product.id}:${meta.imageUrl || 'placeholder'}`}
-                        alt={product.name}
-                        imageUrl={meta.imageUrl}
-                        fallbackEmoji={meta.fallbackEmoji}
-                        heightClass="h-[140px]"
-                        priority={index === 0}
-                      />
-
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          toggleFavorite(product.id)
-                        }}
-                        className="absolute top-3 right-3 h-9 w-9 rounded-full bg-white/85 backdrop-blur-sm flex items-center justify-center shadow-[0_4px_12px_rgba(0,0,0,0.12)]"
-                        aria-label="Favori"
-                      >
-                        <span className={`text-lg ${isFavorite ? 'text-rose-500' : 'text-[#3d2b1f]'}`}>
-                          {isFavorite ? '♥' : '♡'}
-                        </span>
-                      </button>
-                    </div>
+                    <MenuProductImage
+                      key={`${product.id}:${meta.imageUrl || 'placeholder'}`}
+                      alt={product.name}
+                      imageUrl={meta.imageUrl}
+                      fallbackEmoji={meta.fallbackEmoji}
+                      heightClass="h-[140px]"
+                      priority={index === 0}
+                    />
 
                     <div className="px-3.5 pb-3.5 pt-3">
                       <p className="text-[14px] font-bold leading-tight text-[#1a1a1a]">{product.name}</p>
@@ -1717,7 +1709,7 @@ export default function MenuPage() {
 
                   {cart.length === 0 ? (
                     <div className="py-12 text-center">
-                      <p className="text-4xl mb-3">👜</p>
+                      <ShoppingBag size={48} className="mx-auto mb-3 text-gray-300" />
                       <p className="text-sm text-[#888888]">Sepetiniz boş</p>
                     </div>
                   ) : (
@@ -1876,9 +1868,9 @@ export default function MenuPage() {
                     </div>
                   </div>
 
-                  {(ratingMessage || isStaffUser) && (
+                  {ratingMessage && (
                     <p className="text-sm mt-4" style={{ color: '#c2410c' }}>
-                      {ratingMessage ?? STAFF_RATING_MESSAGE}
+                      {ratingMessage}
                     </p>
                   )}
 

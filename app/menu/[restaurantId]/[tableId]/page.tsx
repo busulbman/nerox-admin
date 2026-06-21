@@ -26,6 +26,7 @@ import {
   DEFAULT_MENU_PRIMARY_COLOR,
   EMPTY_MENU_THEME_SETTINGS,
   getMenuPrimaryTextColor,
+  isValidMenuPrimaryColor,
   normalizeMenuThemeSettings,
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
@@ -282,6 +283,7 @@ export default function MenuPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
   const [generalSettings, setGeneralSettings] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
+  const [menuPrimaryColorOverride, setMenuPrimaryColorOverride] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
@@ -348,6 +350,14 @@ export default function MenuPage() {
       setProducts(nextProducts)
       setMenuSettings(menuSettingsSnap.exists() ? normalizeMenuThemeSettings(menuSettingsSnap.data()) : { ...EMPTY_MENU_THEME_SETTINGS })
       setGeneralSettings(generalSettingsSnap.exists() ? normalizeRestaurantGeneralSettings(generalSettingsSnap.data()) : { ...EMPTY_RESTAURANT_GENERAL_SETTINGS })
+
+      if (menuSettingsSnap.exists()) {
+        const menuData = menuSettingsSnap.data()
+        if (typeof menuData.menuPrimaryColor === 'string' && isValidMenuPrimaryColor(menuData.menuPrimaryColor)) {
+          setMenuPrimaryColorOverride(menuData.menuPrimaryColor)
+        }
+      }
+
       setActiveCat(nextCategories[0]?.id ?? null)
       setLoading(false)
     }
@@ -1042,9 +1052,11 @@ export default function MenuPage() {
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
     ? generalSettings.logoUrl
     : menuSettings.logoUrl
-  const menuPrimaryColor = hasGeneralSettings && generalSettings.primaryColor
-    ? generalSettings.primaryColor
-    : (menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR)
+  const menuPrimaryColor = menuPrimaryColorOverride
+    ? menuPrimaryColorOverride
+    : hasGeneralSettings && generalSettings.primaryColor
+      ? generalSettings.primaryColor
+      : (menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR)
   const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)

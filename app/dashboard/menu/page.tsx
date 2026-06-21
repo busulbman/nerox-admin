@@ -1,17 +1,21 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, updateDoc, writeBatch } from 'firebase/firestore'
-import { db, rc, rd } from '@/lib/firebase'
+import { addDoc, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import { Upload, Trash2, Image as ImageIcon, FileUp, Settings, Pencil, Trash, Check, Square } from 'lucide-react'
+import { db, rc, rd, RESTAURANT_ID } from '@/lib/firebase'
+import { useAuth } from '@/components/AuthProvider'
+import { DEFAULT_MENU_PRIMARY_COLOR, isValidMenuPrimaryColor, getMenuPrimaryTextColor } from '@/lib/menu-theme'
 import type { Category, Product } from '@/lib/types'
 
-type ProdForm = { name: string; description: string; price: string; categoryId: string; available: boolean }
+type ProdForm = { name: string; description: string; price: string; categoryId: string; available: boolean; image: string }
 type ParsedItem = {
   category: string
   name: string
   description: string
   price: number
+  imageUrl: string
   valid: boolean
   error?: string
 }
@@ -21,10 +25,22 @@ type ImportResult = {
   productsUpdated: number
 }
 
-const EMPTY_PROD: ProdForm = { name: '', description: '', price: '', categoryId: '', available: true }
+const EMPTY_PROD: ProdForm = { name: '', description: '', price: '', categoryId: '', available: true, image: '' }
 
 const BROWN = '#3d2b1f'
 const GOLD = '#d4a017'
+
+const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
+
+function isValidImageUrl(url: string): boolean {
+  if (!url.trim()) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
 function parseMenuInput(input: string): { items: ParsedItem[]; errors: string[] } {
   const lines = input.trim().split('\n').filter((line) => line.trim())
@@ -39,38 +55,84 @@ function parseMenuInput(input: string): { items: ParsedItem[]; errors: string[] 
 
     if (parts.length < 4) {
       errors.push(`Satır ${i + 1}: Eksik alan (en az 4 alan gerekli: Kategori | Ürün | Açıklama | Fiyat)`)
-      items.push({ category: '', name: '', description: '', price: 0, valid: false, error: 'Eksik alan' })
+      items.push({ category: '', name: '', description: '', price: 0, imageUrl: '', valid: false, error: 'Eksik alan' })
       continue
     }
 
-    const [category, name, description, priceStr] = parts
+    const [category, name, description, priceStr, imageUrl = ''] = parts
     const price = parseFloat(priceStr.replace(',', '.').replace(/[^\d.]/g, ''))
 
     if (!category) {
       errors.push(`Satır ${i + 1}: Kategori boş olamaz`)
-      items.push({ category, name, description, price: 0, valid: false, error: 'Kategori boş' })
+      items.push({ category, name, description, price: 0, imageUrl: '', valid: false, error: 'Kategori boş' })
       continue
     }
 
     if (!name) {
       errors.push(`Satır ${i + 1}: Ürün adı boş olamaz`)
-      items.push({ category, name, description, price: 0, valid: false, error: 'Ürün adı boş' })
+      items.push({ category, name, description, price: 0, imageUrl: '', valid: false, error: 'Ürün adı boş' })
       continue
     }
 
     if (Number.isNaN(price) || price < 0) {
       errors.push(`Satır ${i + 1}: Geçersiz fiyat "${priceStr}"`)
-      items.push({ category, name, description, price: 0, valid: false, error: 'Geçersiz fiyat' })
+      items.push({ category, name, description, price: 0, imageUrl: '', valid: false, error: 'Geçersiz fiyat' })
       continue
     }
 
-    items.push({ category, name, description: description || '', price, valid: true })
+    const cleanImageUrl = imageUrl.trim()
+    if (cleanImageUrl && !isValidImageUrl(cleanImageUrl)) {
+      errors.push(`Satır ${i + 1}: Geçersiz görsel URL "${cleanImageUrl}" - URL atlanacak`)
+    }
+
+    items.push({
+      category,
+      name,
+      description: description || '',
+      price,
+      imageUrl: isValidImageUrl(cleanImageUrl) ? cleanImageUrl : '',
+      valid: true,
+    })
   }
 
   return { items, errors }
 }
 
+async function uploadToImgBB(file: File): Promise<{ success: true; url: string } | { success: false; error: string }> {
+  if (!IMGBB_API_KEY) {
+    return { success: false, error: 'ImgBB API anahtarı ayarlanmamış.' }
+  }
+
+  const formData = new FormData()
+  formData.append('image', file)
+
+  try {
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      return { success: false, error: 'Görsel yüklenemedi. Lütfen tekrar deneyin.' }
+    }
+
+    const data = await response.json()
+    const url = data.data?.url
+    if (!url) {
+      return { success: false, error: 'Görsel yüklenemedi. Yanıt geçersiz.' }
+    }
+
+    return { success: true, url }
+  } catch (error) {
+    console.error('ImgBB upload error:', error)
+    return { success: false, error: 'Görsel yüklenirken bir hata oluştu.' }
+  }
+}
+
 export default function MenuPage() {
+  const { profile } = useAuth()
+  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null)
@@ -80,6 +142,9 @@ export default function MenuPage() {
 
   const [prodModal, setProdModal] = useState<{ open: boolean; editing?: Product }>({ open: false })
   const [prodForm, setProdForm] = useState<ProdForm>(EMPTY_PROD)
+  const [prodImageUploading, setProdImageUploading] = useState(false)
+  const [prodImageError, setProdImageError] = useState('')
+  const prodFileInputRef = useRef<HTMLInputElement>(null)
 
   const [bulkModal, setBulkModal] = useState(false)
   const [bulkInput, setBulkInput] = useState('')
@@ -87,6 +152,11 @@ export default function MenuPage() {
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
   const [bulkStep, setBulkStep] = useState<'input' | 'preview' | 'importing' | 'done'>('input')
   const [bulkResult, setBulkResult] = useState<ImportResult | null>(null)
+
+  const [menuColor, setMenuColor] = useState(DEFAULT_MENU_PRIMARY_COLOR)
+  const [menuColorSaving, setMenuColorSaving] = useState(false)
+  const [menuColorMessage, setMenuColorMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const menuColorInitialized = useRef(false)
 
   useEffect(() => {
     const unsubCats = onSnapshot(
@@ -107,6 +177,27 @@ export default function MenuPage() {
     }
   }, [])
 
+  useEffect(() => {
+    if (menuColorInitialized.current) return
+
+    async function loadMenuSettings() {
+      try {
+        const snap = await getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'menu'))
+        if (snap.exists()) {
+          const data = snap.data()
+          if (typeof data.menuPrimaryColor === 'string' && isValidMenuPrimaryColor(data.menuPrimaryColor)) {
+            setMenuColor(data.menuPrimaryColor)
+          }
+        }
+        menuColorInitialized.current = true
+      } catch (error) {
+        console.error('Menu settings load error:', error)
+      }
+    }
+
+    void loadMenuSettings()
+  }, [restaurantId])
+
   async function saveCat() {
     if (!catName.trim()) return
     if (catModal.editing) {
@@ -124,6 +215,37 @@ export default function MenuPage() {
     setSelectedCatId((prev) => (prev === catId ? (categories.find((category) => category.id !== catId)?.id ?? null) : prev))
   }
 
+  async function handleProdImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setProdImageError('Lütfen bir görsel dosyası seçin.')
+      return
+    }
+
+    if (file.size > 32 * 1024 * 1024) {
+      setProdImageError('Dosya boyutu 32MB\'dan küçük olmalı.')
+      return
+    }
+
+    setProdImageUploading(true)
+    setProdImageError('')
+
+    const result = await uploadToImgBB(file)
+
+    if (result.success) {
+      setProdForm((current) => ({ ...current, image: result.url }))
+    } else {
+      setProdImageError(result.error)
+    }
+
+    setProdImageUploading(false)
+    if (prodFileInputRef.current) {
+      prodFileInputRef.current.value = ''
+    }
+  }
+
   async function saveProd() {
     if (!prodForm.name.trim() || !prodForm.categoryId) return
     const data = {
@@ -132,6 +254,7 @@ export default function MenuPage() {
       price: parseFloat(prodForm.price) || 0,
       categoryId: prodForm.categoryId,
       available: prodForm.available,
+      image: prodForm.image.trim(),
     }
     if (prodModal.editing) {
       await updateDoc(rd('products', prodModal.editing.id), data)
@@ -139,6 +262,7 @@ export default function MenuPage() {
       await addDoc(rc('products'), data)
     }
     setProdModal({ open: false })
+    setProdImageError('')
   }
 
   async function deleteProd(prodId: string) {
@@ -203,6 +327,7 @@ export default function MenuPage() {
           description: item.description,
           price: item.price,
           available: true,
+          ...(item.imageUrl ? { image: item.imageUrl } : {}),
         })
         productsUpdated++
       } else {
@@ -213,7 +338,7 @@ export default function MenuPage() {
           price: item.price,
           categoryId,
           available: true,
-          image: '',
+          image: item.imageUrl || '',
         })
         productsCreated++
       }
@@ -234,11 +359,36 @@ export default function MenuPage() {
     setBulkResult(null)
   }
 
+  async function saveMenuColor() {
+    if (!isValidMenuPrimaryColor(menuColor)) {
+      setMenuColorMessage({ tone: 'error', text: 'Geçerli bir hex renk girin. Örnek: #d4a017' })
+      return
+    }
+
+    setMenuColorSaving(true)
+    setMenuColorMessage(null)
+
+    try {
+      await setDoc(
+        doc(db, 'restaurants', restaurantId, 'settings', 'menu'),
+        { menuPrimaryColor: menuColor, updatedAt: serverTimestamp() },
+        { merge: true }
+      )
+      setMenuColorMessage({ tone: 'success', text: 'Menü rengi kaydedildi.' })
+    } catch (error) {
+      console.error('Menu color save error:', error)
+      setMenuColorMessage({ tone: 'error', text: 'Renk kaydedilemedi. Lütfen tekrar deneyin.' })
+    } finally {
+      setMenuColorSaving(false)
+    }
+  }
+
   const visibleProducts = products.filter((product) => product.categoryId === selectedCatId)
   const selectedCat = categories.find((category) => category.id === selectedCatId)
   const inputCls = 'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
   const validItemsCount = bulkParsed.filter((i) => i.valid).length
   const invalidItemsCount = bulkParsed.filter((i) => !i.valid).length
+  const menuColorPreviewTextColor = getMenuPrimaryTextColor(menuColor)
 
   return (
     <div className="p-8">
@@ -254,15 +404,61 @@ export default function MenuPage() {
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
             style={{ background: GOLD, color: BROWN }}
           >
-            📋 Toplu Ürün Ekle
+            <FileUp size={16} />
+            Toplu Ürün Ekle
           </button>
           <Link
             href="/dashboard/settings"
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold border border-gray-200 hover:bg-gray-50 transition-colors"
             style={{ color: BROWN }}
           >
-            ⚙️ Genel Ayarlar
+            <Settings size={16} />
+            Genel Ayarlar
           </Link>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-6 shadow-[0_8px_24px_rgba(0,0,0,0.04)]">
+        <h2 className="font-semibold text-sm mb-3" style={{ color: BROWN }}>QR Menü Rengi</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          QR menüdeki butonlar, kategori sekmeleri ve vurgu renkleri için ayrı bir renk belirleyin.
+          Belirlenmezse genel ayarlardaki ana renk kullanılır.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={menuColor}
+              onChange={(e) => setMenuColor(e.target.value)}
+              className="h-10 w-12 rounded-lg border border-gray-200 bg-white p-1 cursor-pointer"
+            />
+            <input
+              className="w-28 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#d4a017]"
+              value={menuColor}
+              onChange={(e) => setMenuColor(e.target.value)}
+              placeholder="#d4a017"
+            />
+          </div>
+          <button
+            onClick={() => void saveMenuColor()}
+            disabled={menuColorSaving}
+            className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+            style={{ background: menuColor, color: menuColorPreviewTextColor }}
+          >
+            {menuColorSaving ? 'Kaydediliyor...' : 'Kaydet'}
+          </button>
+          {menuColorMessage && (
+            <span
+              className="text-xs px-3 py-1.5 rounded-full"
+              style={
+                menuColorMessage.tone === 'success'
+                  ? { background: '#dcfce7', color: '#15803d' }
+                  : { background: '#fee2e2', color: '#b91c1c' }
+              }
+            >
+              {menuColorMessage.text}
+            </span>
+          )}
         </div>
       </div>
 
@@ -299,18 +495,18 @@ export default function MenuPage() {
                           setCatName(category.name)
                           setCatModal({ open: true, editing: category })
                         }}
-                        className="px-1"
+                        className="p-1 hover:bg-white/20 rounded"
                       >
-                        ✏️
+                        <Pencil size={12} />
                       </button>
                       <button
                         onClick={(event) => {
                           event.stopPropagation()
                           void deleteCat(category.id)
                         }}
-                        className="px-1"
+                        className="p-1 hover:bg-white/20 rounded"
                       >
-                        🗑️
+                        <Trash size={12} />
                       </button>
                     </span>
                   </div>
@@ -331,6 +527,7 @@ export default function MenuPage() {
               <button
                 onClick={() => {
                   setProdForm({ ...EMPTY_PROD, categoryId: selectedCatId })
+                  setProdImageError('')
                   setProdModal({ open: true })
                 }}
                 className="text-sm font-semibold px-4 py-2 rounded-lg"
@@ -353,6 +550,23 @@ export default function MenuPage() {
                   className="bg-white rounded-xl border p-4 flex items-center gap-4"
                   style={{ borderColor: '#f0ede9', opacity: product.available ? 1 : 0.6 }}
                 >
+                  <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+                    {product.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={product.image}
+                        alt={product.name}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement
+                          target.style.display = 'none'
+                          target.parentElement!.innerHTML = '<span class="text-2xl">🍽️</span>'
+                        }}
+                      />
+                    ) : (
+                      <span className="text-2xl">🍽️</span>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="font-medium text-sm" style={{ color: BROWN }}>{product.name}</span>
@@ -362,7 +576,13 @@ export default function MenuPage() {
                   </div>
                   <div className="shrink-0 font-semibold text-sm" style={{ color: BROWN }}>₺{product.price}</div>
                   <div className="flex items-center gap-0.5 shrink-0">
-                    <button onClick={() => void toggleAvailable(product)} className="p-1.5 rounded hover:bg-gray-50 text-sm">{product.available ? '✅' : '⬜'}</button>
+                    <button
+                      onClick={() => void toggleAvailable(product)}
+                      className="p-1.5 rounded hover:bg-gray-50"
+                      style={{ color: product.available ? '#22c55e' : '#9ca3af' }}
+                    >
+                      {product.available ? <Check size={16} /> : <Square size={16} />}
+                    </button>
                     <button
                       onClick={() => {
                         setProdForm({
@@ -371,14 +591,22 @@ export default function MenuPage() {
                           price: String(product.price),
                           categoryId: product.categoryId,
                           available: product.available,
+                          image: product.image || '',
                         })
+                        setProdImageError('')
                         setProdModal({ open: true, editing: product })
                       }}
-                      className="p-1.5 rounded hover:bg-gray-50 text-sm"
+                      className="p-1.5 rounded hover:bg-gray-50"
+                      style={{ color: BROWN }}
                     >
-                      ✏️
+                      <Pencil size={16} />
                     </button>
-                    <button onClick={() => void deleteProd(product.id)} className="p-1.5 rounded hover:bg-red-50 text-sm">🗑️</button>
+                    <button
+                      onClick={() => void deleteProd(product.id)}
+                      className="p-1.5 rounded hover:bg-red-50 text-red-500"
+                    >
+                      <Trash size={16} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -408,10 +636,72 @@ export default function MenuPage() {
       )}
 
       {prodModal.open && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="font-semibold mb-4" style={{ color: BROWN }}>{prodModal.editing ? 'Ürün Düzenle' : 'Yeni Ürün'}</h3>
             <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: BROWN }}>Ürün Görseli</label>
+                <div className="flex items-start gap-3">
+                  <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden border border-gray-200">
+                    {prodForm.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={prodForm.image}
+                        alt="Ürün önizleme"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement
+                          target.style.display = 'none'
+                          target.parentElement!.innerHTML = '<span class="text-3xl">🍽️</span>'
+                        }}
+                      />
+                    ) : (
+                      <ImageIcon size={28} className="text-gray-300" />
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      ref={prodFileInputRef}
+                      onChange={handleProdImageUpload}
+                      className="hidden"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => prodFileInputRef.current?.click()}
+                        disabled={prodImageUploading || !IMGBB_API_KEY}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+                        style={{ color: BROWN }}
+                      >
+                        <Upload size={14} />
+                        {prodImageUploading ? 'Yükleniyor...' : 'Dosya Seç'}
+                      </button>
+                      {prodForm.image && (
+                        <button
+                          type="button"
+                          onClick={() => setProdForm((current) => ({ ...current, image: '' }))}
+                          className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                    {!IMGBB_API_KEY && (
+                      <p className="text-xs text-amber-600">ImgBB API anahtarı ayarlanmamış. Manuel URL kullanın.</p>
+                    )}
+                    <input
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#d4a017]"
+                      value={prodForm.image}
+                      onChange={(e) => setProdForm((current) => ({ ...current, image: e.target.value }))}
+                      placeholder="veya URL girin: https://..."
+                    />
+                    {prodImageError && <p className="text-xs text-red-500">{prodImageError}</p>}
+                  </div>
+                </div>
+              </div>
               <input className={inputCls} value={prodForm.name} onChange={(event) => setProdForm((current) => ({ ...current, name: event.target.value }))} placeholder="Ürün adı *" />
               <textarea className={`${inputCls} resize-none h-20`} value={prodForm.description} onChange={(event) => setProdForm((current) => ({ ...current, description: event.target.value }))} placeholder="Açıklama" />
               <input type="number" className={inputCls} value={prodForm.price} onChange={(event) => setProdForm((current) => ({ ...current, price: event.target.value }))} placeholder="Fiyat (₺)" min="0" />
@@ -426,7 +716,7 @@ export default function MenuPage() {
             </div>
             <div className="flex gap-2 justify-end mt-5">
               <button onClick={() => setProdModal({ open: false })} className="px-4 py-2 text-sm text-gray-500">İptal</button>
-              <button onClick={() => void saveProd()} className="font-semibold px-5 py-2 rounded-lg text-sm" style={{ background: GOLD, color: BROWN }}>Kaydet</button>
+              <button onClick={() => void saveProd()} disabled={prodImageUploading} className="font-semibold px-5 py-2 rounded-lg text-sm disabled:opacity-50" style={{ background: GOLD, color: BROWN }}>Kaydet</button>
             </div>
           </div>
         </div>
@@ -446,14 +736,14 @@ export default function MenuPage() {
                   Menü verilerini aşağıdaki formatta yapıştırın. Her satır bir ürün olmalıdır.
                 </p>
                 <div className="bg-gray-50 rounded-lg p-3 mb-4 text-xs font-mono" style={{ color: BROWN }}>
-                  Kategori | Ürün Adı | Açıklama | Fiyat
+                  Kategori | Ürün Adı | Açıklama | Fiyat | Görsel URL (opsiyonel)
                 </div>
                 <textarea
                   className={`${inputCls} resize-none font-mono text-xs`}
                   rows={15}
                   value={bulkInput}
                   onChange={(e) => setBulkInput(e.target.value)}
-                  placeholder="KAHVALTI | Simone Kahvaltı | 2 kişilik. Yöresel mezelerimiz... | 1790"
+                  placeholder="KAHVALTI | Simone Kahvaltı | 2 kişilik. Yöresel mezelerimiz... | 1790 | https://i.ibb.co/xxx/image.jpg"
                 />
                 <div className="flex gap-2 justify-end mt-4">
                   <button onClick={closeBulkModal} className="px-4 py-2 text-sm text-gray-500">İptal</button>
@@ -473,24 +763,24 @@ export default function MenuPage() {
               <>
                 <div className="flex items-center gap-4 mb-4">
                   <span className="text-sm px-3 py-1 rounded-full bg-green-100 text-green-700">
-                    ✓ {validItemsCount} geçerli
+                    {validItemsCount} geçerli
                   </span>
                   {invalidItemsCount > 0 && (
                     <span className="text-sm px-3 py-1 rounded-full bg-red-100 text-red-700">
-                      ✗ {invalidItemsCount} hatalı
+                      {invalidItemsCount} hatalı
                     </span>
                   )}
                 </div>
 
                 {bulkErrors.length > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                    <p className="text-sm font-medium text-red-700 mb-2">Hatalar:</p>
+                    <p className="text-sm font-medium text-red-700 mb-2">Uyarılar:</p>
                     <ul className="text-xs text-red-600 space-y-1">
                       {bulkErrors.slice(0, 10).map((err, i) => (
                         <li key={i}>• {err}</li>
                       ))}
                       {bulkErrors.length > 10 && (
-                        <li>...ve {bulkErrors.length - 10} hata daha</li>
+                        <li>...ve {bulkErrors.length - 10} uyarı daha</li>
                       )}
                     </ul>
                   </div>
@@ -500,6 +790,7 @@ export default function MenuPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
+                        <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Görsel</th>
                         <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Kategori</th>
                         <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Ürün</th>
                         <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Açıklama</th>
@@ -510,13 +801,29 @@ export default function MenuPage() {
                     <tbody>
                       {bulkParsed.slice(0, 20).map((item, i) => (
                         <tr key={i} className={item.valid ? '' : 'bg-red-50'}>
+                          <td className="px-3 py-2 border-t">
+                            {item.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={item.imageUrl}
+                                alt=""
+                                className="w-8 h-8 rounded object-cover"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement
+                                  target.style.display = 'none'
+                                }}
+                              />
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 border-t">{item.category || '—'}</td>
                           <td className="px-3 py-2 border-t">{item.name || '—'}</td>
-                          <td className="px-3 py-2 border-t text-gray-500 truncate max-w-[200px]">{item.description || '—'}</td>
+                          <td className="px-3 py-2 border-t text-gray-500 truncate max-w-[150px]">{item.description || '—'}</td>
                           <td className="px-3 py-2 border-t text-right">{item.valid ? `₺${item.price}` : '—'}</td>
                           <td className="px-3 py-2 border-t text-center">
                             {item.valid ? (
-                              <span className="text-green-600">✓</span>
+                              <span className="text-green-600"><Check size={16} className="inline" /></span>
                             ) : (
                               <span className="text-red-600" title={item.error}>✗</span>
                             )}
@@ -548,19 +855,21 @@ export default function MenuPage() {
 
             {bulkStep === 'importing' && (
               <div className="py-12 text-center">
-                <div className="text-4xl mb-4 animate-pulse">⏳</div>
+                <div className="w-12 h-12 border-4 border-gray-200 border-t-[#d4a017] rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-sm text-gray-500">Ürünler ekleniyor...</p>
               </div>
             )}
 
             {bulkStep === 'done' && bulkResult && (
               <div className="py-8 text-center">
-                <div className="text-4xl mb-4">✅</div>
+                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                  <Check size={32} className="text-green-600" />
+                </div>
                 <p className="font-semibold text-lg mb-4" style={{ color: BROWN }}>İçe aktarma tamamlandı!</p>
                 <div className="inline-flex flex-col gap-2 text-sm text-left">
-                  <p>📁 <strong>{bulkResult.categoriesCreated}</strong> yeni kategori oluşturuldu</p>
-                  <p>🆕 <strong>{bulkResult.productsCreated}</strong> yeni ürün eklendi</p>
-                  <p>🔄 <strong>{bulkResult.productsUpdated}</strong> ürün güncellendi</p>
+                  <p><strong>{bulkResult.categoriesCreated}</strong> yeni kategori oluşturuldu</p>
+                  <p><strong>{bulkResult.productsCreated}</strong> yeni ürün eklendi</p>
+                  <p><strong>{bulkResult.productsUpdated}</strong> ürün güncellendi</p>
                 </div>
                 <div className="mt-6">
                   <button

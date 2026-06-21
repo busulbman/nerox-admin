@@ -27,8 +27,6 @@ export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const rtdb = getDatabase(app);
 
-export const LEGACY_RESTAURANT_IDS = ["varina", "mrssimone"] as const;
-
 export async function ensureRealtimeDatabaseAuth() {
   await auth.authStateReady?.();
   if (auth.currentUser) {

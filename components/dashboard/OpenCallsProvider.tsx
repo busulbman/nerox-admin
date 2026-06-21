@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { getDocs, onSnapshot, type QuerySnapshot } from 'firebase/firestore'
+import { onSnapshot, type QuerySnapshot } from 'firebase/firestore'
 import { logFirestoreRead } from '@/lib/firestore-debug'
 import { normalizeWaiterCall } from '@/lib/firestore-models'
 import { getRestaurantOpenCallsQuery } from '@/lib/firestore-queries'
@@ -53,34 +53,8 @@ export function OpenCallsProvider({
       handleSnapshotError
     )
 
-    // Visibility/focus handler: refetch when tab becomes active again
-    async function refetchOnWake() {
-      try {
-        logFirestoreRead('dashboard/refetch on wake', restaurantId)
-        const snap = await getDocs(getRestaurantOpenCallsQuery(restaurantId))
-        processSnapshot(snap)
-      } catch (err) {
-        console.error('Dashboard çağrı yenileme hatası:', err)
-      }
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        void refetchOnWake()
-      }
-    }
-
-    function handleFocus() {
-      void refetchOnWake()
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleFocus)
-
     return () => {
       unsubscribe()
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
     }
   }, [restaurantId])
 

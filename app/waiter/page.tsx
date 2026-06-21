@@ -201,34 +201,8 @@ export default function WaiterPage() {
       handleSnapshotError
     )
 
-    // Visibility/focus handler: refetch when tab becomes active again
-    async function refetchOnWake() {
-      try {
-        logFirestoreRead('waiter/refetch on wake', restaurantId)
-        const snap = await getDocs(getRestaurantOpenCallsQuery(restaurantId))
-        processSnapshot(snap)
-      } catch (err) {
-        console.error('Çağrı yenileme hatası:', err)
-      }
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        void refetchOnWake()
-      }
-    }
-
-    function handleFocus() {
-      void refetchOnWake()
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleFocus)
-
     return () => {
       unsubscribe()
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
     }
   }, [profile, restaurantId])
 

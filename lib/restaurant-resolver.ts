@@ -7,7 +7,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { db, LEGACY_RESTAURANT_IDS } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 
 export type ResolvedRestaurant = {
   id: string;
@@ -18,6 +18,12 @@ export type ResolvedRestaurant = {
 export async function resolveRestaurantBySlugOrId(
   slugOrId: string,
 ): Promise<ResolvedRestaurant | null> {
+  const normalizedSlugOrId = slugOrId.trim().toLowerCase();
+
+  if (!normalizedSlugOrId || normalizedSlugOrId === "varina") {
+    return null;
+  }
+
   const directRef = doc(db, "restaurants", slugOrId);
   const directSnap = await getDoc(directRef);
 
@@ -32,7 +38,7 @@ export async function resolveRestaurantBySlugOrId(
 
   const slugQuery = query(
     collection(db, "restaurants"),
-    where("slug", "==", slugOrId.toLowerCase()),
+    where("slug", "==", normalizedSlugOrId),
     limit(1),
   );
   const slugSnap = await getDocs(slugQuery);
@@ -57,20 +63,6 @@ export async function resolveRestaurantBySlugOrId(
       slug: typeof data.slug === "string" ? data.slug : null,
       name: typeof data.businessName === "string" ? data.businessName : null,
     };
-  }
-
-  if (LEGACY_RESTAURANT_IDS.includes(slugOrId as (typeof LEGACY_RESTAURANT_IDS)[number])) {
-    for (const legacyId of LEGACY_RESTAURANT_IDS) {
-      const legacySnap = await getDoc(doc(db, "restaurants", legacyId));
-      if (!legacySnap.exists()) continue;
-
-      const data = legacySnap.data();
-      return {
-        id: legacySnap.id,
-        slug: typeof data.slug === "string" ? data.slug : null,
-        name: typeof data.name === "string" ? data.name : null,
-      };
-    }
   }
 
   return null;

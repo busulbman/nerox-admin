@@ -14,7 +14,7 @@ import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
 import { db, rd } from '@/lib/firebase'
-import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { DEFAULT_RESTAURANT_SLUG, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -68,7 +68,7 @@ export default function TablesPage() {
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
   const restaurantId = profile?.restaurantId || ''
-  const menuSlug = settings?.slug || restaurantId
+  const menuSlug = settings?.slug?.trim() || DEFAULT_RESTAURANT_SLUG
   const businessName = resolveRestaurantBusinessName(settings)
   const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
 

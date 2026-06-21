@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { auth } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl } from '@/lib/restaurant-settings'
+import { DEFAULT_RESTAURANT_SLUG, resolveRestaurantBusinessName, resolveRestaurantLogoUrl } from '@/lib/restaurant-settings'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -17,7 +17,10 @@ export default function LoginPage() {
     typeof window === 'undefined' ? null : window.localStorage.getItem('nerox:last-restaurant-id')
   ))
   const { user, profile, loading } = useAuth()
-  const { settings } = useRestaurantSettings(lastRestaurantId)
+  const restaurantSettingsId = lastRestaurantId?.trim().toLowerCase() === 'varina'
+    ? DEFAULT_RESTAURANT_SLUG
+    : (lastRestaurantId || DEFAULT_RESTAURANT_SLUG)
+  const { settings } = useRestaurantSettings(restaurantSettingsId)
   const router = useRouter()
   const businessName = resolveRestaurantBusinessName(settings)
   const logoUrl = resolveRestaurantLogoUrl(settings)

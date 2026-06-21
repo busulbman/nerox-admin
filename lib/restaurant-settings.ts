@@ -3,6 +3,7 @@ import type { RestaurantGeneralSettings } from '@/lib/types'
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 export const DEFAULT_BUSINESS_NAME = 'Mrs.Simone'
+export const DEFAULT_RESTAURANT_SLUG = 'mrssimone'
 export const DEFAULT_PRIMARY_COLOR = '#3d2b1f'
 export const DEFAULT_ACCENT_COLOR = '#d4a017'
 export const DEFAULT_BRAND_LOGO_PATH = '/mrs-simone-logo.png'

@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useEffectEvent, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   collection,
@@ -20,7 +20,6 @@ import {
 } from 'firebase/firestore'
 import { ShoppingBag } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
-import { getSessionOpenCallsQuery, getSessionPaymentCallsQuery } from '@/lib/firestore-queries'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { resolveRestaurantBySlugOrId } from '@/lib/restaurant-resolver'
@@ -55,6 +54,16 @@ type ProductMeta = {
   rating: string
   popular: boolean
 }
+
+type CachedMenuData = {
+  categories: Category[]
+  products: Product[]
+  menuSettings: MenuThemeSettings
+  generalSettings: RestaurantGeneralSettings
+  menuPrimaryColorOverride: string | null
+}
+
+const menuDataCache = new Map<string, CachedMenuData>()
 
 const TIP_OPTIONS: { tip: CallTip; icon: string; label: string; desc: string }[] = [
   { tip: 'sipariş', icon: '📋', label: 'Sipariş', desc: 'Sipariş vermek istiyorum' },
@@ -297,36 +306,6 @@ async function findTableForMenu(restaurantId: string, tableId: string): Promise<
   }
 }
 
-async function fetchSessionActivity(restaurantId: string, tableDocId: string, sessionId: string) {
-  logFirestoreRead('menu/session activity', { restaurantId, tableId: tableDocId, sessionId })
-  const [tableSnap, openCallsSnap, paymentCallsSnap] = await Promise.all([
-    getDoc(doc(db, 'restaurants', restaurantId, 'tables', tableDocId)),
-    getDocs(getSessionOpenCallsQuery(restaurantId, sessionId)),
-    getDocs(getSessionPaymentCallsQuery(restaurantId, sessionId)),
-  ])
-
-  const nextTable = tableSnap.exists()
-    ? normalizeTable(tableSnap.id, tableSnap.data() as Record<string, unknown>)
-    : null
-
-  const nextOpenCalls = openCallsSnap.docs
-    .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
-    .filter((call) => call.tableId === tableDocId)
-    .sort((a, b) => b.createdAt - a.createdAt)
-
-  const nextPaymentCalls = paymentCallsSnap.docs
-    .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
-    .filter((call) => call.tableId === tableDocId)
-    .sort((a, b) => b.createdAt - a.createdAt)
-
-  return {
-    table: nextTable,
-    openCalls: nextOpenCalls,
-    paymentCalls: nextPaymentCalls,
-    latestCallAt: nextOpenCalls[0]?.createdAt ?? nextPaymentCalls[0]?.createdAt ?? null,
-  }
-}
-
 export default function MenuPage() {
   const params = useParams<{ restaurantId: string; tableId: string }>()
   const { restaurantId: slugOrId, tableId } = params
@@ -380,16 +359,6 @@ export default function MenuPage() {
   const [ratingSending, setRatingSending] = useState(false)
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
   const [ratingMessage, setRatingMessage] = useState<string | null>(null)
-  const refreshSessionActivity = useEffectEvent(async (nextSessionId: string, nextTableDocId: string) => {
-    const activity = await fetchSessionActivity(restaurantId, nextTableDocId, nextSessionId)
-
-    if (activity.table) {
-      setTable(activity.table)
-    }
-
-    setSessionCalls(activity.openCalls)
-    setPaymentCalls(activity.paymentCalls)
-  })
 
   useEffect(() => {
     let cancelled = false
@@ -425,6 +394,18 @@ export default function MenuPage() {
     const currentRestaurantId = restaurantId
 
     async function loadMenu() {
+      const cachedMenuData = menuDataCache.get(currentRestaurantId)
+      if (cachedMenuData) {
+        setCategories(cachedMenuData.categories)
+        setProducts(cachedMenuData.products)
+        setMenuSettings(cachedMenuData.menuSettings)
+        setGeneralSettings(cachedMenuData.generalSettings)
+        setMenuPrimaryColorOverride(cachedMenuData.menuPrimaryColorOverride)
+        setActiveCat(cachedMenuData.categories[0]?.id ?? null)
+        setLoading(false)
+        return
+      }
+
       logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
       const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
         getDocs(query(collection(db, 'restaurants', currentRestaurantId, 'categories'), orderBy('order', 'asc'))),
@@ -435,19 +416,32 @@ export default function MenuPage() {
 
       const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
       const nextProducts = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product))
+      const nextMenuSettings = menuSettingsSnap.exists()
+        ? normalizeMenuThemeSettings(menuSettingsSnap.data())
+        : { ...EMPTY_MENU_THEME_SETTINGS }
+      const nextGeneralSettings = generalSettingsSnap.exists()
+        ? normalizeRestaurantGeneralSettings(generalSettingsSnap.data())
+        : { ...EMPTY_RESTAURANT_GENERAL_SETTINGS }
+      const nextMenuPrimaryColorOverride =
+        menuSettingsSnap.exists()
+        && typeof menuSettingsSnap.data().menuPrimaryColor === 'string'
+        && isValidMenuPrimaryColor(menuSettingsSnap.data().menuPrimaryColor)
+          ? menuSettingsSnap.data().menuPrimaryColor
+          : null
+
+      menuDataCache.set(currentRestaurantId, {
+        categories: nextCategories,
+        products: nextProducts,
+        menuSettings: nextMenuSettings,
+        generalSettings: nextGeneralSettings,
+        menuPrimaryColorOverride: nextMenuPrimaryColorOverride,
+      })
 
       setCategories(nextCategories)
       setProducts(nextProducts)
-      setMenuSettings(menuSettingsSnap.exists() ? normalizeMenuThemeSettings(menuSettingsSnap.data()) : { ...EMPTY_MENU_THEME_SETTINGS })
-      setGeneralSettings(generalSettingsSnap.exists() ? normalizeRestaurantGeneralSettings(generalSettingsSnap.data()) : { ...EMPTY_RESTAURANT_GENERAL_SETTINGS })
-
-      if (menuSettingsSnap.exists()) {
-        const menuData = menuSettingsSnap.data()
-        if (typeof menuData.menuPrimaryColor === 'string' && isValidMenuPrimaryColor(menuData.menuPrimaryColor)) {
-          setMenuPrimaryColorOverride(menuData.menuPrimaryColor)
-        }
-      }
-
+      setMenuSettings(nextMenuSettings)
+      setGeneralSettings(nextGeneralSettings)
+      setMenuPrimaryColorOverride(nextMenuPrimaryColorOverride)
       setActiveCat(nextCategories[0]?.id ?? null)
       setLoading(false)
     }
@@ -602,7 +596,6 @@ export default function MenuPage() {
           setSessionId(result.sessionId)
           setAccessState('ready')
           setAccessMessage(null)
-          void refreshSessionActivity(result.sessionId, resolved.tableDocId)
           return
         }
 
@@ -667,57 +660,46 @@ export default function MenuPage() {
   }, [cart, restaurantId, tableId, tableDocId, sessionId])
 
   useEffect(() => {
-    if (!sessionId || !tableDocId) return
+    if (!restaurantId || !tableDocId) return
 
-    const currentTableDocId = tableDocId
-    const currentSessionId = sessionId
-    let cancelled = false
-
-    async function refreshOnVisibility() {
-      await refreshSessionActivity(currentSessionId, currentTableDocId)
-      if (cancelled) return
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        void refreshOnVisibility()
+    logFirestoreRead('menu/table listener', { restaurantId, tableId: tableDocId })
+    const unsubscribe = onSnapshot(doc(db, 'restaurants', restaurantId, 'tables', tableDocId), (snapshot) => {
+      if (!snapshot.exists()) {
+        setTable(null)
+        return
       }
-    }
 
-    function handleFocus() {
-      void refreshOnVisibility()
-    }
-
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    return () => {
-      cancelled = true
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [restaurantId, sessionId, tableDocId])
-
-  // Real-time listener for payment calls to auto-open rating modal
-  useEffect(() => {
-    if (!sessionId) return
-
-    const paymentCallsQuery = query(
-      collection(db, 'restaurants', restaurantId, 'calls'),
-      where('sessionId', '==', sessionId),
-      where('tip', '==', 'hesap')
-    )
-
-    const unsubscribe = onSnapshot(paymentCallsQuery, (snapshot) => {
-      const calls = snapshot.docs
-        .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
-        .sort((a, b) => b.createdAt - a.createdAt)
-
-      setPaymentCalls(calls)
+      setTable(normalizeTable(snapshot.id, snapshot.data() as Record<string, unknown>))
     })
 
     return () => unsubscribe()
-  }, [restaurantId, sessionId])
+  }, [restaurantId, tableDocId])
+
+  useEffect(() => {
+    if (!restaurantId || !sessionId || !tableDocId) return
+
+    logFirestoreRead('menu/session calls listener', { restaurantId, tableId: tableDocId, sessionId })
+    const sessionCallsQuery = query(
+      collection(db, 'restaurants', restaurantId, 'calls'),
+      where('sessionId', '==', sessionId),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    )
+
+    const unsubscribe = onSnapshot(sessionCallsQuery, (snapshot) => {
+      const allSessionCalls = snapshot.docs
+        .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
+        .filter((call) => call.tableId === tableDocId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+
+      setSessionCalls(
+        allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
+      )
+      setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
+    })
+
+    return () => unsubscribe()
+  }, [restaurantId, sessionId, tableDocId])
 
   const completedPaymentCall =
     paymentCalls.find((call) => call.tip === 'hesap' && call.durum === 'tamamlandı' && call.sessionId === sessionId) ?? null
@@ -1000,12 +982,9 @@ export default function MenuPage() {
 
       setOrderSent(true)
       setCart([])
-      const activity = await fetchSessionActivity(restaurantId, tableDocId, sessionId)
-      if (activity.table) {
-        setTable(activity.table)
+      if (liveTable.status === 'aktif') {
+        setTable((current) => (current ? { ...current, status: 'çağrı var', updatedAt: Date.now() } : current))
       }
-      setSessionCalls(activity.openCalls)
-      setPaymentCalls(activity.paymentCalls)
       window.setTimeout(() => {
         setOrderSent(false)
         setCartDrawer(false)

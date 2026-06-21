@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "migrate:mrssimone": "node --experimental-strip-types scripts/migrate-varina-to-mrssimone.ts"
+    "lint": "eslint"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

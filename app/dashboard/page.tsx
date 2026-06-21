@@ -2,7 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { collection, getDocs, limit, query, where } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  limit,
+  query,
+  where,
+} from "firebase/firestore";
+import { ArrowRightLeft, CheckCircle2, Loader2, TriangleAlert } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -25,12 +32,23 @@ import {
   getRestaurantRecentCompletedCallsQuery,
   getRestaurantTablesQuery,
 } from "@/lib/firestore-queries";
+import {
+  LEGACY_RESTAURANT_ID,
+  TARGET_RESTAURANT_ID,
+  migrateVarinaTenantToMrsSimone,
+  type TenantMigrationStats,
+} from "@/lib/tenant-migration";
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { WaiterCall, Table } from "@/lib/types";
 
 const BROWN = "#3d2b1f";
 const GOLD = "#d4a017";
+
+type DashboardMessage = {
+  tone: "success" | "error" | "info";
+  text: string;
+};
 
 const TIP_CFG: Record<string, { label: string; icon: string; color: string }> =
   {
@@ -66,7 +84,7 @@ function buildHourlyData(calls: WaiterCall[]) {
 }
 
 export default function DashboardPage() {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { pendingCalls } = useOpenCalls();
   const { settings } = useRestaurantSettingsContext()
   const router = useRouter();
@@ -75,7 +93,14 @@ export default function DashboardPage() {
   const [tables, setTables] = useState<Table[]>([]);
   const [activeWaiters, setActiveWaiters] = useState(0);
   const [, setTick] = useState(0);
+  const [migrationRunning, setMigrationRunning] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState<DashboardMessage | null>(null);
+  const [migrationStats, setMigrationStats] = useState<TenantMigrationStats | null>(null);
   const businessName = resolveRestaurantBusinessName(settings)
+  const canRunMrsSimoneMigration =
+    !!user && profile?.role === "admin" && restaurantId === LEGACY_RESTAURANT_ID;
+  const showMrsSimoneMigrationCard =
+    canRunMrsSimoneMigration || migrationRunning || !!migrationMessage || !!migrationStats;
 
   useEffect(() => {
     let cancelled = false;
@@ -199,6 +224,41 @@ export default function DashboardPage() {
   const hourlyData = buildHourlyData(completedCalls);
   const top5Pending = sortedPendingCalls.slice(0, 5);
 
+  async function handleMrsSimoneMigration() {
+    if (!user || !profile || profile.role !== "admin" || restaurantId !== LEGACY_RESTAURANT_ID) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Varina verileri Mrs.Simone tenant'ına taşınacak. İşlem tamamlandığında varina kullanıcıları da mrssimone olarak güncellenecek. Devam etmek istiyor musunuz?",
+    );
+    if (!confirmed) return;
+
+    setMigrationRunning(true);
+    setMigrationMessage({ tone: "info", text: "Migration başlatıldı. Veriler taşınıyor..." });
+    setMigrationStats(null);
+
+    try {
+      const stats = await migrateVarinaTenantToMrsSimone(db, user.uid);
+      setMigrationStats(stats);
+      setMigrationMessage({
+        tone: "success",
+        text: "Migration tamamlandı",
+      });
+    } catch (error) {
+      console.error("Mrs.Simone migration error:", error);
+      setMigrationMessage({
+        tone: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Migration çalıştırılamadı. Lütfen tekrar deneyin.",
+      });
+    } finally {
+      setMigrationRunning(false);
+    }
+  }
+
   return (
     <div className="p-6 md:p-8">
       <div className="mb-6">
@@ -209,6 +269,88 @@ export default function DashboardPage() {
           {businessName} — Canlı veriler
         </p>
       </div>
+
+      {showMrsSimoneMigrationCard && (
+        <section className="mb-8 rounded-3xl border border-[#eadfd4] bg-white p-5 shadow-sm md:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-[#faf4ed] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#8a6548]">
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+                Tenant Migration
+              </div>
+              <h2 className="mt-3 text-lg font-semibold" style={{ color: BROWN }}>
+                Verileri Mrs.Simone&apos;a Taşı
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-gray-500">
+                Varina altındaki kategori, ürün, ayar ve masa verileri
+                {" "}
+                <span className="font-medium text-[#3d2b1f]">restaurants/{TARGET_RESTAURANT_ID}</span>
+                {" "}
+                altına kopyalanır. İşlem sonunda varina kullanıcılarının
+                restaurantId alanı da mrssimone olarak güncellenir.
+              </p>
+            </div>
+
+            <button
+              onClick={() => void handleMrsSimoneMigration()}
+              disabled={!canRunMrsSimoneMigration || migrationRunning}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: BROWN }}
+            >
+              {migrationRunning ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Taşınıyor...
+                </>
+              ) : (
+                <>
+                  <ArrowRightLeft className="h-4 w-4" />
+                  Verileri Mrs.Simone&apos;a Taşı
+                </>
+              )}
+            </button>
+          </div>
+
+          {migrationMessage && (
+            <div
+              className="mt-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm"
+              style={{
+                background:
+                  migrationMessage.tone === "success"
+                    ? "#f0fdf4"
+                    : migrationMessage.tone === "error"
+                      ? "#fef2f2"
+                      : "#fffbeb",
+                color:
+                  migrationMessage.tone === "success"
+                    ? "#166534"
+                    : migrationMessage.tone === "error"
+                      ? "#991b1b"
+                      : "#92400e",
+              }}
+            >
+              {migrationMessage.tone === "success" ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : migrationMessage.tone === "error" ? (
+                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+              )}
+              <p>{migrationMessage.text}</p>
+            </div>
+          )}
+
+          {migrationStats && (
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+              <SummaryCard label="Kategori" value={String(migrationStats.categories)} />
+              <SummaryCard label="Ürün" value={String(migrationStats.products)} />
+              <SummaryCard label="Ayar" value={String(migrationStats.settings)} />
+              <SummaryCard label="Masa" value={String(migrationStats.tables)} />
+              <SummaryCard label="Kullanıcı" value={String(migrationStats.users)} />
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Üst istatistikler ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

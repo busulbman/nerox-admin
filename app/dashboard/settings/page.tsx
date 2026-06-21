@@ -1,32 +1,32 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore'
 import { Upload, Trash2, Link as LinkIcon } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
-import { db, RESTAURANT_ID } from '@/lib/firebase'
+import { db } from '@/lib/firebase'
 import {
   DEFAULT_BRAND_LOGO_PATH,
   DEFAULT_BUSINESS_NAME,
   DEFAULT_PRIMARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
-  generateSlug,
+  getUniqueRestaurantSlug,
   getContrastColor,
   isValidRestaurantThemeColor,
-  isValidSlug,
 } from '@/lib/restaurant-settings'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import type { RestaurantGeneralSettings } from '@/lib/types'
+import type { Restaurant, RestaurantGeneralSettings } from '@/lib/types'
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
 
 export default function SettingsPage() {
   const { profile } = useAuth()
-  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const restaurantId = profile?.restaurantId || ''
 
   const { settings, loading: settingsLoading } = useRestaurantSettings(restaurantId)
 
   const [form, setForm] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([])
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
@@ -41,10 +41,45 @@ export default function SettingsPage() {
     }
   }, [settings, settingsLoading])
 
-  const suggestedSlug = useMemo(() => {
-    if (!form.businessName || form.slug) return ''
-    return generateSlug(form.businessName)
-  }, [form.businessName, form.slug])
+  useEffect(() => {
+    if (!restaurantId) return
+
+    let cancelled = false
+
+    async function loadRestaurants() {
+      try {
+        const snap = await getDocs(collection(db, 'restaurants'))
+        if (cancelled) return
+
+        setRestaurants(
+          snap.docs.map((restaurantDoc) => {
+            const data = restaurantDoc.data()
+            return {
+              id: restaurantDoc.id,
+              name: typeof data.name === 'string' ? data.name : '',
+              slug: typeof data.slug === 'string' ? data.slug : '',
+              logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : '',
+              primaryColor: typeof data.primaryColor === 'string' ? data.primaryColor : '',
+            }
+          })
+        )
+      } catch (error) {
+        console.error('Restaurant list load error:', error)
+      }
+    }
+
+    void loadRestaurants()
+
+    return () => {
+      cancelled = true
+    }
+  }, [restaurantId])
+
+  const businessNameValue = form.businessName.trim() || settings.businessName.trim() || DEFAULT_BUSINESS_NAME
+  const generatedSlug = useMemo(
+    () => getUniqueRestaurantSlug(businessNameValue, restaurants, restaurantId),
+    [businessNameValue, restaurantId, restaurants]
+  )
 
   async function uploadToImgBB(file: File): Promise<string | null> {
     if (!IMGBB_API_KEY) {
@@ -105,28 +140,12 @@ export default function SettingsPage() {
     }
   }
 
-  function handleSlugChange(value: string) {
-    const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '')
-    setForm((current) => ({ ...current, slug: normalized }))
-  }
-
-  function applySuggestedSlug() {
-    if (suggestedSlug) {
-      setForm((current) => ({ ...current, slug: suggestedSlug }))
-    }
-  }
-
   async function handleSave() {
     const trimmedPrimary = form.primaryColor.trim()
-    const trimmedSlug = form.slug.trim().toLowerCase()
+    const trimmedSlug = generatedSlug
 
     if (trimmedPrimary && !isValidRestaurantThemeColor(trimmedPrimary)) {
       setMessage({ tone: 'error', text: 'Ana renk geçerli bir hex renk olmalı. Örnek: #3d2b1f' })
-      return
-    }
-
-    if (trimmedSlug && !isValidSlug(trimmedSlug)) {
-      setMessage({ tone: 'error', text: 'Slug sadece küçük harf ve rakam içermeli (2-30 karakter).' })
       return
     }
 
@@ -137,7 +156,7 @@ export default function SettingsPage() {
       await setDoc(
         doc(db, 'restaurants', restaurantId, 'settings', 'general'),
         {
-          businessName: form.businessName.trim(),
+          businessName: businessNameValue,
           slug: trimmedSlug,
           logoUrl: form.logoUrl.trim(),
           primaryColor: trimmedPrimary || DEFAULT_PRIMARY_COLOR,
@@ -146,16 +165,16 @@ export default function SettingsPage() {
         { merge: true }
       )
 
-      if (trimmedSlug) {
-        await setDoc(
-          doc(db, 'restaurants', restaurantId),
-          {
-            name: form.businessName.trim(),
-            slug: trimmedSlug,
-          },
-          { merge: true }
-        )
-      }
+      await setDoc(
+        doc(db, 'restaurants', restaurantId),
+        {
+          name: businessNameValue,
+          slug: trimmedSlug,
+          logoUrl: form.logoUrl.trim(),
+          primaryColor: trimmedPrimary || DEFAULT_PRIMARY_COLOR,
+        },
+        { merge: true }
+      )
 
       setMessage({ tone: 'success', text: 'Ayarlar kaydedildi.' })
     } catch (error) {
@@ -168,9 +187,9 @@ export default function SettingsPage() {
 
   const previewColor = form.primaryColor || DEFAULT_PRIMARY_COLOR
   const previewTextColor = getContrastColor(previewColor)
-  const previewBusinessName = form.businessName.trim() || DEFAULT_BUSINESS_NAME
+  const previewBusinessName = businessNameValue
   const previewLogoUrl = form.logoUrl.trim() || DEFAULT_BRAND_LOGO_PATH
-  const menuLink = form.slug ? `/menu/${form.slug}/1` : `/menu/${restaurantId}/1`
+  const menuLink = `/menu/${generatedSlug}/1`
 
   const inputCls =
     'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#3d2b1f] focus:ring-1 focus:ring-[#3d2b1f]'
@@ -222,31 +241,14 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
-                Kısa Link (Slug)
+                Menü Linkiniz
               </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">/menu/</span>
-                  <input
-                    className={`${inputCls} pl-14`}
-                    value={form.slug}
-                    onChange={(event) => handleSlugChange(event.target.value)}
-                    placeholder="mrssimone"
-                  />
-                </div>
-                {suggestedSlug && !form.slug && (
-                  <button
-                    type="button"
-                    onClick={applySuggestedSlug}
-                    className="px-3 py-2.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 whitespace-nowrap"
-                    style={{ color: '#3d2b1f' }}
-                  >
-                    {suggestedSlug}
-                  </button>
-                )}
+              <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-3 border border-gray-200">
+                <LinkIcon size={14} className="text-gray-400 shrink-0" />
+                <code className="text-xs text-gray-600 flex-1 truncate">{menuLink}</code>
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                QR menü linkiniz: <span className="font-mono">{menuLink}</span>
+                İşletme adına göre otomatik oluşturulur. Aynı slug varsa sonuna sıra numarası eklenir.
               </p>
             </div>
 

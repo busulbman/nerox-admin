@@ -12,8 +12,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import { useAuth } from "@/components/AuthProvider";
 import { useOpenCalls } from "@/components/dashboard/OpenCallsProvider";
-import { db, RESTAURANT_ID } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { logFirestoreRead } from "@/lib/firestore-debug";
 import {
   getCallTableLabel,
@@ -65,24 +66,24 @@ function buildHourlyData(calls: WaiterCall[]) {
 }
 
 export default function DashboardPage() {
+  const { profile } = useAuth();
   const { pendingCalls } = useOpenCalls();
   const { settings } = useRestaurantSettingsContext()
   const router = useRouter();
+  const restaurantId = profile?.restaurantId || '';
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [activeWaiters, setActiveWaiters] = useState(0);
   const [, setTick] = useState(0);
-
-  const [seeding, setSeeding] = useState(false);
-  const [seedMsg, setSeedMsg] = useState("");
   const businessName = resolveRestaurantBusinessName(settings)
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadCompletedCalls() {
+      if (!restaurantId) return;
       const snap = await getDocs(
-        getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID),
+        getRestaurantRecentCompletedCallsQuery(restaurantId),
       );
       if (cancelled) return;
       setCompletedCalls(
@@ -97,14 +98,15 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [restaurantId]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadTables() {
-      logFirestoreRead("dashboard/tables", RESTAURANT_ID);
-      const snap = await getDocs(getRestaurantTablesQuery(RESTAURANT_ID));
+      if (!restaurantId) return;
+      logFirestoreRead("dashboard/tables", restaurantId);
+      const snap = await getDocs(getRestaurantTablesQuery(restaurantId));
       if (cancelled) return;
       setTables(
         snap.docs.map((d) =>
@@ -118,18 +120,19 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [restaurantId]);
 
   // Active waiters count
   useEffect(() => {
     let cancelled = false;
 
     async function loadActiveWaiters() {
-      logFirestoreRead("dashboard/online waiters", RESTAURANT_ID);
+      if (!restaurantId) return;
+      logFirestoreRead("dashboard/online waiters", restaurantId);
       const snap = await getDocs(
         query(
           collection(db, "users"),
-          where("restaurantId", "==", RESTAURANT_ID),
+          where("restaurantId", "==", restaurantId),
           where("role", "==", "waiter"),
           where("isOnline", "==", true),
           limit(50),
@@ -144,7 +147,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [restaurantId]);
 
   // 1-minute tick for elapsed times
   useEffect(() => {
@@ -195,20 +198,6 @@ export default function DashboardPage() {
     tables.length > 0 ? Math.round((activeTables / tables.length) * 100) : 0;
   const hourlyData = buildHourlyData(completedCalls);
   const top5Pending = sortedPendingCalls.slice(0, 5);
-
-  async function handleSeed() {
-    setSeeding(true);
-    setSeedMsg("");
-    try {
-      const { seedmrssimoneChocolate } = await import("@/lib/seed");
-      await seedmrssimoneChocolate();
-      setSeedMsg("✓ Demo verisi yüklendi!");
-    } catch (err) {
-      setSeedMsg(err instanceof Error ? err.message : "Hata oluştu.");
-    } finally {
-      setSeeding(false);
-    }
-  }
 
   return (
     <div className="p-6 md:p-8">
@@ -372,38 +361,6 @@ export default function DashboardPage() {
           </div>
         </section>
       </div>
-
-      {/* ── Demo veri — sadece geliştirme ortamında ── */}
-      {process.env.NODE_ENV === "development" && (
-        <details className="bg-white rounded-xl border border-gray-100 p-5 max-w-md">
-          <summary
-            className="cursor-pointer font-semibold text-sm select-none"
-            style={{ color: BROWN }}
-          >
-            🍫 Demo Veri Yükle
-          </summary>
-          <p className="text-gray-400 text-xs mt-3 mb-3">
-            5 kategori, 24 ürün ve demo çağrılar yükler. Yalnızca boş
-            veritabanında çalışır.
-          </p>
-          {seedMsg && (
-            <p
-              className="text-sm mb-3"
-              style={{ color: seedMsg.startsWith("✓") ? "#16a34a" : "#ef4444" }}
-            >
-              {seedMsg}
-            </p>
-          )}
-          <button
-            onClick={handleSeed}
-            disabled={seeding}
-            className="font-semibold px-4 py-2 rounded-lg disabled:opacity-50 text-sm"
-            style={{ background: GOLD, color: BROWN }}
-          >
-            {seeding ? "Yükleniyor..." : "Yükle"}
-          </button>
-        </details>
-      )}
     </div>
   );
 }

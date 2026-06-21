@@ -17,7 +17,7 @@ import {
 import { useAuth } from '@/components/AuthProvider'
 import ViewMenuButton from '@/components/dashboard/ViewMenuButton'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
-import { auth, RESTAURANT_ID } from '@/lib/firebase'
+import { auth } from '@/lib/firebase'
 import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl, getContrastColor } from '@/lib/restaurant-settings'
 
 const NAV = [
@@ -41,7 +41,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const router = useRouter()
   const { settings, primaryColor } = useRestaurantSettingsContext()
 
-  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const restaurantId = profile?.restaurantId || ''
   const businessName = resolveRestaurantBusinessName(settings)
   const logoUrl = resolveRestaurantLogoUrl(settings)
   const textColor = getContrastColor(primaryColor)

@@ -1,5 +1,5 @@
 import { addDoc, getDocs } from "firebase/firestore";
-import { rc } from "@/lib/firebase";
+// import { rc } from "@/lib/firebase";
 
 const CATEGORIES = [
   { name: "Sıcak İçecekler", order: 1 },
@@ -117,29 +117,29 @@ const PRODUCTS_BY_CAT: Record<
   ],
 };
 
-export async function seedmrssimoneChocolate() {
-  const existingCats = await getDocs(rc("categories"));
+export async function seedRestaurantDemoData(restaurantId: string) {
+  const existingCats = await getDocs(rc(restaurantId, "categories"));
   if (!existingCats.empty) {
     throw new Error("Menü verisi zaten mevcut. Önce mevcut veriyi silin.");
   }
 
   const categoryIds: Record<string, string> = {};
   for (const cat of CATEGORIES) {
-    const ref = await addDoc(rc("categories"), cat);
+    const ref = await addDoc(rc(restaurantId, "categories"), cat);
     categoryIds[cat.name] = ref.id;
   }
 
   for (const [catName, products] of Object.entries(PRODUCTS_BY_CAT)) {
     const categoryId = categoryIds[catName];
     for (const product of products) {
-      await addDoc(rc("products"), { ...product, categoryId, available: true });
+      await addDoc(rc(restaurantId, "products"), { ...product, categoryId, available: true });
     }
   }
 
   const demoCalls = [
     {
       tableId: "3",
-      restaurantId: "mrssimone",
+      restaurantId,
       tip: "yardım",
       durum: "bekliyor",
       note: "",
@@ -147,7 +147,7 @@ export async function seedmrssimoneChocolate() {
     },
     {
       tableId: "7",
-      restaurantId: "mrssimone",
+      restaurantId,
       tip: "hesap",
       durum: "bekliyor",
       note: "Nakit ödeyecek",
@@ -155,7 +155,7 @@ export async function seedmrssimoneChocolate() {
     },
     {
       tableId: "1",
-      restaurantId: "mrssimone",
+      restaurantId,
       tip: "sipariş",
       durum: "bekliyor",
       note: "Bir Fondant, bir Sıcak Çikolata",
@@ -163,6 +163,6 @@ export async function seedmrssimoneChocolate() {
     },
   ];
   for (const call of demoCalls) {
-    await addDoc(rc("calls"), call);
+    await addDoc(rc(restaurantId, "calls"), call);
   }
 }

@@ -32,7 +32,7 @@ export function isValidRestaurantThemeColor(value: string) {
 
 export function generateSlug(name: string): string {
   return name
-    .toLowerCase()
+    .toLocaleLowerCase('tr')
     .trim()
     .replace(/ğ/g, 'g')
     .replace(/ü/g, 'u')
@@ -40,11 +40,39 @@ export function generateSlug(name: string): string {
     .replace(/ı/g, 'i')
     .replace(/ö/g, 'o')
     .replace(/ç/g, 'c')
-    .replace(/[^a-z0-9]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 export function isValidSlug(slug: string): boolean {
-  return /^[a-z0-9]+$/.test(slug) && slug.length >= 2 && slug.length <= 30
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && slug.length >= 2 && slug.length <= 50
+}
+
+export function getUniqueRestaurantSlug(
+  businessName: string,
+  restaurants: Array<{ id: string; slug?: string | null }>,
+  currentRestaurantId?: string | null
+) {
+  const baseSlug = generateSlug(businessName) || 'isletme'
+  const takenSlugs = new Set(
+    restaurants
+      .filter((restaurant) => restaurant.id !== currentRestaurantId)
+      .map((restaurant) => restaurant.slug?.trim().toLowerCase())
+      .filter((slug): slug is string => Boolean(slug))
+  )
+
+  if (!takenSlugs.has(baseSlug)) return baseSlug
+
+  let index = 2
+  let nextSlug = `${baseSlug}-${index}`
+  while (takenSlugs.has(nextSlug)) {
+    index += 1
+    nextSlug = `${baseSlug}-${index}`
+  }
+
+  return nextSlug
 }
 
 export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGeneralSettings {

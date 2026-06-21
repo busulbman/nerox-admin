@@ -6,7 +6,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeRating } from '@/lib/firestore-models'
 import { getRestaurantRecentRatingsQuery } from '@/lib/firestore-queries'
-import { db, RESTAURANT_ID } from '@/lib/firebase'
+import { db } from '@/lib/firebase'
 import type { Rating } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -47,7 +47,7 @@ function average(values: number[]): string {
 
 export default function RatingsPage() {
   const { profile } = useAuth()
-  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const restaurantId = profile?.restaurantId || ''
 
   const [ratings, setRatings] = useState<Rating[]>([])
   const [loading, setLoading] = useState(true)

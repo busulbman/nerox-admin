@@ -9,7 +9,7 @@ import { completeRestaurantCall } from '@/lib/call-sync'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { getCallCompletedAt, getCallTableLabel, isOpenWaiterCallStatus, normalizeWaiterCall } from '@/lib/firestore-models'
 import { getRestaurantRecentCompletedCallsQuery } from '@/lib/firestore-queries'
-import { db, RESTAURANT_ID } from '@/lib/firebase'
+import { db } from '@/lib/firebase'
 import type { WaiterCall } from '@/lib/types'
 
 const TIP_CONFIG: Record<string, { label: string; icon: string; border: string; bg: string }> = {
@@ -47,6 +47,7 @@ function formatDuration(ms: number): string {
 
 export default function CallsPage() {
   const { user, profile } = useAuth()
+  const restaurantId = profile?.restaurantId || ''
   const { openCalls } = useOpenCalls()
   const [tab, setTab] = useState<CallsTab>('open')
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([])
@@ -62,8 +63,9 @@ export default function CallsPage() {
     setCompletedLoading(true)
     setCompletedError('')
     try {
-      logFirestoreRead('dashboard/completed calls', RESTAURANT_ID)
-      const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID))
+      if (!restaurantId) return
+      logFirestoreRead('dashboard/completed calls', restaurantId)
+      const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(restaurantId))
       setCompletedCalls(
         snap.docs
           .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
@@ -93,8 +95,8 @@ export default function CallsPage() {
         role: profile.role as 'admin' | 'waiter',
       } : undefined
 
-      logFirestoreWrite('dashboard/complete call', { restaurantId: call.restaurantId || RESTAURANT_ID, callId: call.id })
-      await completeRestaurantCall(call.restaurantId || RESTAURANT_ID, call, actor)
+      logFirestoreWrite('dashboard/complete call', { restaurantId: call.restaurantId || restaurantId, callId: call.id })
+      await completeRestaurantCall(call.restaurantId || restaurantId, call, actor)
     } catch (err) {
       console.error('Çağrı tamamlama hatası:', err)
     } finally {
@@ -120,15 +122,15 @@ export default function CallsPage() {
   }
 
   async function deleteCompletedCall(call: WaiterCall) {
-    const restaurantId = call.restaurantId || RESTAURANT_ID
+    const callRestaurantId = call.restaurantId || restaurantId
     const confirmed = window.confirm(`Masa ${getCallTableLabel(call)} için tamamlanan çağrıyı silmek istiyor musunuz?`)
     if (!confirmed) return
 
     setDeleteBusyId(call.id)
     setCompletedError('')
     try {
-      logFirestoreWrite('dashboard/delete completed call', { restaurantId, callId: call.id })
-      await deleteDoc(doc(db, 'restaurants', restaurantId, 'calls', call.id))
+      logFirestoreWrite('dashboard/delete completed call', { restaurantId: callRestaurantId, callId: call.id })
+      await deleteDoc(doc(db, 'restaurants', callRestaurantId, 'calls', call.id))
       setCompletedCalls((current) => current.filter((completedCall) => completedCall.id !== call.id))
       setSelectedCompletedIds((current) => {
         const next = new Set(current)
@@ -159,7 +161,7 @@ export default function CallsPage() {
     try {
       const batch = writeBatch(db)
       for (const call of callsToDelete) {
-        batch.delete(doc(db, 'restaurants', call.restaurantId || RESTAURANT_ID, 'calls', call.id))
+        batch.delete(doc(db, 'restaurants', call.restaurantId || restaurantId, 'calls', call.id))
       }
       logFirestoreWrite('dashboard/bulk delete completed calls', callsToDelete.map((call) => call.id))
       await batch.commit()

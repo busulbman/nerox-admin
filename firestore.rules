@@ -155,8 +155,8 @@ service cloud.firestore {
     // ─── Restaurant data ────────────────────────────────────────────────────────
 
     match /restaurants/{rid} {
-      // Restaurant doc readable by staff
-      allow read: if isStaff(rid);
+      // Restaurant doc is public for slug/name/logo/theme resolution in QR menu/login
+      allow read: if true;
       allow write: if isAdmin(rid);
 
       // ── Categories & Products (Menu) ──────────────────────────────────────────

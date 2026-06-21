@@ -27,7 +27,7 @@ export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const rtdb = getDatabase(app);
 
-export const RESTAURANT_ID = "mrssimone";
+export const LEGACY_RESTAURANT_IDS = ["varina", "mrssimone"] as const;
 
 export async function ensureRealtimeDatabaseAuth() {
   await auth.authStateReady?.();
@@ -36,14 +36,12 @@ export async function ensureRealtimeDatabaseAuth() {
   }
 }
 
-/** Shorthand: collection under restaurants/mrssimone */
-export function rc(colName: string) {
-  return collection(db, "restaurants", RESTAURANT_ID, colName);
+export function rc(restaurantId: string, colName: string) {
+  return collection(db, "restaurants", restaurantId, colName);
 }
 
-/** Shorthand: doc under restaurants/mrssimone */
-export function rd(colName: string, docId: string) {
-  return doc(db, "restaurants", RESTAURANT_ID, colName, docId);
+export function rd(restaurantId: string, colName: string, docId: string) {
+  return doc(db, "restaurants", restaurantId, colName, docId);
 }
 
 /**

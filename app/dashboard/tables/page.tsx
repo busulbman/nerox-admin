@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
@@ -13,7 +13,7 @@ import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsPro
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
-import { db, rd, RESTAURANT_ID } from '@/lib/firebase'
+import { db, rd } from '@/lib/firebase'
 import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
@@ -67,9 +67,10 @@ export default function TablesPage() {
   const [, setTicker] = useState(0)
   const origin = typeof window === 'undefined' ? '' : window.location.origin
 
-  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const restaurantId = profile?.restaurantId || ''
   const menuSlug = settings?.slug || restaurantId
   const businessName = resolveRestaurantBusinessName(settings)
+  const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
 
   // Delete mode state
   const [selectMode, setSelectMode] = useState(false)
@@ -77,11 +78,12 @@ export default function TablesPage() {
   const [deleteModal, setDeleteModal] = useState<{ type: 'single' | 'selected' | 'all'; tableId?: string; hasActive: boolean } | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  async function loadTables() {
-    logFirestoreRead('dashboard/tables', RESTAURANT_ID)
-    const snap = await getDocs(getRestaurantTablesQuery(RESTAURANT_ID))
+  const loadTables = useCallback(async () => {
+    if (!restaurantId) return
+    logFirestoreRead('dashboard/tables', restaurantId)
+    const snap = await getDocs(getRestaurantTablesQuery(restaurantId))
     setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
-  }
+  }, [restaurantId])
 
   useEffect(() => {
     let cancelled = false
@@ -97,7 +99,7 @@ export default function TablesPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadTables])
 
   const callsByTable = openCalls.reduce<Record<string, TableCallStatus[]>>((acc, call) => {
     if (!call.tableId) return acc
@@ -148,11 +150,11 @@ export default function TablesPage() {
     try {
       logFirestoreWrite('dashboard/open table', { tableId, sessionId: newSessionId })
       await runTransaction(db, async (tx) => {
-        const snap = await tx.get(rd('tables', tableId))
+        const snap = await tx.get(tableDocRef(tableId))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
         const t = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
         if (t.status !== 'boş') throw new Error(`Masa "${STATUS_META[t.status]?.label ?? t.status}" durumunda, açılamaz.`)
-        tx.update(rd('tables', tableId), {
+        tx.update(tableDocRef(tableId), {
           status: 'aktif' satisfies TableStatus,
           sessionId: newSessionId,
           openedAt: serverTimestamp(),
@@ -175,9 +177,9 @@ export default function TablesPage() {
     try {
       logFirestoreWrite('dashboard/close table', tableId)
       await runTransaction(db, async (tx) => {
-        const snap = await tx.get(rd('tables', tableId))
+        const snap = await tx.get(tableDocRef(tableId))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
-        tx.update(rd('tables', tableId), {
+        tx.update(tableDocRef(tableId), {
           status: 'temizlik' satisfies TableStatus,
           sessionId: null,
           openedAt: null,
@@ -201,9 +203,9 @@ export default function TablesPage() {
     try {
       logFirestoreWrite('dashboard/mark cleaned', tableId)
       await runTransaction(db, async (tx) => {
-        const snap = await tx.get(rd('tables', tableId))
+        const snap = await tx.get(tableDocRef(tableId))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
-        tx.update(rd('tables', tableId), {
+        tx.update(tableDocRef(tableId), {
           status: 'boş' satisfies TableStatus,
           sessionId: null,
           openedAt: null,
@@ -231,7 +233,7 @@ export default function TablesPage() {
       let created = 0
       for (let n = 1; n <= safeCount; n++) {
         if (existingNumbers.has(n)) continue
-        batch.set(rd('tables', String(n)), {
+        batch.set(tableDocRef(String(n)), {
           id: String(n), number: n,
           status: 'boş' satisfies TableStatus,
           sessionId: null, openedAt: null,
@@ -337,16 +339,16 @@ export default function TablesPage() {
       let deleteCount = 0
 
       if (deleteModal.type === 'single' && deleteModal.tableId) {
-        batch.delete(rd('tables', deleteModal.tableId))
+        batch.delete(tableDocRef(deleteModal.tableId))
         deleteCount = 1
       } else if (deleteModal.type === 'selected') {
         for (const id of selectedIds) {
-          batch.delete(rd('tables', id))
+          batch.delete(tableDocRef(id))
           deleteCount++
         }
       } else if (deleteModal.type === 'all') {
         for (const table of tables) {
-          batch.delete(rd('tables', table.id))
+          batch.delete(tableDocRef(table.id))
           deleteCount++
         }
       }

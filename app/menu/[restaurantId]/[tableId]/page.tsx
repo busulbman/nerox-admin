@@ -39,7 +39,7 @@ import {
   normalizeRestaurantGeneralSettings,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
-import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
+import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
 import type { CartItem, Category, MenuThemeSettings, Product, RestaurantGeneralSettings, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
@@ -68,6 +68,8 @@ const ACTIVE_HELP_REQUEST_MESSAGE = 'Zaten aktif yardım talebiniz var. Garsonun
 const ACTIVE_PAYMENT_REQUEST_MESSAGE = 'Hesap talebiniz zaten iletildi. Lütfen garsonunuzu bekleyin.'
 const SESSION_CLOSED_MESSAGE = 'Bu masa oturumu kapatıldı. Lütfen garsondan yardım isteyin.'
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
+const DEFAULT_CUSTOMER_NAME = 'Müşteri'
+const ANONYMOUS_CUSTOMER_NAME_PATTERN = /^Müşteri(?:\s+(\d+))?$/
 
 function createSessionId(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -113,11 +115,16 @@ function getCartKey(restaurantId: string, tableId: string, sessionId: string) {
   return `nerox_cart_${restaurantId}_${tableId}_${sessionId}`
 }
 
+function normalizeStoredCustomerName(value: string | null): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed || null
+}
+
 function readCustomerName(restaurantId: string, tableId: string, sessionId: string): string | null {
-  const tableScoped = window.localStorage.getItem(getCustomerNameKey(restaurantId, tableId))
+  const tableScoped = normalizeStoredCustomerName(window.localStorage.getItem(getCustomerNameKey(restaurantId, tableId)))
   if (tableScoped) return tableScoped
 
-  return window.localStorage.getItem(`nerox_customer_name_${restaurantId}_${tableId}_${sessionId}`)
+  return normalizeStoredCustomerName(window.localStorage.getItem(`nerox_customer_name_${restaurantId}_${tableId}_${sessionId}`))
 }
 
 function saveCustomerName(restaurantId: string, tableId: string, name: string) {
@@ -135,6 +142,48 @@ function readCart(restaurantId: string, tableId: string, sessionId: string): Car
 
 function saveCart(restaurantId: string, tableId: string, sessionId: string, cart: CartItem[]) {
   window.localStorage.setItem(getCartKey(restaurantId, tableId, sessionId), JSON.stringify(cart))
+}
+
+function collectCustomerNamesFromCalls(calls: WaiterCall[]): string[] {
+  const names = new Set<string>()
+
+  for (const call of calls) {
+    if (call.customerName?.trim()) {
+      names.add(call.customerName.trim())
+    }
+
+    if (call.groupedByCustomer) {
+      for (const customerName of Object.keys(call.groupedByCustomer)) {
+        const trimmed = customerName.trim()
+        if (trimmed) names.add(trimmed)
+      }
+    }
+
+    for (const item of call.items ?? []) {
+      if (item.customerName.trim()) {
+        names.add(item.customerName.trim())
+      }
+    }
+  }
+
+  return [...names]
+}
+
+function getNextAnonymousCustomerName(existingNames: string[]): string {
+  let maxIndex = 0
+
+  for (const name of existingNames) {
+    const match = name.trim().match(ANONYMOUS_CUSTOMER_NAME_PATTERN)
+    if (!match) continue
+
+    const parsedIndex = match[1] ? Number.parseInt(match[1], 10) : 1
+    if (Number.isFinite(parsedIndex)) {
+      maxIndex = Math.max(maxIndex, parsedIndex)
+    }
+  }
+
+  if (maxIndex === 0) return DEFAULT_CUSTOMER_NAME
+  return `${DEFAULT_CUSTOMER_NAME} ${maxIndex + 1}`
 }
 
 function hashString(value: string): number {
@@ -312,6 +361,7 @@ export default function MenuPage() {
   // Cart & Customer name
   const [cart, setCart] = useState<CartItem[]>([])
   const [customerName, setCustomerName] = useState<string | null>(null)
+  const [customerNamePersisted, setCustomerNamePersisted] = useState(false)
   const [customerNameModal, setCustomerNameModal] = useState(false)
   const [customerNameInput, setCustomerNameInput] = useState('')
   const [cartDrawer, setCartDrawer] = useState(false)
@@ -422,6 +472,7 @@ export default function MenuPage() {
       setPaymentCalls([])
       setRatedCallIds({})
       setCustomerName(null)
+      setCustomerNamePersisted(false)
       setCustomerNameInput('')
       setCustomerNameModal(false)
       setCart([])
@@ -589,10 +640,12 @@ export default function MenuPage() {
 
       if (storedName) {
         setCustomerName(storedName)
+        setCustomerNamePersisted(true)
         setCustomerNameInput(storedName)
         setCustomerNameModal(false)
       } else {
-        setCustomerName(null)
+        setCustomerName(DEFAULT_CUSTOMER_NAME)
+        setCustomerNamePersisted(false)
         setCustomerNameInput('')
         setCustomerNameModal(true)
       }
@@ -737,6 +790,66 @@ export default function MenuPage() {
     setRatingForm(EMPTY_RATING_FORM)
   }
 
+  function getKnownCustomerNames() {
+    return [
+      ...new Set([
+        ...cart.map((item) => item.customerName.trim()).filter(Boolean),
+        ...collectCustomerNamesFromCalls(sessionCalls),
+        ...collectCustomerNamesFromCalls(paymentCalls),
+      ]),
+    ]
+  }
+
+  function buildCartWithCustomerName(nextCustomerName: string) {
+    if (!customerName || customerName === nextCustomerName) return cart
+
+    return mergeCartItems(
+      [],
+      cart.map((item) => (
+        item.customerName === customerName
+          ? { ...item, customerName: nextCustomerName }
+          : item
+      ))
+    )
+  }
+
+  function persistCustomerIdentity(nextCustomerName: string) {
+    if (!restaurantId) return null
+
+    const trimmedCustomerName = nextCustomerName.trim()
+    if (!trimmedCustomerName) return null
+
+    const nextCart = buildCartWithCustomerName(trimmedCustomerName)
+    saveCustomerName(restaurantId, tableId, trimmedCustomerName)
+    setCustomerName(trimmedCustomerName)
+    setCustomerNamePersisted(true)
+    setCustomerNameInput(trimmedCustomerName)
+    setCustomerNameModal(false)
+
+    if (nextCart !== cart) {
+      setCart(nextCart)
+    }
+
+    return {
+      name: trimmedCustomerName,
+      cart: nextCart,
+    }
+  }
+
+  function ensureCustomerIdentity(preferredName?: string | null) {
+    const trimmedPreferredName = preferredName?.trim() ?? ''
+
+    if (trimmedPreferredName) {
+      return persistCustomerIdentity(trimmedPreferredName)
+    }
+
+    if (customerNamePersisted && customerName?.trim()) {
+      return persistCustomerIdentity(customerName.trim())
+    }
+
+    return persistCustomerIdentity(getNextAnonymousCustomerName(getKnownCustomerNames()))
+  }
+
   function openProduct(product: Product) {
     setSelectedProduct(product)
     setDetailQuantity(1)
@@ -815,21 +928,27 @@ export default function MenuPage() {
   }
 
   function handleSaveCustomerName() {
-    const trimmed = customerNameInput.trim()
-    if (!trimmed) return
-    saveCustomerName(restaurantId, tableId, trimmed)
-    setCustomerName(trimmed)
-    setCustomerNameInput(trimmed)
-    setCustomerNameModal(false)
+    void ensureCustomerIdentity(customerNameInput)
+  }
+
+  function handleContinueWithoutName() {
+    void ensureCustomerIdentity()
   }
 
   async function sendOrder() {
-    if (cart.length === 0 || !tableDocId || !sessionId || !customerName) return
+    if (cart.length === 0 || !tableDocId || !sessionId) return
 
     setOrderSending(true)
     setActionMessage(null)
 
     try {
+      const customerState = ensureCustomerIdentity()
+      if (!customerState) {
+        setActionMessage('Müşteri bilgisi hazırlanamadı. Lütfen tekrar deneyin.')
+        return
+      }
+
+      const { name: activeCustomerName, cart: activeCart } = customerState
       const tableRef = doc(db, 'restaurants', restaurantId, 'tables', tableDocId)
       const liveTableSnap = await getDoc(tableRef)
 
@@ -845,8 +964,8 @@ export default function MenuPage() {
         return
       }
 
-      const grouped = groupCartItemsByCustomer(cart)
-      const totalPrice = calculateCartTotal(cart)
+      const grouped = groupCartItemsByCustomer(activeCart)
+      const totalPrice = calculateCartTotal(activeCart)
       const batch = writeBatch(db)
       const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
       const newCallRef = doc(callsCollection)
@@ -859,12 +978,12 @@ export default function MenuPage() {
         tip: 'sipariş',
         durum: 'bekliyor',
         status: 'open',
-        customerName,
+        customerName: activeCustomerName,
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,
         note: '',
-        items: cart,
+        items: activeCart,
         totalPrice,
         groupedByCustomer: grouped,
       })
@@ -876,7 +995,7 @@ export default function MenuPage() {
         })
       }
 
-      logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: cart.length })
+      logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: activeCart.length })
       await batch.commit()
 
       setOrderSent(true)
@@ -905,6 +1024,13 @@ export default function MenuPage() {
     setActionMessage(null)
 
     try {
+      const customerState = ensureCustomerIdentity()
+      if (!customerState) {
+        setActionMessage('Müşteri bilgisi hazırlanamadı. Lütfen tekrar deneyin.')
+        return
+      }
+
+      const { name: activeCustomerName } = customerState
       const storedSessionId = readStoredSessionId(tableId, restaurantId, tableDocId)
       const activeSessionId = sessionId ?? storedSessionId
 
@@ -976,7 +1102,7 @@ export default function MenuPage() {
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,
-        customerName: customerName ?? null,
+        customerName: activeCustomerName,
         note: note.trim() || '',
       })
 
@@ -1002,7 +1128,7 @@ export default function MenuPage() {
           status: 'open',
           waiterId: undefined,
           waiterName: undefined,
-          customerName: customerName ?? undefined,
+          customerName: activeCustomerName,
           note: note.trim() || '',
           createdAt: Date.now(),
         }
@@ -1567,10 +1693,10 @@ export default function MenuPage() {
                     className="text-[24px] font-bold text-[#3d2b1f]"
                     style={{ fontFamily: 'var(--font-playfair), serif' }}
                   >
-                    İsminizi yazın
+                    İsminizi yazabilirsiniz
                   </h2>
                   <p className="text-sm text-[#888888] mt-1">
-                    Siparişler kişi bazlı takip edilsin diye bu cihaz için adınızı kaydedelim.
+                    Siparişler kişi bazlı takip edilsin diye bu cihaz için adınızı kaydedebilir veya isimsiz devam edebilirsiniz.
                   </p>
                 </div>
                 {canDismissCustomerModal && (
@@ -1608,12 +1734,19 @@ export default function MenuPage() {
                   </button>
                 )}
                 <button
+                  onClick={handleContinueWithoutName}
+                  className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold"
+                  style={{ background: '#fff', color: '#3d2b1f', border: '1px solid rgba(61,43,31,0.12)' }}
+                >
+                  İsimsiz Devam Et
+                </button>
+                <button
                   onClick={handleSaveCustomerName}
                   disabled={!customerNameInput.trim()}
                   className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-bold disabled:opacity-50"
                   style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                 >
-                  Kaydet
+                  Adımı Kaydet
                 </button>
               </div>
             </div>
@@ -1851,7 +1984,7 @@ export default function MenuPage() {
                         </div>
                         <button
                           onClick={sendOrder}
-                          disabled={orderSending || cart.length === 0 || !customerName}
+                          disabled={orderSending || cart.length === 0}
                           className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
                           style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                         >

@@ -7,7 +7,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { db, RESTAURANT_ID } from "@/lib/firebase";
+import { db, LEGACY_RESTAURANT_IDS } from "@/lib/firebase";
 
 export type ResolvedRestaurant = {
   id: string;
@@ -59,40 +59,18 @@ export async function resolveRestaurantBySlugOrId(
     };
   }
 
-  const allRestaurantsSnap = await getDocs(collection(db, "restaurants"));
+  if (LEGACY_RESTAURANT_IDS.includes(slugOrId as (typeof LEGACY_RESTAURANT_IDS)[number])) {
+    for (const legacyId of LEGACY_RESTAURANT_IDS) {
+      const legacySnap = await getDoc(doc(db, "restaurants", legacyId));
+      if (!legacySnap.exists()) continue;
 
-  for (const restaurantDoc of allRestaurantsSnap.docs) {
-    const generalSettingsRef = doc(
-      db,
-      "restaurants",
-      restaurantDoc.id,
-      "settings",
-      "general",
-    );
-    const generalSettingsSnap = await getDoc(generalSettingsRef);
-
-    if (generalSettingsSnap.exists()) {
-      const data = generalSettingsSnap.data();
-      if (
-        typeof data.slug === "string" &&
-        data.slug.toLowerCase() === slugOrId.toLowerCase()
-      ) {
-        return {
-          id: restaurantDoc.id,
-          slug: data.slug,
-          name:
-            typeof data.businessName === "string" ? data.businessName : null,
-        };
-      }
+      const data = legacySnap.data();
+      return {
+        id: legacySnap.id,
+        slug: typeof data.slug === "string" ? data.slug : null,
+        name: typeof data.name === "string" ? data.name : null,
+      };
     }
-  }
-
-  if (slugOrId === RESTAURANT_ID || slugOrId === "mrssimone" || slugOrId === "varina") {
-    return {
-      id: RESTAURANT_ID,
-      slug: null,
-      name: null,
-    };
   }
 
   return null;

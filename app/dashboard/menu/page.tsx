@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { addDoc, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { Upload, Trash2, Image as ImageIcon, FileUp, Settings, Pencil, Trash, Check, Square } from 'lucide-react'
-import { db, rc, rd, RESTAURANT_ID } from '@/lib/firebase'
+import { db, rc, rd } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import { DEFAULT_MENU_PRIMARY_COLOR, isValidMenuPrimaryColor, getMenuPrimaryTextColor } from '@/lib/menu-theme'
 import type { Category, Product } from '@/lib/types'
@@ -131,7 +131,7 @@ async function uploadToImgBB(file: File): Promise<{ success: true; url: string }
 
 export default function MenuPage() {
   const { profile } = useAuth()
-  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const restaurantId = profile?.restaurantId || ''
 
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -157,10 +157,14 @@ export default function MenuPage() {
   const [menuColorSaving, setMenuColorSaving] = useState(false)
   const [menuColorMessage, setMenuColorMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const menuColorInitialized = useRef(false)
+  const categoryDocRef = (categoryId: string) => rd(restaurantId, 'categories', categoryId)
+  const productDocRef = (productId: string) => rd(restaurantId, 'products', productId)
 
   useEffect(() => {
+    if (!restaurantId) return
+
     const unsubCats = onSnapshot(
-      query(rc('categories'), orderBy('order', 'asc')),
+      query(rc(restaurantId, 'categories'), orderBy('order', 'asc')),
       (snapshot) => {
         const cats = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Category))
         setCategories(cats)
@@ -168,16 +172,17 @@ export default function MenuPage() {
       }
     )
     const unsubProds = onSnapshot(
-      query(rc('products'), orderBy('name', 'asc')),
+      query(rc(restaurantId, 'products'), orderBy('name', 'asc')),
       (snapshot) => setProducts(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Product)))
     )
     return () => {
       unsubCats()
       unsubProds()
     }
-  }, [])
+  }, [restaurantId])
 
   useEffect(() => {
+    if (!restaurantId || menuColorInitialized.current) return
     if (menuColorInitialized.current) return
 
     async function loadMenuSettings() {
@@ -201,17 +206,17 @@ export default function MenuPage() {
   async function saveCat() {
     if (!catName.trim()) return
     if (catModal.editing) {
-      await updateDoc(rd('categories', catModal.editing.id), { name: catName.trim() })
+      await updateDoc(categoryDocRef(catModal.editing.id), { name: catName.trim() })
     } else {
       const maxOrder = categories.length > 0 ? Math.max(...categories.map((category) => category.order)) : 0
-      await addDoc(rc('categories'), { name: catName.trim(), order: maxOrder + 1 })
+      await addDoc(rc(restaurantId, 'categories'), { name: catName.trim(), order: maxOrder + 1 })
     }
     setCatModal({ open: false })
   }
 
   async function deleteCat(catId: string) {
     if (!confirm('Bu kategoriyi silmek istediğinizden emin misiniz?')) return
-    await deleteDoc(rd('categories', catId))
+    await deleteDoc(categoryDocRef(catId))
     setSelectedCatId((prev) => (prev === catId ? (categories.find((category) => category.id !== catId)?.id ?? null) : prev))
   }
 
@@ -257,9 +262,9 @@ export default function MenuPage() {
       image: prodForm.image.trim(),
     }
     if (prodModal.editing) {
-      await updateDoc(rd('products', prodModal.editing.id), data)
+      await updateDoc(productDocRef(prodModal.editing.id), data)
     } else {
-      await addDoc(rc('products'), data)
+      await addDoc(rc(restaurantId, 'products'), data)
     }
     setProdModal({ open: false })
     setProdImageError('')
@@ -267,11 +272,11 @@ export default function MenuPage() {
 
   async function deleteProd(prodId: string) {
     if (!confirm('Bu ürünü silmek istediğinizden emin misiniz?')) return
-    await deleteDoc(rd('products', prodId))
+    await deleteDoc(productDocRef(prodId))
   }
 
   async function toggleAvailable(product: Product) {
-    await updateDoc(rd('products', product.id), { available: !product.available })
+    await updateDoc(productDocRef(product.id), { available: !product.available })
   }
 
   function handleBulkParse() {
@@ -303,7 +308,7 @@ export default function MenuPage() {
       const existing = categoryMap.get(catName.toLowerCase())
       if (!existing) {
         maxOrder += 1
-        const newCatRef = doc(rc('categories'))
+        const newCatRef = doc(rc(restaurantId, 'categories'))
         batch.set(newCatRef, { name: catName, order: maxOrder })
         categoryMap.set(catName.toLowerCase(), newCatRef.id)
         categoriesCreated++
@@ -323,7 +328,7 @@ export default function MenuPage() {
       )
 
       if (existingProduct) {
-        productBatch.update(rd('products', existingProduct.id), {
+        productBatch.update(productDocRef(existingProduct.id), {
           description: item.description,
           price: item.price,
           available: true,
@@ -331,7 +336,7 @@ export default function MenuPage() {
         })
         productsUpdated++
       } else {
-        const newProdRef = doc(rc('products'))
+        const newProdRef = doc(rc(restaurantId, 'products'))
         productBatch.set(newProdRef, {
           name: item.name,
           description: item.description,
@@ -396,6 +401,9 @@ export default function MenuPage() {
         <div>
           <h1 className="font-bold text-2xl" style={{ color: BROWN }}>Menü Yönetimi</h1>
           <p className="text-gray-400 text-sm mt-0.5">Menü içerikleri ve QR menü görünümü buradan yönetilir.</p>
+          {process.env.NODE_ENV === 'development' && restaurantId && (
+            <p className="text-[11px] mt-2 font-mono text-gray-400">Aktif restaurantId: {restaurantId}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

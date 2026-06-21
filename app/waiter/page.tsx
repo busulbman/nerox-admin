@@ -9,7 +9,7 @@ import {
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
 import { Bell, UtensilsCrossed, Armchair, ClipboardList } from 'lucide-react'
-import { auth, db, rd, rtdb, RESTAURANT_ID } from '@/lib/firebase'
+import { auth, db, rd, rtdb } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
 import CallCard from '@/components/waiter/CallCard'
@@ -73,11 +73,13 @@ function createSessionId(): string {
 export default function WaiterPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
-  const { settings: restaurantSettings } = useRestaurantSettings(profile?.restaurantId)
+  const restaurantId = profile?.restaurantId || ''
+  const { settings: restaurantSettings } = useRestaurantSettings(restaurantId)
 
   const BROWN = restaurantSettings?.primaryColor || DEFAULT_PRIMARY_COLOR
   const GOLD = DEFAULT_ACCENT_COLOR
   const businessName = resolveRestaurantBusinessName(restaurantSettings)
+  const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
 
   const [activeTab,  setActiveTab]  = useState<Tab>('calls')
   const [openSection, setOpenSection] = useState<Section>('pending')
@@ -127,11 +129,11 @@ export default function WaiterPage() {
 
   // ─── RTDB presence system ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!user || !profile || profile.role !== 'waiter') return
+    if (!user || !profile || profile.role !== 'waiter' || !restaurantId) return
 
     const uid = user.uid
     const waiterName = profile.name
-    const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters/${uid}`)
+    const presenceRef = dbRef(rtdb, `presence/${restaurantId}/waiters/${uid}`)
     const connectedRef = dbRef(rtdb, '.info/connected')
 
     const unsubscribe = onValue(connectedRef, (snap) => {
@@ -151,7 +153,7 @@ export default function WaiterPage() {
     })
 
     return () => unsubscribe()
-  }, [user, profile])
+  }, [profile, restaurantId, user])
 
   async function fetchDoneCalls(waiterId: string, restaurantId: string) {
     const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(restaurantId))
@@ -163,7 +165,7 @@ export default function WaiterPage() {
 
   // ─── Open calls listener ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter') return
+    if (!profile || profile.role !== 'waiter' || !restaurantId) return
 
     const currentProfile = profile
 
@@ -192,9 +194,9 @@ export default function WaiterPage() {
       setConnectionLost(true)
     }
 
-    logFirestoreRead('waiter/open calls listener', currentProfile.restaurantId)
+    logFirestoreRead('waiter/open calls listener', restaurantId)
     const unsubscribe = onSnapshot(
-      getRestaurantOpenCallsQuery(currentProfile.restaurantId),
+      getRestaurantOpenCallsQuery(restaurantId),
       processSnapshot,
       handleSnapshotError
     )
@@ -202,8 +204,8 @@ export default function WaiterPage() {
     // Visibility/focus handler: refetch when tab becomes active again
     async function refetchOnWake() {
       try {
-        logFirestoreRead('waiter/refetch on wake', currentProfile.restaurantId)
-        const snap = await getDocs(getRestaurantOpenCallsQuery(currentProfile.restaurantId))
+        logFirestoreRead('waiter/refetch on wake', restaurantId)
+        const snap = await getDocs(getRestaurantOpenCallsQuery(restaurantId))
         processSnapshot(snap)
       } catch (err) {
         console.error('Çağrı yenileme hatası:', err)
@@ -228,18 +230,18 @@ export default function WaiterPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleFocus)
     }
-  }, [profile])
+  }, [profile, restaurantId])
 
   // ─── Ratings listener ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls') return
+    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || !restaurantId) return
 
     const currentProfile = profile
     let cancelled = false
 
     async function loadMyRatings() {
-      logFirestoreRead('waiter/ratings', { restaurantId: currentProfile.restaurantId, waiterId: currentProfile.uid })
-      const snap = await getDocs(getWaiterRecentRatingsQuery(currentProfile.restaurantId, currentProfile.uid))
+      logFirestoreRead('waiter/ratings', { restaurantId, waiterId: currentProfile.uid })
+      const snap = await getDocs(getWaiterRecentRatingsQuery(restaurantId, currentProfile.uid))
       if (cancelled) return
       setMyRatings(
         snap.docs
@@ -253,17 +255,17 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, profile])
+  }, [activeTab, profile, restaurantId])
 
   // ─── Done calls on demand ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || openSection !== 'done') return
+    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || openSection !== 'done' || !restaurantId) return
 
     const currentProfile = profile
     let cancelled = false
 
     async function loadDoneCalls() {
-      const allCompleted = await fetchDoneCalls(currentProfile.uid, currentProfile.restaurantId)
+      const allCompleted = await fetchDoneCalls(currentProfile.uid, restaurantId)
       if (cancelled) return
       setDone(allCompleted.filter((call) => getCallCompletedAt(call) >= getTodayStartTs()))
     }
@@ -273,20 +275,19 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, openSection, profile])
+  }, [activeTab, openSection, profile, restaurantId])
 
   // ─── Tables listener ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'tables') return
+    if (!profile || profile.role !== 'waiter' || activeTab !== 'tables' || !restaurantId) return
 
-    const currentProfile = profile
     let cancelled = false
 
     async function loadTables() {
       setTablesLoaded(false)
       try {
-        logFirestoreRead('waiter/tables', currentProfile.restaurantId)
-        const snap = await getDocs(getRestaurantTablesQuery(currentProfile.restaurantId))
+        logFirestoreRead('waiter/tables', restaurantId)
+        const snap = await getDocs(getRestaurantTablesQuery(restaurantId))
         if (cancelled) return
         setTables(
           snap.docs
@@ -305,15 +306,15 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, profile])
+  }, [activeTab, profile, restaurantId])
 
   // ─── Menu loader (once) ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || menuLoaded) return
+    if (!profile || menuLoaded || !restaurantId) return
     async function loadMenu() {
       const [catSnap, prodSnap] = await Promise.all([
-        getDocs(query(collection(db, 'restaurants', RESTAURANT_ID, 'categories'), orderBy('order', 'asc'))),
-        getDocs(collection(db, 'restaurants', RESTAURANT_ID, 'products')),
+        getDocs(query(collection(db, 'restaurants', restaurantId, 'categories'), orderBy('order', 'asc'))),
+        getDocs(collection(db, 'restaurants', restaurantId, 'products')),
       ])
       const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
       setCategories(cats)
@@ -322,7 +323,7 @@ export default function WaiterPage() {
       setMenuLoaded(true)
     }
     loadMenu().catch(() => {})
-  }, [profile, menuLoaded])
+  }, [menuLoaded, profile, restaurantId])
 
   // ─── Tick for elapsed times ───────────────────────────────────────────────
   useEffect(() => {
@@ -334,16 +335,16 @@ export default function WaiterPage() {
 
   // ─── Actions ──────────────────────────────────────────────────────────────
   async function acceptCall(call: WaiterCall) {
-    if (!profile) return
+    if (!profile || !restaurantId) return
     setCallBusyId(call.id)
     setCallError('')
     try {
-      logFirestoreWrite('waiter/accept call', { restaurantId: profile.restaurantId, callId: call.id })
+      logFirestoreWrite('waiter/accept call', { restaurantId, callId: call.id })
 
       const batch = writeBatch(db)
 
       // Update call status
-      batch.update(doc(db, 'restaurants', profile.restaurantId, 'calls', call.id), {
+      batch.update(doc(db, 'restaurants', restaurantId, 'calls', call.id), {
         durum: 'kabul edildi',
         status: 'accepted',
         waiterId: profile.uid,
@@ -353,7 +354,7 @@ export default function WaiterPage() {
 
       // Update table status to aktif (garson kabul etti, çağrı artık işleniyor)
       if (call.tableId) {
-        batch.update(rd('tables', call.tableId), {
+        batch.update(tableDocRef(call.tableId), {
           status: 'aktif' as TableStatus,
           updatedAt: serverTimestamp(),
         })
@@ -370,19 +371,19 @@ export default function WaiterPage() {
   }
 
   async function completeCall(call: WaiterCall) {
-    if (!profile) return
+    if (!profile || !restaurantId) return
     setCallBusyId(call.id)
     setCallError('')
     try {
-      logFirestoreWrite('waiter/complete call', { restaurantId: profile.restaurantId, callId: call.id })
-      await completeRestaurantCall(profile.restaurantId, call, {
+      logFirestoreWrite('waiter/complete call', { restaurantId, callId: call.id })
+      await completeRestaurantCall(restaurantId, call, {
         uid: profile.uid,
         name: profile.name,
         role: 'waiter',
       })
       setActive((current) => current.filter((activeCall) => activeCall.id !== call.id))
       if (activeTab === 'calls' && openSection === 'done') {
-        const allCompleted = await fetchDoneCalls(profile.uid, profile.restaurantId)
+        const allCompleted = await fetchDoneCalls(profile.uid, restaurantId)
         setDone(allCompleted.filter((doneCall) => getCallCompletedAt(doneCall) >= getTodayStartTs()))
       }
     } catch (err) {
@@ -400,11 +401,11 @@ export default function WaiterPage() {
     try {
       logFirestoreWrite('waiter/open table session', { tableId: table.id, sessionId: newSessionId })
       await runTransaction(db, async (tx) => {
-        const snap = await tx.get(rd('tables', table.id))
+        const snap = await tx.get(tableDocRef(table.id))
         if (!snap.exists()) throw new Error('Masa bulunamadı.')
         const t = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
         if (t.status !== 'boş') throw new Error(`Masa şu anda "${TABLE_STATUS_LABEL[t.status] ?? t.status}" durumunda.`)
-        tx.update(rd('tables', table.id), {
+        tx.update(tableDocRef(table.id), {
           status: 'aktif', sessionId: newSessionId, openedAt: serverTimestamp(), lastPaymentCompletedAt: null, lastPaymentWaiterName: null, updatedAt: serverTimestamp(),
         })
       })
@@ -417,10 +418,10 @@ export default function WaiterPage() {
   }
 
   async function handleLogout() {
-    if (user && profile) {
+    if (user && profile && restaurantId) {
       // Clear RTDB presence
       try {
-        const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters/${user.uid}`)
+        const presenceRef = dbRef(rtdb, `presence/${restaurantId}/waiters/${user.uid}`)
         await dbSet(presenceRef, {
           online: false,
           name: profile.name,

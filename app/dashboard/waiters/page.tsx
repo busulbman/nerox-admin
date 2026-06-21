@@ -10,7 +10,7 @@ import {
   getRestaurantRecentRatingsQuery,
   getRestaurantWaiterUsersQuery,
 } from '@/lib/firestore-queries'
-import { auth, createFirebaseUser, db, ensureRealtimeDatabaseAuth, rtdb, RESTAURANT_ID } from '@/lib/firebase'
+import { auth, createFirebaseUser, db, ensureRealtimeDatabaseAuth, rtdb } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import type { Rating, UserProfile, WaiterCall } from '@/lib/types'
 
@@ -91,7 +91,7 @@ const inputCls =
 
 export default function WaitersPage() {
   const { user, profile } = useAuth()
-  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+  const restaurantId = profile?.restaurantId || ''
   const [waiters, setWaiters] = useState<UserProfile[]>([])
   const [ratings, setRatings] = useState<Rating[]>([])
   const [recentCompletedCalls, setRecentCompletedCalls] = useState<WaiterCall[]>([])

@@ -5,14 +5,22 @@ import { signInWithEmailAndPassword } from 'firebase/auth'
 import { useRouter } from 'next/navigation'
 import { auth } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
+import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl } from '@/lib/restaurant-settings'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [lastRestaurantId] = useState<string | null>(() => (
+    typeof window === 'undefined' ? null : window.localStorage.getItem('nerox:last-restaurant-id')
+  ))
   const { user, profile, loading } = useAuth()
+  const { settings } = useRestaurantSettings(lastRestaurantId)
   const router = useRouter()
+  const businessName = resolveRestaurantBusinessName(settings)
+  const logoUrl = resolveRestaurantLogoUrl(settings)
 
   useEffect(() => {
     if (loading || !user) return
@@ -43,9 +51,9 @@ export default function LoginPage() {
       <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm border border-gray-100">
         <div className="text-center mb-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mrs-simone-logo.png" alt="Mrs.Simone" className="h-14 w-14 rounded-2xl object-cover mx-auto mb-3" />
-          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>Mrs.Simone Admin</h1>
-          <p className="text-gray-400 text-sm mt-1">Yönetim Girişi</p>
+          <img src={logoUrl} alt={businessName} className="h-14 w-14 rounded-2xl object-cover mx-auto mb-3" />
+          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>{businessName} Yönetim Paneli</h1>
+          <p className="text-gray-400 text-sm mt-1">Admin Girişi</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

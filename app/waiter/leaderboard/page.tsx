@@ -6,7 +6,7 @@ import { getDocs } from "firebase/firestore";
 import { ref as dbRef, onValue } from "firebase/database";
 import { logFirestoreRead } from "@/lib/firestore-debug";
 import { getRestaurantActiveWaitersQuery } from "@/lib/firestore-queries";
-import { auth, rtdb, RESTAURANT_ID } from "@/lib/firebase";
+import { auth, rtdb } from "@/lib/firebase";
 import { useAuth } from "@/components/AuthProvider";
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
@@ -46,7 +46,8 @@ function formatLastSeen(ts: unknown): string {
 export default function LeaderboardPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const { settings } = useRestaurantSettings(profile?.restaurantId || RESTAURANT_ID)
+  const restaurantId = profile?.restaurantId || ''
+  const { settings } = useRestaurantSettings(restaurantId)
   const [waiters, setWaiters] = useState<UserProfile[]>([]);
   const [presence, setPresence] = useState<Record<string, PresenceData>>({});
   const [dataLoading, setDataLoading] = useState(true);
@@ -67,7 +68,7 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     if (loading) return;
-    if (!user || !profile || profile.role !== "waiter") return;
+    if (!user || !profile || profile.role !== "waiter" || !restaurantId) return;
 
     let cancelled = false;
 
@@ -75,10 +76,8 @@ export default function LeaderboardPage() {
       setDataLoading(true);
       setDataError("");
       try {
-        logFirestoreRead("waiter/leaderboard", RESTAURANT_ID);
-        const snap = await getDocs(
-          getRestaurantActiveWaitersQuery(RESTAURANT_ID),
-        );
+        logFirestoreRead("waiter/leaderboard", restaurantId);
+        const snap = await getDocs(getRestaurantActiveWaitersQuery(restaurantId));
         if (cancelled) return;
         const list = snap.docs.map(
           (d) => ({ uid: d.id, ...d.data() }) as UserProfile,
@@ -104,13 +103,13 @@ export default function LeaderboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [loading, profile, user]);
+  }, [loading, profile, restaurantId, user]);
 
   // RTDB presence listener - only start after auth is ready
   useEffect(() => {
-    if (!user || !profile || profile.role !== "waiter") return;
+    if (!user || !profile || profile.role !== "waiter" || !restaurantId) return;
 
-    const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters`);
+    const presenceRef = dbRef(rtdb, `presence/${restaurantId}/waiters`);
     const unsubscribe = onValue(
       presenceRef,
       (snap) => {
@@ -119,14 +118,14 @@ export default function LeaderboardPage() {
       },
       (error) => {
         console.error("RTDB PRESENCE READ ERROR", {
-          path: `presence/${RESTAURANT_ID}/waiters`,
+          path: `presence/${restaurantId}/waiters`,
           uid: auth.currentUser?.uid,
           error,
         });
       },
     );
     return () => unsubscribe();
-  }, [user, profile]);
+  }, [profile, restaurantId, user]);
 
   if (loading || !profile || profile.role !== "waiter") {
     return (

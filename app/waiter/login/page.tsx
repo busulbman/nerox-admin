@@ -5,14 +5,22 @@ import { signInWithEmailAndPassword } from 'firebase/auth'
 import { useRouter } from 'next/navigation'
 import { auth } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
+import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl } from '@/lib/restaurant-settings'
 
 export default function WaiterLoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [lastRestaurantId] = useState<string | null>(() => (
+    typeof window === 'undefined' ? null : window.localStorage.getItem('nerox:last-restaurant-id')
+  ))
   const { user, profile, loading } = useAuth()
+  const { settings } = useRestaurantSettings(lastRestaurantId)
   const router = useRouter()
+  const businessName = resolveRestaurantBusinessName(settings)
+  const logoUrl = resolveRestaurantLogoUrl(settings)
 
   useEffect(() => {
     if (loading || !user) return
@@ -47,9 +55,9 @@ export default function WaiterLoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mrs-simone-logo.png" alt="Mrs.Simone" className="h-20 w-20 rounded-3xl object-cover mx-auto mb-4" />
+          <img src={logoUrl} alt={businessName} className="h-20 w-20 rounded-3xl object-cover mx-auto mb-4" />
           <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>
-            Mrs.Simone Garson Paneli
+            {businessName} Garson Paneli
           </h1>
           <p className="text-gray-400 text-sm mt-1">Garson Girişi</p>
         </div>

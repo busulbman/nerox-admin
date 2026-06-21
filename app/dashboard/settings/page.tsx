@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { Upload, Trash2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { db, RESTAURANT_ID } from '@/lib/firebase'
 import {
   DEFAULT_BUSINESS_NAME,
   DEFAULT_PRIMARY_COLOR,
-  DEFAULT_SECONDARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
-  getThemeTextColor,
+  getContrastColor,
   isValidRestaurantThemeColor,
 } from '@/lib/restaurant-settings'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
@@ -99,15 +99,9 @@ export default function SettingsPage() {
 
   async function handleSave() {
     const trimmedPrimary = form.primaryColor.trim()
-    const trimmedSecondary = form.secondaryColor.trim()
 
     if (trimmedPrimary && !isValidRestaurantThemeColor(trimmedPrimary)) {
       setMessage({ tone: 'error', text: 'Ana renk geçerli bir hex renk olmalı. Örnek: #3d2b1f' })
-      return
-    }
-
-    if (trimmedSecondary && !isValidRestaurantThemeColor(trimmedSecondary)) {
-      setMessage({ tone: 'error', text: 'İkincil renk geçerli bir hex renk olmalı. Örnek: #d4a017' })
       return
     }
 
@@ -121,7 +115,6 @@ export default function SettingsPage() {
           businessName: form.businessName.trim(),
           logoUrl: form.logoUrl.trim(),
           primaryColor: trimmedPrimary || DEFAULT_PRIMARY_COLOR,
-          secondaryColor: trimmedSecondary || DEFAULT_SECONDARY_COLOR,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -135,14 +128,12 @@ export default function SettingsPage() {
     }
   }
 
-  const previewPrimaryColor = form.primaryColor || DEFAULT_PRIMARY_COLOR
-  const previewSecondaryColor = form.secondaryColor || DEFAULT_SECONDARY_COLOR
-  const primaryTextColor = getThemeTextColor(previewPrimaryColor)
-  const secondaryTextColor = getThemeTextColor(previewSecondaryColor)
+  const previewColor = form.primaryColor || DEFAULT_PRIMARY_COLOR
+  const previewTextColor = getContrastColor(previewColor)
   const previewBusinessName = form.businessName.trim() || DEFAULT_BUSINESS_NAME
 
   const inputCls =
-    'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
+    'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#3d2b1f] focus:ring-1 focus:ring-[#3d2b1f]'
 
   if (settingsLoading) {
     return (
@@ -163,7 +154,7 @@ export default function SettingsPage() {
           Genel Ayarlar
         </h1>
         <p className="text-gray-400 text-sm mt-0.5">
-          İşletme bilgileri ve tema renkleri buradan yönetilir.
+          İşletme bilgileri ve tema rengi buradan yönetilir.
         </p>
       </div>
 
@@ -205,9 +196,10 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
                   style={{ color: '#3d2b1f' }}
                 >
+                  <Upload size={16} />
                   {uploading ? 'Yükleniyor...' : 'Dosya Seç'}
                 </button>
                 {form.logoUrl && (
@@ -221,9 +213,9 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => setForm((current) => ({ ...current, logoUrl: '' }))}
-                      className="text-xs text-red-500 hover:text-red-600"
+                      className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 rounded"
                     >
-                      Kaldır
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 )}
@@ -238,7 +230,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
-                Ana Renk (Primary)
+                Tema Rengi
               </label>
               <div className="flex items-center gap-3">
                 <input
@@ -254,28 +246,9 @@ export default function SettingsPage() {
                   placeholder={DEFAULT_PRIMARY_COLOR}
                 />
               </div>
-              <p className="text-xs text-gray-400 mt-1">Sidebar, butonlar ve vurgu renkleri için kullanılır.</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
-                İkincil Renk (Secondary)
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={form.secondaryColor || DEFAULT_SECONDARY_COLOR}
-                  onChange={(event) => setForm((current) => ({ ...current, secondaryColor: event.target.value }))}
-                  className="h-11 w-14 rounded-lg border border-gray-200 bg-white p-1 cursor-pointer"
-                />
-                <input
-                  className={inputCls}
-                  value={form.secondaryColor}
-                  onChange={(event) => setForm((current) => ({ ...current, secondaryColor: event.target.value }))}
-                  placeholder={DEFAULT_SECONDARY_COLOR}
-                />
-              </div>
-              <p className="text-xs text-gray-400 mt-1">Aktif öğeler ve vurgu metinleri için kullanılır.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Sidebar, butonlar, QR menü ve tüm vurgu alanları için kullanılır.
+              </p>
             </div>
           </div>
 
@@ -297,7 +270,7 @@ export default function SettingsPage() {
               onClick={() => void handleSave()}
               disabled={saving || uploading}
               className="font-semibold px-5 py-2.5 rounded-xl text-sm disabled:opacity-50"
-              style={{ background: previewSecondaryColor, color: secondaryTextColor }}
+              style={{ background: previewColor, color: previewTextColor }}
             >
               {saving ? 'Kaydediliyor...' : 'Kaydet'}
             </button>
@@ -308,57 +281,52 @@ export default function SettingsPage() {
           <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">Canlı Önizleme</p>
 
           <div className="rounded-[20px] overflow-hidden border border-gray-100">
-            <div className="p-5" style={{ background: previewPrimaryColor }}>
+            <div className="p-5" style={{ background: previewColor }}>
               <div className="flex items-center gap-3">
                 {form.logoUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={form.logoUrl}
                     alt={previewBusinessName}
-                    className="h-12 w-12 rounded-xl object-cover border border-white/10 bg-white"
+                    className="h-12 w-12 rounded-xl object-cover"
+                    style={{ border: `1px solid ${previewTextColor}20` }}
                   />
                 )}
                 <div>
-                  <p className="font-bold text-lg" style={{ color: secondaryTextColor === '#ffffff' ? '#ffffff' : previewSecondaryColor }}>
+                  <p className="font-bold text-lg" style={{ color: previewTextColor }}>
                     {previewBusinessName}
                   </p>
-                  <p className="text-sm opacity-70" style={{ color: primaryTextColor }}>Admin Panel</p>
+                  <p className="text-sm" style={{ color: `${previewTextColor}80` }}>Admin Panel</p>
                 </div>
               </div>
             </div>
 
             <div className="p-5 bg-[#faf7f4]">
               <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">Butonlar</p>
-              <div className="flex gap-3">
+              <div className="flex gap-3 flex-wrap">
                 <button
                   className="rounded-xl px-4 py-2.5 text-sm font-semibold"
-                  style={{ background: previewPrimaryColor, color: primaryTextColor }}
+                  style={{ background: previewColor, color: previewTextColor }}
                 >
                   Ana Buton
                 </button>
                 <button
-                  className="rounded-xl px-4 py-2.5 text-sm font-semibold"
-                  style={{ background: previewSecondaryColor, color: secondaryTextColor }}
+                  className="rounded-xl px-4 py-2.5 text-sm font-semibold border-2"
+                  style={{ borderColor: previewColor, color: previewColor, background: 'white' }}
                 >
-                  İkincil Buton
+                  Outline Buton
                 </button>
               </div>
 
-              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3 mt-5">Vurgu Renkleri</p>
-              <div className="flex gap-3 items-center">
-                <span className="text-sm font-semibold" style={{ color: previewPrimaryColor }}>Ana Vurgu</span>
-                <span className="text-sm font-semibold" style={{ color: previewSecondaryColor }}>İkincil Vurgu</span>
-              </div>
-
-              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3 mt-5">Navigasyon Örneği</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3 mt-5">Navigasyon</p>
               <div className="flex gap-2">
                 <span
                   className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                  style={{ background: previewSecondaryColor, color: secondaryTextColor }}
+                  style={{ background: `${previewColor}20`, color: previewColor }}
                 >
                   Aktif Sayfa
                 </span>
-                <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white" style={{ color: previewPrimaryColor }}>
+                <span className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500">
                   Pasif Sayfa
                 </span>
               </div>

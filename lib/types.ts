@@ -39,7 +39,6 @@ export interface RestaurantGeneralSettings {
   businessName: string
   logoUrl: string
   primaryColor: string
-  secondaryColor: string
   updatedAt?: number | null
 }
 

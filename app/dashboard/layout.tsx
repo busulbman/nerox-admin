@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
+import { Menu, Bell, LogOut } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
@@ -15,7 +16,6 @@ const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap'
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
 
-  // Don't render OpenCallsProvider until auth is ready and we have a restaurantId
   if (loading || !user || !profile?.restaurantId) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
@@ -36,28 +36,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const { pendingCalls, pendingCount, connectionLost } = useOpenCalls()
-  const { primaryColor, secondaryColor } = useRestaurantSettingsContext()
+  const { primaryColor, textColor } = useRestaurantSettingsContext()
   const router = useRouter()
 
-  const [sidebarOpen,  setSidebarOpen]  = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  const prevCallIds   = useRef<Set<string>>(new Set())
-  const initialized   = useRef(false)
+  const prevCallIds = useRef<Set<string>>(new Set())
+  const initialized = useRef(false)
 
-  // ─── Auth guard ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (loading) return
     if (!user) { router.replace('/login'); return }
     if (profile?.role === 'waiter') { router.replace('/waiter'); return }
   }, [user, profile, loading, router])
 
-  // ─── Notification permission ─────────────────────────────────────────────
   useEffect(() => {
     if (!user || profile?.role === 'waiter') return
     requestPermission()
   }, [user, profile])
 
-  // ─── Notifications from shared open-calls stream ─────────────────────────
   useEffect(() => {
     if (!user || profile?.role === 'waiter') return
 
@@ -66,7 +63,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         if (!prevCallIds.current.has(call.id)) {
           const tableNum = call.tableNumber || call.tableId || '?'
           const tip = TIP_LABEL[call.tip] ?? call.tip
-          showLocalNotification(`🔔 Masa ${tableNum} Çağırıyor`, `${tip} talebi`, '/dashboard/calls')
+          showLocalNotification(`Masa ${tableNum} Çağırıyor`, `${tip} talebi`, '/dashboard/calls')
         }
       }
     }
@@ -93,35 +90,30 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen" style={{ background: '#faf7f4' }}>
-      {/* ── Mobile top header ── */}
       <header
         className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14"
-        style={{ background: primaryColor, borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+        style={{ background: primaryColor }}
       >
-        {/* Hamburger */}
         <button
           onClick={() => setSidebarOpen(true)}
-          className="text-xl font-bold w-9 h-9 flex items-center justify-center rounded-lg"
-          style={{ color: secondaryColor, background: `${secondaryColor}20` }}
+          className="w-9 h-9 flex items-center justify-center rounded-lg"
+          style={{ color: textColor, background: `${textColor}15` }}
           aria-label="Menüyü aç"
         >
-          ☰
+          <Menu size={20} />
         </button>
 
-        {/* Title */}
-        <p className="font-bold text-sm" style={{ color: secondaryColor }}>Nerox Admin</p>
+        <p className="font-bold text-sm" style={{ color: textColor }}>Nerox Admin</p>
 
-        {/* Right actions */}
         <div className="flex items-center gap-2">
-          {/* Notification bell */}
           <div className="relative">
             <button
               onClick={() => router.push('/dashboard/calls')}
-              className="w-9 h-9 flex items-center justify-center rounded-lg text-lg"
-              style={{ background: 'rgba(255,255,255,0.08)' }}
+              className="w-9 h-9 flex items-center justify-center rounded-lg"
+              style={{ color: textColor, background: `${textColor}15` }}
               aria-label="Çağrılar"
             >
-              🔔
+              <Bell size={18} />
             </button>
             {pendingCount > 0 && (
               <span
@@ -133,21 +125,19 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          {/* Logout */}
           <button
             onClick={handleLogout}
-            className="text-xs px-2.5 py-1.5 rounded-lg"
-            style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+            className="w-9 h-9 flex items-center justify-center rounded-lg"
+            style={{ color: textColor, background: `${textColor}15` }}
+            aria-label="Çıkış"
           >
-            Çıkış
+            <LogOut size={18} />
           </button>
         </div>
       </header>
 
-      {/* ── Sidebar (handles its own mobile overlay) ── */}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* ── Main content ── */}
       <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
         {connectionLost && (
           <div

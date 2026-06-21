@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useEffectEvent, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import {
   collection,
   doc,
@@ -30,7 +30,6 @@ import {
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
 import {
-  DEFAULT_SECONDARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
   normalizeRestaurantGeneralSettings,
   resolveRestaurantBusinessName,
@@ -279,8 +278,6 @@ export default function MenuPage() {
   const params = useParams<{ restaurantId: string; tableId: string }>()
   const { restaurantId, tableId } = params
   const { user, profile, loading: authLoading } = useAuth()
-  const router = useRouter()
-
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
@@ -1038,15 +1035,15 @@ export default function MenuPage() {
   const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.name]))
 
   // Use general settings first, fall back to menu settings for backwards compatibility
-  const hasGeneralSettings = generalSettings.businessName || generalSettings.logoUrl || generalSettings.primaryColor !== DEFAULT_SECONDARY_COLOR
+  const hasGeneralSettings = Boolean(generalSettings.businessName || generalSettings.logoUrl)
   const menuDisplayName = hasGeneralSettings
     ? resolveRestaurantBusinessName(generalSettings)
     : resolveMenuDisplayName(menuSettings)
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
     ? generalSettings.logoUrl
     : menuSettings.logoUrl
-  const menuPrimaryColor = hasGeneralSettings && generalSettings.secondaryColor
-    ? generalSettings.secondaryColor
+  const menuPrimaryColor = hasGeneralSettings && generalSettings.primaryColor
+    ? generalSettings.primaryColor
     : (menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR)
   const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
 
@@ -1138,25 +1135,15 @@ export default function MenuPage() {
       >
         <header className="sticky top-0 z-20 bg-[#fafafa]/95 backdrop-blur-xl border-b border-black/5">
           <div className="max-w-5xl mx-auto px-4 pt-5 pb-4">
-            <div className="grid grid-cols-[40px_1fr_40px] items-center gap-3">
-              <button
-                onClick={() => router.back()}
-                className="h-10 w-10 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] flex items-center justify-center text-[#3d2b1f]"
-                aria-label="Geri"
-              >
-                <span className="text-lg">←</span>
-              </button>
-
-              <div className="text-center">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
                 {menuLogoUrl && (
-                  <div className="mb-2 flex justify-center">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={menuLogoUrl}
-                      alt={menuDisplayName}
-                      className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
-                    />
-                  </div>
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={menuLogoUrl}
+                    alt={menuDisplayName}
+                    className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                  />
                 )}
                 <p
                   className="text-[1.2rem] font-semibold leading-none"
@@ -1166,7 +1153,7 @@ export default function MenuPage() {
                 </p>
               </div>
 
-              <div className="relative flex justify-end">
+              <div className="relative">
                 <button
                   onClick={openCartDrawer}
                   className="h-10 w-10 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] flex items-center justify-center text-[#3d2b1f]"

@@ -2,21 +2,15 @@
 
 import { createContext, useContext, useMemo } from 'react'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import {
-  DEFAULT_PRIMARY_COLOR,
-  DEFAULT_SECONDARY_COLOR,
-  getThemeTextColor,
-} from '@/lib/restaurant-settings'
+import { DEFAULT_PRIMARY_COLOR, getContrastColor } from '@/lib/restaurant-settings'
 import type { RestaurantGeneralSettings } from '@/lib/types'
 
 interface RestaurantSettingsContextValue {
-  settings: RestaurantGeneralSettings
+  settings: RestaurantGeneralSettings | null
   loading: boolean
   error: string
   primaryColor: string
-  secondaryColor: string
-  primaryTextColor: string
-  secondaryTextColor: string
+  textColor: string
 }
 
 const RestaurantSettingsContext = createContext<RestaurantSettingsContextValue | null>(null)
@@ -32,16 +26,13 @@ export function RestaurantSettingsProvider({
 
   const value = useMemo(() => {
     const primaryColor = settings.primaryColor || DEFAULT_PRIMARY_COLOR
-    const secondaryColor = settings.secondaryColor || DEFAULT_SECONDARY_COLOR
 
     return {
       settings,
       loading,
       error,
       primaryColor,
-      secondaryColor,
-      primaryTextColor: getThemeTextColor(primaryColor),
-      secondaryTextColor: getThemeTextColor(secondaryColor),
+      textColor: getContrastColor(primaryColor),
     }
   }, [settings, loading, error])
 
@@ -61,9 +52,7 @@ export function useRestaurantSettingsContext() {
       loading: false,
       error: '',
       primaryColor: DEFAULT_PRIMARY_COLOR,
-      secondaryColor: DEFAULT_SECONDARY_COLOR,
-      primaryTextColor: getThemeTextColor(DEFAULT_PRIMARY_COLOR),
-      secondaryTextColor: getThemeTextColor(DEFAULT_SECONDARY_COLOR),
+      textColor: getContrastColor(DEFAULT_PRIMARY_COLOR),
     }
   }
 

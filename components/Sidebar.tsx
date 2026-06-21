@@ -3,18 +3,29 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
+import {
+  LayoutDashboard,
+  UtensilsCrossed,
+  Bell,
+  QrCode,
+  Star,
+  Users,
+  Settings,
+  LogOut,
+  X,
+} from 'lucide-react'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { auth } from '@/lib/firebase'
-import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { resolveRestaurantBusinessName, getContrastColor } from '@/lib/restaurant-settings'
 
 const NAV = [
-  { href: '/dashboard',          label: 'Genel Bakış', icon: '📊' },
-  { href: '/dashboard/menu',     label: 'Menü',        icon: '🍽️' },
-  { href: '/dashboard/calls',    label: 'Çağrılar',    icon: '🔔' },
-  { href: '/dashboard/tables',   label: 'Masalar / QR', icon: '🪑' },
-  { href: '/dashboard/ratings',  label: 'Yorumlar',    icon: '⭐' },
-  { href: '/dashboard/waiters',  label: 'Garsonlar',   icon: '👨‍🍳' },
-  { href: '/dashboard/settings', label: 'Genel Ayarlar', icon: '⚙️' },
+  { href: '/dashboard',          label: 'Genel Bakış',   Icon: LayoutDashboard },
+  { href: '/dashboard/menu',     label: 'Menü',          Icon: UtensilsCrossed },
+  { href: '/dashboard/calls',    label: 'Çağrılar',      Icon: Bell },
+  { href: '/dashboard/tables',   label: 'Masalar / QR',  Icon: QrCode },
+  { href: '/dashboard/ratings',  label: 'Yorumlar',      Icon: Star },
+  { href: '/dashboard/waiters',  label: 'Garsonlar',     Icon: Users },
+  { href: '/dashboard/settings', label: 'Genel Ayarlar', Icon: Settings },
 ]
 
 interface SidebarProps {
@@ -25,9 +36,11 @@ interface SidebarProps {
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const { settings, primaryColor, secondaryColor, primaryTextColor, secondaryTextColor } = useRestaurantSettingsContext()
+  const { settings, primaryColor } = useRestaurantSettingsContext()
 
   const businessName = resolveRestaurantBusinessName(settings)
+  const textColor = getContrastColor(primaryColor)
+  const activeItemBg = textColor === '#ffffff' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'
 
   async function handleLogout() {
     await signOut(auth).catch(() => {})
@@ -36,7 +49,6 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* ── Mobile overlay ── */}
       {isOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden"
@@ -45,7 +57,6 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         />
       )}
 
-      {/* ── Sidebar panel ── */}
       <aside
         className={[
           'fixed md:static inset-y-0 left-0 z-50',
@@ -56,37 +67,36 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         ].join(' ')}
         style={{ background: primaryColor }}
       >
-        {/* Close button (mobile only) */}
         <div className="md:hidden flex items-center justify-between px-5 pt-4 pb-1">
-          <p className="font-bold text-base" style={{ color: secondaryColor }}>☕ Nerox Admin</p>
+          <p className="font-bold text-base" style={{ color: textColor }}>Nerox Admin</p>
           <button
             onClick={onClose}
-            className="text-white/60 hover:text-white text-2xl leading-none px-1"
+            className="p-1 rounded-lg transition-colors"
+            style={{ color: textColor }}
             aria-label="Menüyü kapat"
           >
-            ×
+            <X size={20} />
           </button>
         </div>
 
-        {/* Logo (desktop only) */}
-        <div className="hidden md:block px-6 py-5 border-b border-white/10">
+        <div className="hidden md:block px-6 py-5 border-b" style={{ borderColor: `${textColor}20` }}>
           <div className="flex items-center gap-3">
             {settings?.logoUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={settings.logoUrl}
                 alt={businessName}
-                className="h-10 w-10 rounded-xl object-cover border border-white/10"
+                className="h-10 w-10 rounded-xl object-cover"
+                style={{ border: `1px solid ${textColor}20` }}
               />
             )}
             <div>
-              <p className="font-bold text-lg" style={{ color: secondaryColor }}>Nerox Admin</p>
-              <p className="text-xs mt-0.5" style={{ color: `${primaryTextColor}80` }}>{businessName}</p>
+              <p className="font-bold text-lg" style={{ color: textColor }}>Nerox Admin</p>
+              <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>{businessName}</p>
             </div>
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {NAV.map((item) => {
             const active = pathname === item.href
@@ -98,25 +108,25 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-colors"
                 style={
                   active
-                    ? { background: secondaryColor, color: secondaryTextColor, fontWeight: 600 }
-                    : { color: `${primaryTextColor}bf` }
+                    ? { background: activeItemBg, color: textColor, fontWeight: 600 }
+                    : { color: `${textColor}bf` }
                 }
               >
-                <span className="text-base">{item.icon}</span>
+                <item.Icon size={18} />
                 {item.label}
               </Link>
             )
           })}
         </nav>
 
-        {/* Logout */}
-        <div className="px-3 py-4 border-t border-white/10">
+        <div className="px-3 py-4 border-t" style={{ borderColor: `${textColor}20` }}>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-colors"
-            style={{ color: `${primaryTextColor}80` }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-colors hover:opacity-80"
+            style={{ color: `${textColor}80` }}
           >
-            <span>🚪</span> Çıkış Yap
+            <LogOut size={18} />
+            Çıkış Yap
           </button>
         </div>
       </aside>

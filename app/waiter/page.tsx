@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
+import { Bell, UtensilsCrossed, Armchair, ClipboardList } from 'lucide-react'
 import { auth, db, rd, rtdb, RESTAURANT_ID } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
@@ -27,7 +28,7 @@ import { requestPermission, showNotification } from '@/lib/notifications'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import {
   DEFAULT_PRIMARY_COLOR,
-  DEFAULT_SECONDARY_COLOR,
+  DEFAULT_ACCENT_COLOR,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 
@@ -35,7 +36,7 @@ type Section = 'pending' | 'active' | 'done'
 type Tab = 'calls' | 'menu' | 'tables'
 
 const DEFAULT_BROWN = DEFAULT_PRIMARY_COLOR
-const DEFAULT_GOLD = DEFAULT_SECONDARY_COLOR
+const DEFAULT_GOLD = DEFAULT_ACCENT_COLOR
 
 const TABLE_STATUS_LABEL: Record<string, string> = {
   boş: 'Boş', aktif: 'Aktif', 'çağrı var': 'Çağrı Var',
@@ -75,7 +76,7 @@ export default function WaiterPage() {
   const { settings: restaurantSettings } = useRestaurantSettings(profile?.restaurantId)
 
   const BROWN = restaurantSettings?.primaryColor || DEFAULT_PRIMARY_COLOR
-  const GOLD = restaurantSettings?.secondaryColor || DEFAULT_SECONDARY_COLOR
+  const GOLD = DEFAULT_ACCENT_COLOR
   const businessName = resolveRestaurantBusinessName(restaurantSettings)
 
   const [activeTab,  setActiveTab]  = useState<Tab>('calls')
@@ -598,7 +599,7 @@ export default function WaiterPage() {
               <section>
                 <SectionHeader label="Bugün Tamamladıklarım" count={done.length} badge={done.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {done.length === 0 ? (
-                  <EmptyState icon="📋" text="Henüz tamamlanan çağrı yok" />
+                  <EmptyState icon={<ClipboardList size={32} />} text="Henüz tamamlanan çağrı yok" />
                 ) : (
                   <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #f0ede9' }}>
                     {done.map((call, i) => (
@@ -653,7 +654,7 @@ export default function WaiterPage() {
                   </div>
                 )}
                 {visibleProducts.length === 0 ? (
-                  <EmptyState icon="🍽️" text="Bu kategoride ürün yok" />
+                  <EmptyState icon={<UtensilsCrossed size={32} />} text="Bu kategoride ürün yok" />
                 ) : (
                   <div className="space-y-3">
                     {visibleProducts.map((p) => (
@@ -695,7 +696,7 @@ export default function WaiterPage() {
                 {[1,2,3,4,5,6].map((i) => <div key={i} className="bg-white rounded-2xl h-20 animate-pulse border border-gray-100" />)}
               </div>
             ) : tables.length === 0 ? (
-              <EmptyState icon="🪑" text="Henüz masa eklenmemiş" />
+              <EmptyState icon={<Armchair size={32} />} text="Henüz masa eklenmemiş" />
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                 {tables.map((table) => {
@@ -736,16 +737,16 @@ export default function WaiterPage() {
         style={{ background: '#fff', borderColor: '#f0ede9', paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {([
-          { id: 'calls' as Tab, icon: '🔔', label: 'Çağrılar', badge: pending.length > 0 ? pending.length : 0 },
-          { id: 'menu'   as Tab, icon: '📋', label: 'Menü',     badge: 0 },
-          { id: 'tables' as Tab, icon: '🪑', label: 'Masalar',  badge: 0 },
+          { id: 'calls' as Tab, Icon: Bell, label: 'Çağrılar', badge: pending.length > 0 ? pending.length : 0 },
+          { id: 'menu'   as Tab, Icon: UtensilsCrossed, label: 'Menü', badge: 0 },
+          { id: 'tables' as Tab, Icon: Armchair, label: 'Masalar', badge: 0 },
         ] as const).map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className="flex-1 flex flex-col items-center py-3 relative"
           >
-            <span className="text-xl leading-none">{tab.icon}</span>
+            <tab.Icon size={22} style={{ color: activeTab === tab.id ? BROWN : '#9ca3af' }} />
             <span
               className="text-xs mt-1 font-medium"
               style={{ color: activeTab === tab.id ? BROWN : '#9ca3af' }}
@@ -800,10 +801,10 @@ function StatPill({ value, label, active, urgent, onClick, primaryColor = DEFAUL
   )
 }
 
-function EmptyState({ icon, text }: { icon: string; text: string }) {
+function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="rounded-2xl px-5 py-8 text-center" style={{ background: '#fff', border: '1px solid #f0ede9' }}>
-      <p className="text-3xl mb-2">{icon}</p>
+      <div className="flex justify-center mb-2 text-gray-300">{icon}</div>
       <p className="text-sm text-gray-400">{text}</p>
     </div>
   )

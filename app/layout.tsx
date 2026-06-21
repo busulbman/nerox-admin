@@ -5,10 +5,21 @@ import { AuthProvider } from "@/components/AuthProvider";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
-export const metadata: Metadata = {
-  title: "Nerox Admin — mrssimone Chocolate",
-  description: "QR Menü Yönetim Paneli",
-};
+export const metadata = {
+  title: 'Mrs.Simone Admin',
+  description: 'QR Menü ve Sipariş Yönetim Sistemi',
+  openGraph: {
+    title: 'Mrs.Simone Admin',
+    description: 'QR Menü ve Sipariş Yönetim Sistemi',
+    images: ['/simoneLogo.png'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Mrs.Simone Admin',
+    description: 'QR Menü ve Sipariş Yönetim Sistemi',
+    images: ['/simoneLogo.png'],
+  },
+}
 
 export default function RootLayout({
   children,

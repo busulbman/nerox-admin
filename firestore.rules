@@ -54,6 +54,70 @@ service cloud.firestore {
             .hasOnly(['durum', 'status', 'completedAt', 'resolvedAt']);
     }
 
+    function isNonNegativeNumber(value) {
+      return (value is int || value is float) && value >= 0;
+    }
+
+    function publicCallTargetsLiveTableSession(rid) {
+      return request.resource.data.restaurantId == rid
+        && request.resource.data.tableId is string
+        && request.resource.data.tableId.size() > 0
+        && request.resource.data.tableNumber is int
+        && request.resource.data.sessionId is string
+        && request.resource.data.sessionId.size() > 0
+        && exists(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId))
+        && get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data.number == request.resource.data.tableNumber
+        && get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data.sessionId == request.resource.data.sessionId
+        && get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data.status in ['aktif', 'çağrı var', 'hesap istendi'];
+    }
+
+    function validPublicCallBase(rid) {
+      return publicCallTargetsLiveTableSession(rid)
+        && request.resource.data.durum == 'bekliyor'
+        && request.resource.data.status == 'open'
+        && request.resource.data.waiterId == null
+        && request.resource.data.waiterName == null
+        && request.resource.data.note is string;
+    }
+
+    function validPublicOrderCall(rid) {
+      return validPublicCallBase(rid)
+        && request.resource.data.tip == 'sipariş'
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() > 0
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.groupedByCustomer is map
+        && request.resource.data.groupedByCustomer.keys().size() > 0
+        && isNonNegativeNumber(request.resource.data.totalPrice)
+        && request.resource.data.keys().hasAll([
+          'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
+          'durum', 'status', 'customerName', 'createdAt', 'waiterId',
+          'waiterName', 'note', 'items', 'totalPrice', 'groupedByCustomer'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
+          'durum', 'status', 'customerName', 'createdAt', 'waiterId',
+          'waiterName', 'note', 'items', 'totalPrice', 'groupedByCustomer'
+        ]);
+    }
+
+    function validPublicServiceCall(rid) {
+      return validPublicCallBase(rid)
+        && request.resource.data.tip in ['yardım', 'hesap']
+        && (request.resource.data.customerName == null || request.resource.data.customerName is string)
+        && request.resource.data.keys().hasAll([
+          'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
+          'durum', 'status', 'customerName', 'createdAt', 'waiterId',
+          'waiterName', 'note'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
+          'durum', 'status', 'customerName', 'createdAt', 'waiterId',
+          'waiterName', 'note'
+        ]);
+    }
+
     // ─── Users collection ───────────────────────────────────────────────────────
 
     match /users/{uid} {
@@ -157,21 +221,16 @@ service cloud.firestore {
         allow create, update, delete: if isAdmin(rid);
         allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid);
 
-        // Customer: create new call with restricted fields
+        // Customer: create new call with tip-specific restricted fields
         allow create: if !signedIn()
-          && request.resource.data.tableId is string
-          && request.resource.data.sessionId is string
-          && request.resource.data.tip in ['sipariş', 'hesap', 'yardım']
-          && request.resource.data.durum == 'bekliyor'
-          && request.resource.data.waiterId == null
-          && request.resource.data.waiterName == null
-          && request.resource.data.keys().hasAll(['tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip', 'durum', 'createdAt', 'waiterId', 'waiterName', 'note']);
+          && (validPublicOrderCall(rid) || validPublicServiceCall(rid));
       }
 
-      // ── Menu Settings ─────────────────────────────────────────────────────────
+      // ── Settings (menu, general) ───────────────────────────────────────────
 
       match /settings/{settingId} {
-        allow read: if settingId == 'menu' || isStaff(rid);
+        // Public read for menu and general settings (QR menu needs logo/colors)
+        allow read: if settingId == 'menu' || settingId == 'general' || isStaff(rid);
         allow write: if isAdmin(rid);
       }
 

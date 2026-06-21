@@ -24,12 +24,18 @@ import {
 } from '@/lib/firestore-models'
 import type { Category, Product, Rating, Table, TableStatus, WaiterCall } from '@/lib/types'
 import { requestPermission, showNotification } from '@/lib/notifications'
+import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+import {
+  DEFAULT_PRIMARY_COLOR,
+  DEFAULT_SECONDARY_COLOR,
+  resolveRestaurantBusinessName,
+} from '@/lib/restaurant-settings'
 
 type Section = 'pending' | 'active' | 'done'
 type Tab = 'calls' | 'menu' | 'tables'
 
-const BROWN = '#3d2b1f'
-const GOLD = '#d4a017'
+const DEFAULT_BROWN = DEFAULT_PRIMARY_COLOR
+const DEFAULT_GOLD = DEFAULT_SECONDARY_COLOR
 
 const TABLE_STATUS_LABEL: Record<string, string> = {
   boş: 'Boş', aktif: 'Aktif', 'çağrı var': 'Çağrı Var',
@@ -66,6 +72,11 @@ function createSessionId(): string {
 export default function WaiterPage() {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
+  const { settings: restaurantSettings } = useRestaurantSettings(profile?.restaurantId)
+
+  const BROWN = restaurantSettings?.primaryColor || DEFAULT_PRIMARY_COLOR
+  const GOLD = restaurantSettings?.secondaryColor || DEFAULT_SECONDARY_COLOR
+  const businessName = resolveRestaurantBusinessName(restaurantSettings)
 
   const [activeTab,  setActiveTab]  = useState<Tab>('calls')
   const [openSection, setOpenSection] = useState<Section>('pending')
@@ -439,7 +450,7 @@ export default function WaiterPage() {
         <div className="px-5 pt-4 pb-3">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>Varina Chocolate</p>
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{businessName}</p>
               <p className="font-bold text-lg leading-tight mt-0.5" style={{ color: GOLD }}>
                 Merhaba, {profile.name.split(' ')[0]} 👋
               </p>
@@ -464,9 +475,9 @@ export default function WaiterPage() {
 
           {activeTab === 'calls' && (
             <div className="flex gap-2 mt-3 pb-1">
-              <StatPill value={pending.length} label="Bekliyor" active={openSection === 'pending'} urgent={pending.length > 0} onClick={() => setOpenSection('pending')} />
-              <StatPill value={active.length}  label="Aktifim"  active={openSection === 'active'}  onClick={() => setOpenSection('active')} />
-              <StatPill value={done.length}    label="Bugün ✓"  active={openSection === 'done'}    onClick={() => setOpenSection('done')} />
+              <StatPill value={pending.length} label="Bekliyor" active={openSection === 'pending'} urgent={pending.length > 0} onClick={() => setOpenSection('pending')} primaryColor={BROWN} secondaryColor={GOLD} />
+              <StatPill value={active.length}  label="Aktifim"  active={openSection === 'active'}  onClick={() => setOpenSection('active')} primaryColor={BROWN} secondaryColor={GOLD} />
+              <StatPill value={done.length}    label="Bugün ✓"  active={openSection === 'done'}    onClick={() => setOpenSection('done')} primaryColor={BROWN} secondaryColor={GOLD} />
             </div>
           )}
         </div>
@@ -490,12 +501,12 @@ export default function WaiterPage() {
           <div className="space-y-6">
             {/* Puanlarım */}
             <section>
-              <SectionHeader label="Puanlarım" count={myRatings.length} badge={myRatings.length > 0 ? 'green' : undefined} />
+              <SectionHeader label="Puanlarım" count={myRatings.length} badge={myRatings.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
               <div className="bg-white rounded-2xl border border-[#f0ede9] p-5">
                 <div className="grid grid-cols-3 gap-3 mb-4">
-                  <MiniStatCard label="Ortalama" value={avgWaiterRating === '—' ? '—' : `${avgWaiterRating} ★`} />
-                  <MiniStatCard label="Toplam"   value={String(myRatings.length)} />
-                  <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} />
+                  <MiniStatCard label="Ortalama" value={avgWaiterRating === '—' ? '—' : `${avgWaiterRating} ★`} primaryColor={BROWN} />
+                  <MiniStatCard label="Toplam"   value={String(myRatings.length)} primaryColor={BROWN} />
+                  <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} primaryColor={BROWN} />
                 </div>
                 {myRatings.slice(0, 5).length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">Henüz yorum yok.</p>
@@ -516,7 +527,7 @@ export default function WaiterPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3 mb-2">
-                          <Stars value={r.waiterRating} />
+                          <Stars value={r.waiterRating} secondaryColor={GOLD} />
                           <span className="text-xs text-gray-400">Hizmet {r.serviceRating}/5</span>
                         </div>
                         <p className="text-sm leading-6" style={{ color: r.comment ? '#4b5563' : '#9ca3af' }}>
@@ -541,7 +552,7 @@ export default function WaiterPage() {
             {/* Bekleyen */}
             {openSection === 'pending' && (
               <section>
-                <SectionHeader label="Bekleyen Çağrılar" count={pending.length} badge={pending.length > 0 ? 'red' : undefined} />
+                <SectionHeader label="Bekleyen Çağrılar" count={pending.length} badge={pending.length > 0 ? 'red' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {pending.length === 0 ? (
                   <EmptyState icon="✅" text="Bekleyen çağrı yok" />
                 ) : (
@@ -563,7 +574,7 @@ export default function WaiterPage() {
             {/* Aktif */}
             {openSection === 'active' && (
               <section>
-                <SectionHeader label="Aktif Çağrılarım" count={active.length} badge={active.length > 0 ? 'gold' : undefined} />
+                <SectionHeader label="Aktif Çağrılarım" count={active.length} badge={active.length > 0 ? 'gold' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {active.length === 0 ? (
                   <EmptyState icon="⏳" text="Aktif çağrın yok" />
                 ) : (
@@ -585,7 +596,7 @@ export default function WaiterPage() {
             {/* Tamamlananlar */}
             {openSection === 'done' && (
               <section>
-                <SectionHeader label="Bugün Tamamladıklarım" count={done.length} badge={done.length > 0 ? 'green' : undefined} />
+                <SectionHeader label="Bugün Tamamladıklarım" count={done.length} badge={done.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {done.length === 0 ? (
                   <EmptyState icon="📋" text="Henüz tamamlanan çağrı yok" />
                 ) : (
@@ -761,30 +772,30 @@ export default function WaiterPage() {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function SectionHeader({ label, count, badge }: { label: string; count: number; badge?: 'red' | 'gold' | 'green' }) {
-  const colors = { red: { bg: '#ef4444', text: '#fff' }, gold: { bg: GOLD, text: BROWN }, green: { bg: '#22c55e', text: '#fff' } }
+function SectionHeader({ label, count, badge, primaryColor = DEFAULT_BROWN, secondaryColor = DEFAULT_GOLD }: { label: string; count: number; badge?: 'red' | 'gold' | 'green'; primaryColor?: string; secondaryColor?: string }) {
+  const colors = { red: { bg: '#ef4444', text: '#fff' }, gold: { bg: secondaryColor, text: primaryColor }, green: { bg: '#22c55e', text: '#fff' } }
   const c = badge ? colors[badge] : null
   return (
     <div className="flex items-center gap-2 mb-3 px-1">
-      <span className="text-sm font-bold tracking-wide uppercase" style={{ color: BROWN }}>{label}</span>
+      <span className="text-sm font-bold tracking-wide uppercase" style={{ color: primaryColor }}>{label}</span>
       {c && <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: c.bg, color: c.text }}>{count}</span>}
     </div>
   )
 }
 
-function StatPill({ value, label, active, urgent, onClick }: {
-  value: number; label: string; active: boolean; urgent?: boolean; onClick: () => void
+function StatPill({ value, label, active, urgent, onClick, primaryColor = DEFAULT_BROWN, secondaryColor = DEFAULT_GOLD }: {
+  value: number; label: string; active: boolean; urgent?: boolean; onClick: () => void; primaryColor?: string; secondaryColor?: string
 }) {
   return (
     <button
       onClick={onClick}
       className="flex-1 rounded-xl py-2 px-3 text-center transition-all"
-      style={active ? { background: GOLD } : { background: 'rgba(255,255,255,0.1)' }}
+      style={active ? { background: secondaryColor } : { background: 'rgba(255,255,255,0.1)' }}
     >
-      <p className="text-lg font-black leading-none" style={{ color: active ? BROWN : urgent && value > 0 ? '#fca5a5' : '#fff' }}>
+      <p className="text-lg font-black leading-none" style={{ color: active ? primaryColor : urgent && value > 0 ? '#fca5a5' : '#fff' }}>
         {value}
       </p>
-      <p className="text-xs mt-0.5" style={{ color: active ? BROWN : 'rgba(255,255,255,0.6)' }}>{label}</p>
+      <p className="text-xs mt-0.5" style={{ color: active ? primaryColor : 'rgba(255,255,255,0.6)' }}>{label}</p>
     </button>
   )
 }
@@ -798,18 +809,18 @@ function EmptyState({ icon, text }: { icon: string; text: string }) {
   )
 }
 
-function MiniStatCard({ label, value }: { label: string; value: string }) {
+function MiniStatCard({ label, value, primaryColor = DEFAULT_BROWN }: { label: string; value: string; primaryColor?: string }) {
   return (
     <div className="rounded-xl px-3 py-3 text-center" style={{ background: '#faf7f4' }}>
       <p className="text-xs text-gray-400 mb-1">{label}</p>
-      <p className="text-lg font-bold" style={{ color: BROWN }}>{value}</p>
+      <p className="text-lg font-bold" style={{ color: primaryColor }}>{value}</p>
     </div>
   )
 }
 
-function Stars({ value }: { value: number }) {
+function Stars({ value, secondaryColor = DEFAULT_GOLD }: { value: number; secondaryColor?: string }) {
   return (
-    <span className="text-sm tracking-[0.2em]" style={{ color: GOLD }}>
+    <span className="text-sm tracking-[0.2em]" style={{ color: secondaryColor }}>
       {'★'.repeat(Math.max(0, Math.min(5, value)))}
       <span style={{ color: '#d1d5db' }}>{'★'.repeat(Math.max(0, 5 - value))}</span>
     </span>

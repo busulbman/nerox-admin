@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { useAuth } from '@/components/AuthProvider'
 import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { auth } from '@/lib/firebase'
 import { requestPermission, showLocalNotification } from '@/lib/notifications'
 import Sidebar from '@/components/Sidebar'
@@ -24,15 +25,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <OpenCallsProvider restaurantId={profile.restaurantId}>
-      <DashboardLayoutInner>{children}</DashboardLayoutInner>
-    </OpenCallsProvider>
+    <RestaurantSettingsProvider restaurantId={profile.restaurantId}>
+      <OpenCallsProvider restaurantId={profile.restaurantId}>
+        <DashboardLayoutInner>{children}</DashboardLayoutInner>
+      </OpenCallsProvider>
+    </RestaurantSettingsProvider>
   )
 }
 
 function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const { pendingCalls, pendingCount, connectionLost } = useOpenCalls()
+  const { primaryColor, secondaryColor } = useRestaurantSettingsContext()
   const router = useRouter()
 
   const [sidebarOpen,  setSidebarOpen]  = useState(false)
@@ -92,20 +96,20 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
       {/* ── Mobile top header ── */}
       <header
         className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14"
-        style={{ background: '#3d2b1f', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+        style={{ background: primaryColor, borderBottom: '1px solid rgba(255,255,255,0.08)' }}
       >
         {/* Hamburger */}
         <button
           onClick={() => setSidebarOpen(true)}
           className="text-xl font-bold w-9 h-9 flex items-center justify-center rounded-lg"
-          style={{ color: '#d4a017', background: 'rgba(212,160,23,0.12)' }}
+          style={{ color: secondaryColor, background: `${secondaryColor}20` }}
           aria-label="Menüyü aç"
         >
           ☰
         </button>
 
         {/* Title */}
-        <p className="font-bold text-sm" style={{ color: '#d4a017' }}>Nerox Admin</p>
+        <p className="font-bold text-sm" style={{ color: secondaryColor }}>Nerox Admin</p>
 
         {/* Right actions */}
         <div className="flex items-center gap-2">

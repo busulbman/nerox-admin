@@ -25,12 +25,21 @@ export interface Product {
   price: number
   categoryId: string
   available: boolean
+  image?: string
 }
 
 export interface MenuThemeSettings {
   displayName: string
   logoUrl: string
   primaryColor: string
+  updatedAt?: number | null
+}
+
+export interface RestaurantGeneralSettings {
+  businessName: string
+  logoUrl: string
+  primaryColor: string
+  secondaryColor: string
   updatedAt?: number | null
 }
 

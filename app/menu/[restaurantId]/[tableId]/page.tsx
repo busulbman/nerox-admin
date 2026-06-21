@@ -29,8 +29,14 @@ import {
   normalizeMenuThemeSettings,
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
+import {
+  DEFAULT_SECONDARY_COLOR,
+  EMPTY_RESTAURANT_GENERAL_SETTINGS,
+  normalizeRestaurantGeneralSettings,
+  resolveRestaurantBusinessName,
+} from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
-import type { CartItem, Category, MenuThemeSettings, Product, Table, WaiterCall } from '@/lib/types'
+import type { CartItem, Category, MenuThemeSettings, Product, RestaurantGeneralSettings, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -59,16 +65,6 @@ const ACTIVE_PAYMENT_REQUEST_MESSAGE = 'Hesap talebiniz zaten iletildi. Lütfen 
 const SESSION_CLOSED_MESSAGE = 'Bu masa oturumu kapatıldı. Lütfen garsondan yardım isteyin.'
 const STAFF_RATING_MESSAGE = 'Personel hesabı ile müşteri puanlaması gönderilemez.'
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
-
-const IMAGE_PRESETS = {
-  waffle: 'https://images.unsplash.com/photo-1562376552-0d160a2f238d?w=400&q=80',
-  crepe: 'https://images.unsplash.com/photo-1519676867240-f03562e64548?w=400&q=80',
-  coffee: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=400&q=80',
-  chocolate: 'https://images.unsplash.com/photo-1511381939415-e44a8dcb8239?w=400&q=80',
-  icecream: 'https://images.unsplash.com/photo-1563805042-7684c019e1cb?w=400&q=80',
-  cake: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400&q=80',
-  default: 'https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&q=80',
-} as const
 
 function createSessionId(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -161,33 +157,18 @@ function getProductMeta(product: Product, categoryName: string): ProductMeta {
   const key = hashString(`${product.id}:${product.name}:${categoryName}`)
   const magnitude = Math.abs(key)
 
-  const imageUrl =
-    haystack.includes('vafle') || haystack.includes('waffle')
-      ? IMAGE_PRESETS.waffle
-      : haystack.includes('krep')
-        ? IMAGE_PRESETS.crepe
-        : haystack.includes('kahve') || haystack.includes('latte') || haystack.includes('cappuccino') || haystack.includes('espresso')
-          ? IMAGE_PRESETS.coffee
-          : haystack.includes('dondurma') || haystack.includes('milkshake')
-            ? IMAGE_PRESETS.icecream
-            : haystack.includes('pasta') || haystack.includes('cheesecake') || haystack.includes('cake')
-              ? IMAGE_PRESETS.cake
-              : haystack.includes('çikolata') || haystack.includes('fondant') || haystack.includes('brownie') || haystack.includes('trüf')
-                ? IMAGE_PRESETS.chocolate
-                : IMAGE_PRESETS.default
-
   const fallbackEmoji =
-    imageUrl === IMAGE_PRESETS.waffle
+    haystack.includes('vafle') || haystack.includes('waffle')
       ? '🧇'
-      : imageUrl === IMAGE_PRESETS.crepe
+      : haystack.includes('krep')
         ? '🥞'
-        : imageUrl === IMAGE_PRESETS.coffee
+        : haystack.includes('kahve') || haystack.includes('latte') || haystack.includes('cappuccino') || haystack.includes('espresso')
           ? '☕'
-          : imageUrl === IMAGE_PRESETS.icecream
+          : haystack.includes('dondurma') || haystack.includes('milkshake')
             ? '🍨'
-            : imageUrl === IMAGE_PRESETS.cake
+            : haystack.includes('pasta') || haystack.includes('cheesecake') || haystack.includes('cake')
               ? '🍰'
-              : imageUrl === IMAGE_PRESETS.chocolate
+              : haystack.includes('çikolata') || haystack.includes('fondant') || haystack.includes('brownie') || haystack.includes('trüf')
                 ? '🍫'
                 : '🍽️'
 
@@ -205,7 +186,7 @@ function getProductMeta(product: Product, categoryName: string): ProductMeta {
   }
 
   return {
-    imageUrl,
+    imageUrl: typeof product.image === 'string' ? product.image.trim() : '',
     fallbackEmoji,
     ingredientIcons: ingredientIcons.slice(0, 4),
     prepTime: 10 + (magnitude % 11),
@@ -303,6 +284,7 @@ export default function MenuPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
+  const [generalSettings, setGeneralSettings] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
@@ -354,19 +336,21 @@ export default function MenuPage() {
 
   useEffect(() => {
     async function loadMenu() {
-      logFirestoreRead('menu/products + categories', restaurantId)
-      const [catSnap, prodSnap, settingsSnap] = await Promise.all([
+      logFirestoreRead('menu/products + categories + settings', restaurantId)
+      const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
         getDocs(query(collection(db, 'restaurants', restaurantId, 'categories'), orderBy('order', 'asc'))),
         getDocs(collection(db, 'restaurants', restaurantId, 'products')),
         getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'menu')),
+        getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'general')),
       ])
 
-      const nextCategories = catSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Category))
-      const nextProducts = prodSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Product))
+      const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
+      const nextProducts = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product))
 
       setCategories(nextCategories)
       setProducts(nextProducts)
-      setMenuSettings(settingsSnap.exists() ? normalizeMenuThemeSettings(settingsSnap.data()) : { ...EMPTY_MENU_THEME_SETTINGS })
+      setMenuSettings(menuSettingsSnap.exists() ? normalizeMenuThemeSettings(menuSettingsSnap.data()) : { ...EMPTY_MENU_THEME_SETTINGS })
+      setGeneralSettings(generalSettingsSnap.exists() ? normalizeRestaurantGeneralSettings(generalSettingsSnap.data()) : { ...EMPTY_RESTAURANT_GENERAL_SETTINGS })
       setActiveCat(nextCategories[0]?.id ?? null)
       setLoading(false)
     }
@@ -798,7 +782,7 @@ export default function MenuPage() {
 
       batch.set(newCallRef, {
         tableId: tableDocId,
-        tableNumber: table?.number ?? 0,
+        tableNumber: table?.number ?? liveTable.number,
         sessionId,
         restaurantId,
         tip: 'sipariş',
@@ -1052,8 +1036,18 @@ export default function MenuPage() {
   )
 
   const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.name]))
-  const menuDisplayName = resolveMenuDisplayName(menuSettings)
-  const menuPrimaryColor = menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR
+
+  // Use general settings first, fall back to menu settings for backwards compatibility
+  const hasGeneralSettings = generalSettings.businessName || generalSettings.logoUrl || generalSettings.primaryColor !== DEFAULT_SECONDARY_COLOR
+  const menuDisplayName = hasGeneralSettings
+    ? resolveRestaurantBusinessName(generalSettings)
+    : resolveMenuDisplayName(menuSettings)
+  const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
+    ? generalSettings.logoUrl
+    : menuSettings.logoUrl
+  const menuPrimaryColor = hasGeneralSettings && generalSettings.secondaryColor
+    ? generalSettings.secondaryColor
+    : (menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR)
   const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
@@ -1154,11 +1148,11 @@ export default function MenuPage() {
               </button>
 
               <div className="text-center">
-                {menuSettings.logoUrl && (
+                {menuLogoUrl && (
                   <div className="mb-2 flex justify-center">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={menuSettings.logoUrl}
+                      src={menuLogoUrl}
                       alt={menuDisplayName}
                       className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
                     />
@@ -1253,7 +1247,7 @@ export default function MenuPage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4">
-              {visibleProducts.map((product) => {
+              {visibleProducts.map((product, index) => {
                 const categoryName = categoryNames[product.categoryId] ?? ''
                 const meta = getProductMeta(product, categoryName)
                 const isFavorite = !!favoriteIds[product.id]
@@ -1274,10 +1268,12 @@ export default function MenuPage() {
                   >
                     <div className="relative">
                       <MenuProductImage
+                        key={`${product.id}:${meta.imageUrl || 'placeholder'}`}
                         alt={product.name}
                         imageUrl={meta.imageUrl}
                         fallbackEmoji={meta.fallbackEmoji}
                         heightClass="h-[140px]"
+                        priority={index === 0}
                       />
 
                       <button
@@ -1383,6 +1379,7 @@ export default function MenuPage() {
               <div className="h-1.5 w-14 rounded-full bg-black/10 mx-auto mt-3 mb-3" />
               <div className="relative">
                 <MenuProductImage
+                  key={`${selectedProduct.id}:${getProductMeta(selectedProduct, categoryNames[selectedProduct.categoryId] ?? '').imageUrl || 'placeholder'}`}
                   alt={selectedProduct.name}
                   imageUrl={getProductMeta(selectedProduct, categoryNames[selectedProduct.categoryId] ?? '').imageUrl}
                   fallbackEmoji={getProductMeta(selectedProduct, categoryNames[selectedProduct.categoryId] ?? '').fallbackEmoji}
@@ -1930,15 +1927,17 @@ function MenuProductImage({
 }) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
+  const hasImage = imageUrl.length > 0
 
   return (
     <div className={`relative overflow-hidden bg-[#f2ede2] ${heightClass} ${roundedClass}`}>
-      {!failed && (
+      {hasImage && !failed && (
         <Image
           src={imageUrl}
           alt={alt}
           fill
           priority={priority}
+          loading={priority ? 'eager' : 'lazy'}
           sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
           className={`object-cover transition duration-500 ${loaded ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}`}
           onLoad={() => setLoaded(true)}
@@ -1960,9 +1959,17 @@ function MenuProductImage({
         />
       )}
 
-      {(failed || !imageUrl) && (
-        <div className="absolute inset-0 flex items-center justify-center text-5xl">
-          {fallbackEmoji}
+      {(!hasImage || failed) && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center"
+          style={{
+            background: 'linear-gradient(160deg, #f7f2e8 0%, #ece3d3 100%)',
+          }}
+        >
+          <span className="text-5xl">{fallbackEmoji}</span>
+          <span className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8b7355]">
+            Gorsel Hazirlaniyor
+          </span>
         </div>
       )}
     </div>

@@ -5,11 +5,12 @@ import {
   createUserWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { getDatabase } from "firebase/database";
+import { getDatabase, type Database } from "firebase/database";
+
+const ROOT_MENU_COLLECTIONS = new Set(["categories", "products"]);
 
 const realtimeDatabaseUrl =
-  process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
-  "https://nerox-admin-default-rtdb.europe-west1.firebasedatabase.app/";
+  process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL?.trim() || "";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -18,27 +19,38 @@ const firebaseConfig = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  databaseURL: realtimeDatabaseUrl,
+  ...(realtimeDatabaseUrl ? { databaseURL: realtimeDatabaseUrl } : {}),
 };
 
 const app =
   getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 export const db = getFirestore(app);
 export const auth = getAuth(app);
-export const rtdb = getDatabase(app);
+export const isRealtimeDatabaseEnabled = realtimeDatabaseUrl.length > 0;
+export const rtdb: Database | null = isRealtimeDatabaseEnabled
+  ? getDatabase(app, realtimeDatabaseUrl)
+  : null;
 
 export async function ensureRealtimeDatabaseAuth() {
+  if (!rtdb) return false;
   await auth.authStateReady?.();
   if (auth.currentUser) {
     await auth.currentUser.getIdToken();
   }
+  return true;
 }
 
 export function rc(restaurantId: string, colName: string) {
+  if (ROOT_MENU_COLLECTIONS.has(colName)) {
+    return collection(db, colName);
+  }
   return collection(db, "restaurants", restaurantId, colName);
 }
 
 export function rd(restaurantId: string, colName: string, docId: string) {
+  if (ROOT_MENU_COLLECTIONS.has(colName)) {
+    return doc(db, colName, docId);
+  }
   return doc(db, "restaurants", restaurantId, colName, docId);
 }
 

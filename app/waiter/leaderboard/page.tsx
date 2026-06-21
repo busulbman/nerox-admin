@@ -107,7 +107,7 @@ export default function LeaderboardPage() {
 
   // RTDB presence listener - only start after auth is ready
   useEffect(() => {
-    if (!user || !profile || profile.role !== "waiter" || !restaurantId) return;
+    if (!user || !profile || profile.role !== "waiter" || !restaurantId || !rtdb) return;
 
     const presenceRef = dbRef(rtdb, `presence/${restaurantId}/waiters`);
     const unsubscribe = onValue(
@@ -117,11 +117,13 @@ export default function LeaderboardPage() {
         setPresence(data ?? {});
       },
       (error) => {
-        console.error("RTDB PRESENCE READ ERROR", {
-          path: `presence/${restaurantId}/waiters`,
-          uid: auth.currentUser?.uid,
-          error,
-        });
+        if (process.env.NODE_ENV !== "production") {
+          console.error("RTDB PRESENCE READ ERROR", {
+            path: `presence/${restaurantId}/waiters`,
+            uid: auth.currentUser?.uid,
+            error,
+          });
+        }
       },
     );
     return () => unsubscribe();

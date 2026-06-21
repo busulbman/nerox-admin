@@ -149,17 +149,26 @@ export default function WaitersPage() {
   // RTDB presence listener - only start after auth is ready
   useEffect(() => {
     if (!user || !profile || profile.role !== 'admin') return
+    if (!rtdb) return
+    const presenceDb: NonNullable<typeof rtdb> = rtdb
 
     let unsubscribe: (() => void) | null = null
     let cancelled = false
 
     async function startPresenceListener() {
       try {
-        await ensureRealtimeDatabaseAuth()
+        const authReady = await ensureRealtimeDatabaseAuth()
+        if (!authReady || cancelled) {
+          if (!cancelled) {
+            setPresence({})
+            setPresenceWarning('Canlı durum bilgisi şu anda kullanılamıyor.')
+          }
+          return
+        }
         if (cancelled) return
 
         const path = `presence/${restaurantId}/waiters`
-        const presenceRef = dbRef(rtdb, path)
+        const presenceRef = dbRef(presenceDb, path)
         unsubscribe = onValue(
           presenceRef,
           (snap) => {
@@ -342,6 +351,8 @@ export default function WaitersPage() {
   const teamAverage = averageNumber(rankedWaiters.map((waiter) => waiter.avgWaiterRating).filter((value): value is number => value !== null))
   const totalComments = rankedWaiters.reduce((sum, waiter) => sum + waiter.totalRatings, 0)
   const onlineCount = waiters.filter((waiter) => presence[waiter.uid]?.online).length
+  const realtimePresenceWarning =
+    presenceWarning || (!rtdb ? 'Canlı durum bilgisi şu anda kullanılamıyor.' : '')
 
   return (
     <>
@@ -376,12 +387,12 @@ export default function WaitersPage() {
           />
         </div>
 
-        {presenceWarning && (
+        {realtimePresenceWarning && (
           <div
             className="rounded-2xl px-4 py-3 text-sm"
             style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }}
           >
-            {presenceWarning}
+            {realtimePresenceWarning}
           </div>
         )}
 

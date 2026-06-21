@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  collection, doc, getDocs, onSnapshot, orderBy, query,
+  doc, getDocs, onSnapshot,
   runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
@@ -15,6 +15,8 @@ import { useAuth } from '@/components/AuthProvider'
 import CallCard from '@/components/waiter/CallCard'
 import {
   getRestaurantOpenCallsQuery,
+  getMenuCategoriesQuery,
+  getMenuProductsQuery,
   getRestaurantRecentCompletedCallsQuery,
   getRestaurantTablesQuery,
   getWaiterRecentRatingsQuery,
@@ -129,7 +131,7 @@ export default function WaiterPage() {
 
   // ─── RTDB presence system ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!user || !profile || profile.role !== 'waiter' || !restaurantId) return
+    if (!user || !profile || profile.role !== 'waiter' || !restaurantId || !rtdb) return
 
     const uid = user.uid
     const waiterName = profile.name
@@ -287,8 +289,8 @@ export default function WaiterPage() {
     if (!profile || menuLoaded || !restaurantId) return
     async function loadMenu() {
       const [catSnap, prodSnap] = await Promise.all([
-        getDocs(query(collection(db, 'restaurants', restaurantId, 'categories'), orderBy('order', 'asc'))),
-        getDocs(collection(db, 'restaurants', restaurantId, 'products')),
+        getDocs(getMenuCategoriesQuery()),
+        getDocs(getMenuProductsQuery()),
       ])
       const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
       setCategories(cats)
@@ -392,7 +394,7 @@ export default function WaiterPage() {
   }
 
   async function handleLogout() {
-    if (user && profile && restaurantId) {
+    if (user && profile && restaurantId && rtdb) {
       // Clear RTDB presence
       try {
         const presenceRef = dbRef(rtdb, `presence/${restaurantId}/waiters/${user.uid}`)

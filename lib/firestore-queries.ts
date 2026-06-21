@@ -49,6 +49,20 @@ export function getRestaurantTablesQuery(restaurantId: string, max = DEFAULT_TAB
   )
 }
 
+export function getMenuCategoriesQuery() {
+  return query(
+    collection(db, 'categories'),
+    orderBy('order', 'asc')
+  )
+}
+
+export function getMenuProductsQuery() {
+  return query(
+    collection(db, 'products'),
+    orderBy('name', 'asc')
+  )
+}
+
 export function getRestaurantWaiterUsersQuery(restaurantId: string) {
   return query(
     collection(db, 'users'),

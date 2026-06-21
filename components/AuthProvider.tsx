@@ -5,6 +5,7 @@ import { browserLocalPersistence, onAuthStateChanged, setPersistence, User } fro
 import { doc, onSnapshot } from 'firebase/firestore'
 import { auth, db } from '@/lib/firebase'
 import { resolveRestaurantBySlugOrId } from '@/lib/restaurant-resolver'
+import { DEFAULT_RESTAURANT_SLUG } from '@/lib/restaurant-settings'
 import type { UserProfile } from '@/lib/types'
 
 interface AuthContextType {
@@ -19,6 +20,20 @@ const restaurantIdResolutionCache = new Map<string, string>()
 async function resolveCanonicalRestaurantId(sourceRestaurantId: string): Promise<string> {
   const cached = restaurantIdResolutionCache.get(sourceRestaurantId)
   if (cached) return cached
+
+  if (sourceRestaurantId.trim().toLowerCase() === 'varina') {
+    const legacyResolved = await resolveRestaurantBySlugOrId(DEFAULT_RESTAURANT_SLUG).catch(() => null)
+    const legacyRestaurantId = legacyResolved?.id || DEFAULT_RESTAURANT_SLUG
+
+    restaurantIdResolutionCache.set(sourceRestaurantId, legacyRestaurantId)
+    restaurantIdResolutionCache.set(legacyRestaurantId, legacyRestaurantId)
+
+    if (legacyResolved?.slug) {
+      restaurantIdResolutionCache.set(legacyResolved.slug, legacyRestaurantId)
+    }
+
+    return legacyRestaurantId
+  }
 
   const resolved = await resolveRestaurantBySlugOrId(sourceRestaurantId).catch(() => null)
   const canonicalRestaurantId = resolved?.id || sourceRestaurantId

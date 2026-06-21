@@ -33,38 +33,6 @@ service cloud.firestore {
       return isAdmin(rid) || isWaiter(rid);
     }
 
-    function isLegacyVarinaAdmin() {
-      return signedIn() && role() == 'admin' && userRestaurantId() == 'varina';
-    }
-
-    function canRunMrsSimoneMigration(rid) {
-      return isLegacyVarinaAdmin() && rid == 'mrssimone';
-    }
-
-    function validMrsSimoneRootCreate() {
-      return request.resource.data.name == 'Mrs.Simone'
-        && request.resource.data.slug == 'mrssimone'
-        && request.resource.data.status == 'active'
-        && request.resource.data.keys().hasAll(['name', 'slug', 'status'])
-        && request.resource.data.keys().hasOnly(['name', 'slug', 'status']);
-    }
-
-    function validMrsSimoneRootUpdate() {
-      return request.resource.data.name == 'Mrs.Simone'
-        && request.resource.data.slug == 'mrssimone'
-        && request.resource.data.status == 'active'
-        && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['name', 'slug', 'status']);
-    }
-
-    function canMigrateVarinaUserToMrsSimone() {
-      return isLegacyVarinaAdmin()
-        && resource.data.restaurantId == 'varina'
-        && request.resource.data.restaurantId == 'mrssimone'
-        && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['restaurantId']);
-    }
-
     function waiterCanAcceptCall(rid) {
       return isWaiter(rid)
         && resource.data.durum == 'bekliyor'
@@ -172,9 +140,6 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['isOnline', 'lastSeen']);
 
-      // One-time tenant migration: varina -> mrssimone
-      allow update: if canMigrateVarinaUserToMrsSimone();
-
       // Allow waiter to increment only their own completed call counter
       allow update: if signedIn()
         && request.auth.uid == uid
@@ -187,13 +152,25 @@ service cloud.firestore {
         && request.resource.data.totalCalls == ((resource.data.totalCalls is int ? resource.data.totalCalls : 0) + 1);
     }
 
+    // ─── Root menu data ─────────────────────────────────────────────────────────
+
+    match /categories/{catId} {
+      allow read: if true;
+      allow write: if signedIn() && role() == 'admin';
+    }
+
+    match /products/{prodId} {
+      allow read: if true;
+      allow write: if signedIn() && role() == 'admin';
+    }
+
     // ─── Restaurant data ────────────────────────────────────────────────────────
 
     match /restaurants/{rid} {
       // Restaurant doc is public for slug/name/logo/theme resolution in QR menu/login
       allow read: if true;
-      allow create: if isAdmin(rid) || (canRunMrsSimoneMigration(rid) && validMrsSimoneRootCreate());
-      allow update: if isAdmin(rid) || (canRunMrsSimoneMigration(rid) && validMrsSimoneRootUpdate());
+      allow create: if isAdmin(rid);
+      allow update: if isAdmin(rid);
       allow delete: if isAdmin(rid);
 
       // ── Categories & Products (Menu) ──────────────────────────────────────────
@@ -202,14 +179,14 @@ service cloud.firestore {
         // Public read for menu display
         allow read: if true;
         // Only admin can modify
-        allow write: if isAdmin(rid) || canRunMrsSimoneMigration(rid);
+        allow write: if isAdmin(rid);
       }
 
       match /products/{prodId} {
         // Public read for menu display
         allow read: if true;
         // Only admin can modify
-        allow write: if isAdmin(rid) || canRunMrsSimoneMigration(rid);
+        allow write: if isAdmin(rid);
       }
 
       // ── Tables ────────────────────────────────────────────────────────────────
@@ -219,7 +196,7 @@ service cloud.firestore {
         allow read: if true;
 
         // Staff can do any write
-        allow write: if isStaff(rid) || canRunMrsSimoneMigration(rid);
+        allow write: if isStaff(rid);
 
         // Customer: open session on empty table (boş -> aktif)
         allow update: if !signedIn()
@@ -268,7 +245,7 @@ service cloud.firestore {
       match /settings/{settingId} {
         // Public read for menu and general settings (QR menu needs logo/colors)
         allow read: if settingId == 'menu' || settingId == 'general' || isStaff(rid);
-        allow write: if isAdmin(rid) || canRunMrsSimoneMigration(rid);
+        allow write: if isAdmin(rid);
       }
 
       // ── Ratings ───────────────────────────────────────────────────────────────

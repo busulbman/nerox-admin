@@ -23,6 +23,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { resolveRestaurantBySlugOrId } from '@/lib/restaurant-resolver'
+import { getMenuCategoriesQuery, getMenuProductsQuery } from '@/lib/firestore-queries'
 import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
 import {
   DEFAULT_MENU_PRIMARY_COLOR,
@@ -408,8 +409,8 @@ export default function MenuPage() {
 
       logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
       const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'restaurants', currentRestaurantId, 'categories'), orderBy('order', 'asc'))),
-        getDocs(collection(db, 'restaurants', currentRestaurantId, 'products')),
+        getDocs(getMenuCategoriesQuery()),
+        getDocs(getMenuProductsQuery()),
         getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
         getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
       ])

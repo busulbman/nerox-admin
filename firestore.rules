@@ -43,10 +43,28 @@ service cloud.firestore {
       allow read: if signedIn() && isAdmin(resource.data.restaurantId);
       allow write: if signedIn() && isAdmin(request.resource.data.restaurantId);
 
+      // Waiters can read active waiter leaderboard entries from their restaurant
+      allow read: if signedIn()
+        && role() == 'waiter'
+        && resource.data.role == 'waiter'
+        && resource.data.active == true
+        && resource.data.restaurantId == userRestaurantId();
+
       // Allow user to update their own presence fields
       allow update: if signedIn() && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['isOnline', 'lastSeen']);
+
+      // Allow waiter to increment only their own completed call counter
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && role() == 'waiter'
+        && resource.data.role == 'waiter'
+        && resource.data.restaurantId == userRestaurantId()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['totalCalls'])
+        && request.resource.data.totalCalls is int
+        && request.resource.data.totalCalls == ((resource.data.totalCalls is int ? resource.data.totalCalls : 0) + 1);
     }
 
     // ─── Restaurant data ────────────────────────────────────────────────────────

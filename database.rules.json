@@ -4,7 +4,9 @@
       "$restaurantId": {
         "waiters": {
           ".read": "auth != null",
+          ".write": false,
           "$waiterId": {
+            ".read": "auth != null",
             ".write": "auth != null && auth.uid == $waiterId"
           }
         }

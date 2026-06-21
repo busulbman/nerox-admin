@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   collection, doc, getDocs, onSnapshot, orderBy, query,
-  runTransaction, serverTimestamp, updateDoc, writeBatch,
+  runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
@@ -75,6 +75,8 @@ export default function WaiterPage() {
   const [active,  setActive]    = useState<WaiterCall[]>([])
   const [done,    setDone]      = useState<WaiterCall[]>([])
   const [myRatings, setMyRatings] = useState<Rating[]>([])
+  const [callBusyId, setCallBusyId] = useState<string | null>(null)
+  const [callError, setCallError] = useState('')
   const [, setTick] = useState(0)
 
   // Menu
@@ -321,41 +323,57 @@ export default function WaiterPage() {
   // ─── Actions ──────────────────────────────────────────────────────────────
   async function acceptCall(call: WaiterCall) {
     if (!profile) return
-    logFirestoreWrite('waiter/accept call', { restaurantId: profile.restaurantId, callId: call.id })
+    setCallBusyId(call.id)
+    setCallError('')
+    try {
+      logFirestoreWrite('waiter/accept call', { restaurantId: profile.restaurantId, callId: call.id })
 
-    const batch = writeBatch(db)
+      const batch = writeBatch(db)
 
-    // Update call status
-    batch.update(doc(db, 'restaurants', profile.restaurantId, 'calls', call.id), {
-      durum: 'kabul edildi',
-      waiterId: profile.uid,
-      waiterName: profile.name,
-      acceptedAt: serverTimestamp(),
-    })
-
-    // Update table status to aktif (garson kabul etti, çağrı artık işleniyor)
-    if (call.tableId) {
-      batch.update(rd('tables', call.tableId), {
-        status: 'aktif' as TableStatus,
-        updatedAt: serverTimestamp(),
+      // Update call status
+      batch.update(doc(db, 'restaurants', profile.restaurantId, 'calls', call.id), {
+        durum: 'kabul edildi',
+        status: 'accepted',
+        waiterId: profile.uid,
+        waiterName: profile.name,
+        acceptedAt: serverTimestamp(),
       })
-    }
 
-    await batch.commit()
-    setOpenSection('active')
+      // Update table status to aktif (garson kabul etti, çağrı artık işleniyor)
+      if (call.tableId) {
+        batch.update(rd('tables', call.tableId), {
+          status: 'aktif' as TableStatus,
+          updatedAt: serverTimestamp(),
+        })
+      }
+
+      await batch.commit()
+      setOpenSection('active')
+    } catch (err) {
+      console.error('Çağrı kabul hatası:', err)
+      setCallError(err instanceof Error ? err.message : 'Çağrı kabul edilemedi.')
+    } finally {
+      setCallBusyId(null)
+    }
   }
 
   async function completeCall(call: WaiterCall) {
     if (!profile) return
+    setCallBusyId(call.id)
+    setCallError('')
     try {
       logFirestoreWrite('waiter/complete call', { restaurantId: profile.restaurantId, callId: call.id })
       await completeRestaurantCall(profile.restaurantId, call)
+      setActive((current) => current.filter((activeCall) => activeCall.id !== call.id))
       if (activeTab === 'calls' && openSection === 'done') {
         const allCompleted = await fetchDoneCalls(profile.uid, profile.restaurantId)
         setDone(allCompleted.filter((doneCall) => getCallCompletedAt(doneCall) >= getTodayStartTs()))
       }
     } catch (err) {
       console.error('Çağrı tamamlama hatası:', err)
+      setCallError(err instanceof Error ? err.message : 'Çağrı tamamlanamadı.')
+    } finally {
+      setCallBusyId(null)
     }
   }
 
@@ -511,6 +529,15 @@ export default function WaiterPage() {
               </div>
             </section>
 
+            {callError && (
+              <div
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }}
+              >
+                {callError}
+              </div>
+            )}
+
             {/* Bekleyen */}
             {openSection === 'pending' && (
               <section>
@@ -519,7 +546,15 @@ export default function WaiterPage() {
                   <EmptyState icon="✅" text="Bekleyen çağrı yok" />
                 ) : (
                   <div className="space-y-3">
-                    {pending.map((call) => <CallCard key={call.id} call={call} variant="pending" onAccept={() => acceptCall(call)} />)}
+                    {pending.map((call) => (
+                      <CallCard
+                        key={call.id}
+                        call={call}
+                        variant="pending"
+                        busy={callBusyId === call.id}
+                        onAccept={() => acceptCall(call)}
+                      />
+                    ))}
                   </div>
                 )}
               </section>
@@ -533,7 +568,15 @@ export default function WaiterPage() {
                   <EmptyState icon="⏳" text="Aktif çağrın yok" />
                 ) : (
                   <div className="space-y-3">
-                    {active.map((call) => <CallCard key={call.id} call={call} variant="active" onComplete={() => completeCall(call)} />)}
+                    {active.map((call) => (
+                      <CallCard
+                        key={call.id}
+                        call={call}
+                        variant="active"
+                        busy={callBusyId === call.id}
+                        onComplete={() => completeCall(call)}
+                      />
+                    ))}
                   </div>
                 )}
               </section>

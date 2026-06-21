@@ -42,6 +42,7 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
 
   batch.update(callRef, {
     durum: 'tamamlandı',
+    status: 'completed',
     completedAt: completionTimestamp,
     resolvedAt: completionTimestamp,
   })

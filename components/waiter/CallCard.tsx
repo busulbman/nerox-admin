@@ -1,4 +1,5 @@
 import { getCallTableLabel } from '@/lib/firestore-models'
+import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import type { WaiterCall } from '@/lib/types'
 
 const TIP_META: Record<string, { icon: string; label: string; accent: string; lightBg: string }> = {
@@ -19,9 +20,10 @@ interface Props {
   variant: 'pending' | 'active'
   onAccept?: () => void
   onComplete?: () => void
+  busy?: boolean
 }
 
-export default function CallCard({ call, variant, onAccept, onComplete }: Props) {
+export default function CallCard({ call, variant, onAccept, onComplete, busy = false }: Props) {
   const meta = TIP_META[call.tip] ?? TIP_META.yardım
 
   return (
@@ -75,6 +77,11 @@ export default function CallCard({ call, variant, onAccept, onComplete }: Props)
             {call.note ? (
               <p className="text-sm text-gray-500 mt-1 italic">&quot;{call.note}&quot;</p>
             ) : null}
+            {call.customerName && call.tip !== 'sipariş' ? (
+              <p className="text-xs text-gray-500 mt-1">
+                Müşteri: <span className="font-semibold text-[#3d2b1f]">{call.customerName}</span>
+              </p>
+            ) : null}
             {variant === 'active' && call.acceptedAt ? (
               <p className="text-xs text-gray-400 mt-1">
                 {elapsed(call.acceptedAt)} önce kabul edildi
@@ -83,22 +90,26 @@ export default function CallCard({ call, variant, onAccept, onComplete }: Props)
           </div>
         </div>
 
+        <OrderBreakdown call={call} className="mb-3" />
+
         {/* Action button */}
         {variant === 'pending' && onAccept ? (
           <button
             onClick={onAccept}
-            className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform"
+            disabled={busy}
+            className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-50"
             style={{ background: '#d4a017', color: '#3d2b1f' }}
           >
-            Kabul Et →
+            {busy ? 'Kabul Ediliyor...' : 'Kabul Et →'}
           </button>
         ) : variant === 'active' && onComplete ? (
           <button
             onClick={onComplete}
-            className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform"
+            disabled={busy}
+            className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-50"
             style={{ background: '#22c55e', color: '#fff' }}
           >
-            ✓ Tamamlandı
+            {busy ? 'Tamamlanıyor...' : '✓ Tamamlandı'}
           </button>
         ) : null}
       </div>

@@ -45,6 +45,7 @@ export default function LeaderboardPage() {
   const [waiters, setWaiters] = useState<UserProfile[]>([])
   const [presence, setPresence] = useState<Record<string, PresenceData>>({})
   const [dataLoading, setDataLoading] = useState(true)
+  const [dataError, setDataError] = useState('')
 
   useEffect(() => {
     if (loading) return
@@ -56,20 +57,33 @@ export default function LeaderboardPage() {
   }, [user, profile, loading, router])
 
   useEffect(() => {
+    if (loading) return
+    if (!user || !profile || profile.role !== 'waiter') return
+
     let cancelled = false
 
     async function loadWaiters() {
-      logFirestoreRead('waiter/leaderboard', RESTAURANT_ID)
-      const snap = await getDocs(getRestaurantActiveWaitersQuery(RESTAURANT_ID))
-      if (cancelled) return
-      const list = snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile))
-      list.sort((a, b) => {
-        const callDiff = (b.totalCalls ?? 0) - (a.totalCalls ?? 0)
-        if (callDiff !== 0) return callDiff
-        return (b.avgRating ?? 0) - (a.avgRating ?? 0)
-      })
-      setWaiters(list)
-      setDataLoading(false)
+      setDataLoading(true)
+      setDataError('')
+      try {
+        logFirestoreRead('waiter/leaderboard', RESTAURANT_ID)
+        const snap = await getDocs(getRestaurantActiveWaitersQuery(RESTAURANT_ID))
+        if (cancelled) return
+        const list = snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile))
+        list.sort((a, b) => {
+          const callDiff = (b.totalCalls ?? 0) - (a.totalCalls ?? 0)
+          if (callDiff !== 0) return callDiff
+          return (b.avgRating ?? 0) - (a.avgRating ?? 0)
+        })
+        setWaiters(list)
+      } catch (error) {
+        if (cancelled) return
+        console.error('Leaderboard yükleme hatası:', error)
+        setWaiters([])
+        setDataError('Sıralama verileri yüklenemedi. Lütfen tekrar deneyin.')
+      } finally {
+        if (!cancelled) setDataLoading(false)
+      }
     }
 
     void loadWaiters()
@@ -77,7 +91,7 @@ export default function LeaderboardPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loading, profile, user])
 
   // RTDB presence listener - only start after auth is ready
   useEffect(() => {
@@ -133,6 +147,17 @@ export default function LeaderboardPage() {
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="bg-white rounded-2xl h-16 animate-pulse" style={{ border: '1px solid #f0ede9' }} />
             ))}
+          </div>
+        ) : dataError ? (
+          <div className="bg-white rounded-2xl p-8 text-center" style={{ border: '1px solid #f0ede9' }}>
+            <p className="text-sm" style={{ color: '#c2410c' }}>{dataError}</p>
+            <button
+              onClick={() => router.refresh()}
+              className="mt-4 text-xs px-4 py-2 rounded-lg"
+              style={{ background: '#3d2b1f', color: '#fefaf3' }}
+            >
+              Tekrar Dene
+            </button>
           </div>
         ) : waiters.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center" style={{ border: '1px solid #f0ede9' }}>

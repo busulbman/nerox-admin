@@ -48,8 +48,10 @@ export interface WaiterCall {
   restaurantId: string
   tip: 'sipariş' | 'hesap' | 'yardım'
   durum: 'bekliyor' | 'kabul edildi' | 'tamamlandı'
+  status?: 'open' | 'accepted' | 'completed'
   waiterId?: string
   waiterName?: string
+  customerName?: string
   note?: string
   createdAt: number
   acceptedAt?: number

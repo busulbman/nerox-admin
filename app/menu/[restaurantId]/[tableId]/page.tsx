@@ -22,7 +22,8 @@ import { getSessionOpenCallsQuery, getSessionPaymentCallsQuery } from '@/lib/fir
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
-import type { CartItem, Category, CustomerGroup, Product, Table, WaiterCall } from '@/lib/types'
+import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
+import type { CartItem, Category, Product, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -98,8 +99,8 @@ function getRatingPromptKey(restaurantId: string, callId: string) {
   return `nerox:rating-prompted:${restaurantId}:${callId}`
 }
 
-function getCustomerNameKey(restaurantId: string, tableId: string, sessionId: string) {
-  return `nerox_customer_name_${restaurantId}_${tableId}_${sessionId}`
+function getCustomerNameKey(restaurantId: string, tableId: string) {
+  return `nerox_customer_name_${restaurantId}_${tableId}`
 }
 
 function getCartKey(restaurantId: string, tableId: string, sessionId: string) {
@@ -107,11 +108,14 @@ function getCartKey(restaurantId: string, tableId: string, sessionId: string) {
 }
 
 function readCustomerName(restaurantId: string, tableId: string, sessionId: string): string | null {
-  return window.localStorage.getItem(getCustomerNameKey(restaurantId, tableId, sessionId))
+  const tableScoped = window.localStorage.getItem(getCustomerNameKey(restaurantId, tableId))
+  if (tableScoped) return tableScoped
+
+  return window.localStorage.getItem(`nerox_customer_name_${restaurantId}_${tableId}_${sessionId}`)
 }
 
-function saveCustomerName(restaurantId: string, tableId: string, sessionId: string, name: string) {
-  window.localStorage.setItem(getCustomerNameKey(restaurantId, tableId, sessionId), name)
+function saveCustomerName(restaurantId: string, tableId: string, name: string) {
+  window.localStorage.setItem(getCustomerNameKey(restaurantId, tableId), name)
 }
 
 function readCart(restaurantId: string, tableId: string, sessionId: string): CartItem[] {
@@ -125,18 +129,6 @@ function readCart(restaurantId: string, tableId: string, sessionId: string): Car
 
 function saveCart(restaurantId: string, tableId: string, sessionId: string, cart: CartItem[]) {
   window.localStorage.setItem(getCartKey(restaurantId, tableId, sessionId), JSON.stringify(cart))
-}
-
-function groupCartByCustomer(cart: CartItem[]): Record<string, CustomerGroup> {
-  const groups: Record<string, CustomerGroup> = {}
-  for (const item of cart) {
-    if (!groups[item.customerName]) {
-      groups[item.customerName] = { total: 0, items: [] }
-    }
-    groups[item.customerName].items.push(item)
-    groups[item.customerName].total += item.price * item.quantity
-  }
-  return groups
 }
 
 function hashString(value: string): number {
@@ -274,6 +266,36 @@ async function findTableForMenu(restaurantId: string, tableId: string): Promise<
   }
 }
 
+async function fetchSessionActivity(restaurantId: string, tableDocId: string, sessionId: string) {
+  logFirestoreRead('menu/session activity', { restaurantId, tableId: tableDocId, sessionId })
+  const [tableSnap, openCallsSnap, paymentCallsSnap] = await Promise.all([
+    getDoc(doc(db, 'restaurants', restaurantId, 'tables', tableDocId)),
+    getDocs(getSessionOpenCallsQuery(restaurantId, sessionId)),
+    getDocs(getSessionPaymentCallsQuery(restaurantId, sessionId)),
+  ])
+
+  const nextTable = tableSnap.exists()
+    ? normalizeTable(tableSnap.id, tableSnap.data() as Record<string, unknown>)
+    : null
+
+  const nextOpenCalls = openCallsSnap.docs
+    .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
+    .filter((call) => call.tableId === tableDocId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+
+  const nextPaymentCalls = paymentCallsSnap.docs
+    .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
+    .filter((call) => call.tableId === tableDocId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+
+  return {
+    table: nextTable,
+    openCalls: nextOpenCalls,
+    paymentCalls: nextPaymentCalls,
+    latestCallAt: nextOpenCalls[0]?.createdAt ?? nextPaymentCalls[0]?.createdAt ?? null,
+  }
+}
+
 export default function MenuPage() {
   const params = useParams<{ restaurantId: string; tableId: string }>()
   const { restaurantId, tableId } = params
@@ -306,8 +328,6 @@ export default function MenuPage() {
   const [customerNameModal, setCustomerNameModal] = useState(false)
   const [customerNameInput, setCustomerNameInput] = useState('')
   const [cartDrawer, setCartDrawer] = useState(false)
-  const [splitModal, setSplitModal] = useState(false)
-  const [splitCount, setSplitCount] = useState(2)
   const [orderSending, setOrderSending] = useState(false)
   const [orderSent, setOrderSent] = useState(false)
 
@@ -326,33 +346,17 @@ export default function MenuPage() {
   const [, setTick] = useState(0)
 
   const refreshSessionActivity = useEffectEvent(async (nextSessionId: string, nextTableDocId: string) => {
-    logFirestoreRead('menu/session activity', { restaurantId, tableId: nextTableDocId, sessionId: nextSessionId })
-    const [tableSnap, openCallsSnap, paymentCallsSnap] = await Promise.all([
-      getDoc(doc(db, 'restaurants', restaurantId, 'tables', nextTableDocId)),
-      getDocs(getSessionOpenCallsQuery(restaurantId, nextSessionId)),
-      getDocs(getSessionPaymentCallsQuery(restaurantId, nextSessionId)),
-    ])
+    const activity = await fetchSessionActivity(restaurantId, nextTableDocId, nextSessionId)
 
-    if (tableSnap.exists()) {
-      setTable(normalizeTable(tableSnap.id, tableSnap.data() as Record<string, unknown>))
+    if (activity.table) {
+      setTable(activity.table)
     }
 
-    const nextOpenCalls = openCallsSnap.docs
-      .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
-      .filter((call) => call.tableId === nextTableDocId)
-      .sort((a, b) => b.createdAt - a.createdAt)
+    setSessionCalls(activity.openCalls)
+    setPaymentCalls(activity.paymentCalls)
 
-    const nextPaymentCalls = paymentCallsSnap.docs
-      .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
-      .filter((call) => call.tableId === nextTableDocId)
-      .sort((a, b) => b.createdAt - a.createdAt)
-
-    setSessionCalls(nextOpenCalls)
-    setPaymentCalls(nextPaymentCalls)
-
-    const latestCallAt = nextOpenCalls[0]?.createdAt ?? nextPaymentCalls[0]?.createdAt ?? null
-    if (latestCallAt) {
-      setLastSessionCallAt((current) => Math.max(current ?? 0, latestCallAt))
+    if (activity.latestCallAt) {
+      setLastSessionCallAt((current) => Math.max(current ?? 0, activity.latestCallAt))
     }
   })
 
@@ -390,6 +394,12 @@ export default function MenuPage() {
       setPaymentCalls([])
       setRatedCallIds({})
       setLastSessionCallAt(null)
+      setCustomerName(null)
+      setCustomerNameInput('')
+      setCustomerNameModal(false)
+      setCart([])
+      setCartDrawer(false)
+      setOrderSent(false)
       setRatingModal(false)
       setRatingTargetCallId(null)
       setRatingMessage(null)
@@ -479,6 +489,18 @@ export default function MenuPage() {
             }
           }
 
+          if (
+            currentTable.sessionId &&
+            (currentTable.status === 'aktif' || currentTable.status === 'çağrı var' || currentTable.status === 'hesap istendi')
+          ) {
+            return {
+              state: 'ready' as const,
+              message: null,
+              table: currentTable,
+              sessionId: currentTable.sessionId,
+            }
+          }
+
           return {
             state: 'locked' as const,
             message: ACTIVE_SESSION_MESSAGE,
@@ -523,15 +545,35 @@ export default function MenuPage() {
   useEffect(() => {
     if (!sessionId || !tableDocId) return
 
-    const storedName = readCustomerName(restaurantId, tableId, sessionId)
-    if (storedName) {
-      setCustomerName(storedName)
-    } else {
-      setCustomerNameModal(true)
+    const currentSessionId = sessionId
+    let cancelled = false
+
+    async function loadStoredCustomerState() {
+      await Promise.resolve()
+
+      const storedName = readCustomerName(restaurantId, tableId, currentSessionId)
+      const storedCart = readCart(restaurantId, tableId, currentSessionId)
+
+      if (cancelled) return
+
+      if (storedName) {
+        setCustomerName(storedName)
+        setCustomerNameInput(storedName)
+        setCustomerNameModal(false)
+      } else {
+        setCustomerName(null)
+        setCustomerNameInput('')
+        setCustomerNameModal(true)
+      }
+
+      setCart(storedCart)
     }
 
-    const storedCart = readCart(restaurantId, tableId, sessionId)
-    setCart(storedCart)
+    void loadStoredCustomerState()
+
+    return () => {
+      cancelled = true
+    }
   }, [restaurantId, tableId, tableDocId, sessionId])
 
   // Save cart to localStorage whenever it changes
@@ -667,6 +709,11 @@ export default function MenuPage() {
     setCallModal(true)
   }
 
+  function openCartDrawer() {
+    setActionMessage(null)
+    setCartDrawer(true)
+  }
+
   function closeCallModal() {
     setCallModal(false)
     setSelectedTip(null)
@@ -699,6 +746,7 @@ export default function MenuPage() {
 
   function addToCart(product: Product, quantity: number) {
     if (!customerName) {
+      setCustomerNameInput('')
       setCustomerNameModal(true)
       return
     }
@@ -750,10 +798,6 @@ export default function MenuPage() {
     ))
   }
 
-  function clearCart() {
-    setCart([])
-  }
-
   function handleQuickAdd(product: Product) {
     addToCart(product, 1)
   }
@@ -767,14 +811,15 @@ export default function MenuPage() {
 
   function handleSaveCustomerName() {
     const trimmed = customerNameInput.trim()
-    if (!trimmed || !sessionId) return
-    saveCustomerName(restaurantId, tableId, sessionId, trimmed)
+    if (!trimmed) return
+    saveCustomerName(restaurantId, tableId, trimmed)
     setCustomerName(trimmed)
+    setCustomerNameInput(trimmed)
     setCustomerNameModal(false)
   }
 
   async function sendOrder() {
-    if (cart.length === 0 || !tableDocId || !sessionId) return
+    if (cart.length === 0 || !tableDocId || !sessionId || !customerName) return
 
     setOrderSending(true)
     setActionMessage(null)
@@ -795,28 +840,54 @@ export default function MenuPage() {
         return
       }
 
-      const grouped = groupCartByCustomer(cart)
-      const totalPrice = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      const grouped = groupCartItemsByCustomer(cart)
+      const totalPrice = calculateCartTotal(cart)
+      const sessionSnap = await getDocs(
+        query(
+          collection(db, 'restaurants', restaurantId, 'calls'),
+          where('sessionId', '==', sessionId),
+          orderBy('createdAt', 'desc'),
+          limit(50)
+        )
+      )
 
-      const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
-      const newCallRef = doc(callsCollection)
+      const openOrderCall = sessionSnap.docs
+        .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
+        .find((call) => call.tableId === tableDocId && call.tip === 'sipariş' && call.durum === 'bekliyor')
+
       const batch = writeBatch(db)
 
-      batch.set(newCallRef, {
-        tableId: tableDocId,
-        tableNumber: table?.number ?? 0,
-        sessionId,
-        restaurantId,
-        tip: 'sipariş',
-        durum: 'bekliyor',
-        createdAt: serverTimestamp(),
-        waiterId: null,
-        waiterName: null,
-        note: '',
-        items: cart,
-        totalPrice,
-        groupedByCustomer: grouped,
-      })
+      if (openOrderCall) {
+        const mergedItems = mergeCartItems(openOrderCall.items ?? [], cart)
+        batch.update(doc(db, 'restaurants', restaurantId, 'calls', openOrderCall.id), {
+          customerName,
+          items: mergedItems,
+          groupedByCustomer: groupCartItemsByCustomer(mergedItems),
+          totalPrice: calculateCartTotal(mergedItems),
+          status: 'open',
+        })
+      } else {
+        const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
+        const newCallRef = doc(callsCollection)
+
+        batch.set(newCallRef, {
+          tableId: tableDocId,
+          tableNumber: table?.number ?? 0,
+          sessionId,
+          restaurantId,
+          tip: 'sipariş',
+          durum: 'bekliyor',
+          status: 'open',
+          customerName,
+          createdAt: serverTimestamp(),
+          waiterId: null,
+          waiterName: null,
+          note: '',
+          items: cart,
+          totalPrice,
+          groupedByCustomer: grouped,
+        })
+      }
 
       if (liveTable.status === 'aktif') {
         batch.update(tableRef, {
@@ -831,10 +902,19 @@ export default function MenuPage() {
       setLastSessionCallAt(Date.now())
       setOrderSent(true)
       setCart([])
-      setCartDrawer(false)
+      const activity = await fetchSessionActivity(restaurantId, tableDocId, sessionId)
+      if (activity.table) {
+        setTable(activity.table)
+      }
+      setSessionCalls(activity.openCalls)
+      setPaymentCalls(activity.paymentCalls)
+      if (activity.latestCallAt) {
+        setLastSessionCallAt((current) => Math.max(current ?? 0, activity.latestCallAt))
+      }
 
       window.setTimeout(() => {
         setOrderSent(false)
+        setCartDrawer(false)
       }, 3000)
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : 'Sipariş gönderilemedi.')
@@ -926,9 +1006,11 @@ export default function MenuPage() {
         restaurantId,
         tip: selectedTip,
         durum: 'bekliyor',
+        status: 'open',
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,
+        customerName: customerName ?? null,
         note: note.trim() || '',
       })
 
@@ -952,8 +1034,10 @@ export default function MenuPage() {
           restaurantId,
           tip: selectedTip,
           durum: 'bekliyor',
+          status: 'open',
           waiterId: undefined,
           waiterName: undefined,
+          customerName: customerName ?? undefined,
           note: note.trim() || '',
           createdAt: Date.now(),
         }
@@ -1060,8 +1144,8 @@ export default function MenuPage() {
   const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.name]))
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
-  const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const cartGrouped = groupCartByCustomer(cart)
+  const cartTotal = calculateCartTotal(cart)
+  const cartGrouped = groupCartItemsByCustomer(cart)
 
   const hasActiveRequest = sessionCalls.some((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
   const latestCallAt = sessionCalls[0]?.createdAt ?? paymentCalls[0]?.createdAt ?? lastSessionCallAt
@@ -1111,6 +1195,7 @@ export default function MenuPage() {
     sending
 
   const displayTableLabel = table?.number ? String(table.number) : tableId
+  const canDismissCustomerModal = !!customerName
   const modalSendDisabled =
     !selectedTip ||
     sending ||
@@ -1169,7 +1254,7 @@ export default function MenuPage() {
 
               <div className="relative flex justify-end">
                 <button
-                  onClick={() => setCartDrawer(true)}
+                  onClick={openCartDrawer}
                   className="h-10 w-10 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] flex items-center justify-center text-[#3d2b1f]"
                   aria-label="Sepet"
                 >
@@ -1350,7 +1435,11 @@ export default function MenuPage() {
               </button>
 
               {cartCount > 0 && (
-                <div className="flex-1 rounded-[22px] bg-white px-4 py-3 shadow-[0_12px_24px_rgba(0,0,0,0.08)] border border-black/5">
+                <button
+                  type="button"
+                  onClick={openCartDrawer}
+                  className="flex-1 rounded-[22px] bg-white px-4 py-3 shadow-[0_12px_24px_rgba(0,0,0,0.08)] border border-black/5 text-left"
+                >
                   <p className="text-[11px] uppercase tracking-[0.2em] text-[#888888]">Sepet</p>
                   <div className="mt-1 flex items-end justify-between gap-3">
                     <div>
@@ -1359,7 +1448,7 @@ export default function MenuPage() {
                     </div>
                     <p className="text-[15px] font-bold text-[#d4a017]">{formatPrice(cartTotal)}</p>
                   </div>
-                </div>
+                </button>
               )}
             </div>
           </div>
@@ -1494,6 +1583,71 @@ export default function MenuPage() {
           </div>
         )}
 
+        {customerNameModal && (
+          <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-end sm:items-center sm:justify-center">
+            <div
+              className="w-full bg-[#fafafa] rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-[28px] sm:pb-6"
+              style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+            >
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div>
+                  <h2
+                    className="text-[24px] font-bold text-[#3d2b1f]"
+                    style={{ fontFamily: 'var(--font-playfair), serif' }}
+                  >
+                    İsminizi yazın
+                  </h2>
+                  <p className="text-sm text-[#888888] mt-1">
+                    Siparişler kişi bazlı takip edilsin diye bu cihaz için adınızı kaydedelim.
+                  </p>
+                </div>
+                {canDismissCustomerModal && (
+                  <button
+                    onClick={() => setCustomerNameModal(false)}
+                    className="h-10 w-10 rounded-full bg-white text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)] text-xl shrink-0"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              <input
+                value={customerNameInput}
+                onChange={(event) => setCustomerNameInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    handleSaveCustomerName()
+                  }
+                }}
+                placeholder="Örnek: Ahmet"
+                autoFocus
+                className="w-full rounded-[22px] bg-white px-4 py-4 text-base text-[#1a1a1a] outline-none border border-black/8 shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+              />
+
+              <div className="mt-5 flex gap-3">
+                {canDismissCustomerModal && (
+                  <button
+                    onClick={() => setCustomerNameModal(false)}
+                    className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold"
+                    style={{ background: '#fff', color: '#3d2b1f', border: '1px solid rgba(61,43,31,0.12)' }}
+                  >
+                    Vazgeç
+                  </button>
+                )}
+                <button
+                  onClick={handleSaveCustomerName}
+                  disabled={!customerNameInput.trim()}
+                  className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-bold disabled:opacity-50"
+                  style={{ background: '#d4a017', color: '#3d2b1f' }}
+                >
+                  Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {callModal && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
             <div
@@ -1569,6 +1723,152 @@ export default function MenuPage() {
                   >
                     {sending ? 'Gönderiliyor...' : 'Talebi Gönder'}
                   </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Cart Drawer ── */}
+        {cartDrawer && (
+          <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
+            <div
+              className="w-full bg-[#fafafa] rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto"
+              style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+            >
+              {orderSent ? (
+                <div className="py-10 text-center">
+                  <div className="text-5xl mb-4">✅</div>
+                  <p
+                    className="text-[24px] font-bold text-[#3d2b1f]"
+                    style={{ fontFamily: 'var(--font-playfair), serif' }}
+                  >
+                    Siparişiniz iletildi
+                  </p>
+                  <p className="text-sm text-[#888888] mt-2">Garsonunuz siparişinizi hazırlıyor.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-5">
+                    <div>
+                      <h2
+                        className="text-[24px] font-bold text-[#3d2b1f]"
+                        style={{ fontFamily: 'var(--font-playfair), serif' }}
+                      >
+                        Sepetim
+                      </h2>
+                      <p className="text-sm text-[#888888] mt-1">{cartCount} ürün • {formatPrice(cartTotal)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {customerName && (
+                        <button
+                          onClick={() => {
+                            setCustomerNameInput(customerName)
+                            setCustomerNameModal(true)
+                          }}
+                          className="rounded-full bg-white px-3 py-2 text-xs font-medium text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
+                        >
+                          İsmi Değiştir
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setCartDrawer(false)}
+                        className="h-10 w-10 rounded-full bg-white text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)] text-xl"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+
+                  {cart.length === 0 ? (
+                    <div className="py-12 text-center">
+                      <p className="text-4xl mb-3">👜</p>
+                      <p className="text-sm text-[#888888]">Sepetiniz boş</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-3">
+                        {Object.entries(cartGrouped).map(([groupName, group]) => (
+                          <div
+                            key={groupName}
+                            className="rounded-[20px] bg-white p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)] border border-black/5"
+                          >
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                              <div>
+                                <p className="font-semibold text-base text-[#3d2b1f]">{groupName}</p>
+                                <p className="text-xs text-[#888888] mt-1">{group.items.length} kalem ürün</p>
+                              </div>
+                              <p className="font-bold text-[#d4a017] shrink-0">{formatPrice(group.total)}</p>
+                            </div>
+
+                            <div className="space-y-3">
+                              {group.items.map((item) => (
+                                <div key={`${groupName}-${item.productId}`} className="rounded-2xl bg-[#faf7f4] px-3 py-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-semibold text-sm text-[#3d2b1f]">{item.name}</p>
+                                      <p className="text-xs text-[#888888] mt-1">Birim: {formatPrice(item.price)}</p>
+                                    </div>
+                                    <p className="font-bold text-[#d4a017] shrink-0">{formatPrice(item.price * item.quantity)}</p>
+                                  </div>
+                                  <div className="flex items-center justify-between mt-3">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => updateCartItemQuantity(item.productId, item.customerName, -1)}
+                                        className="h-8 w-8 rounded-full bg-white text-[#3d2b1f] text-lg flex items-center justify-center"
+                                      >
+                                        −
+                                      </button>
+                                      <span className="w-8 text-center text-sm font-bold text-[#1a1a1a]">{item.quantity}</span>
+                                      <button
+                                        onClick={() => updateCartItemQuantity(item.productId, item.customerName, 1)}
+                                        className="h-8 w-8 rounded-full bg-[#d4a017] text-[#3d2b1f] text-lg flex items-center justify-center"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                    <button
+                                      onClick={() => removeCartItem(item.productId, item.customerName)}
+                                      className="text-xs text-[#ef4444] font-medium"
+                                    >
+                                      Kaldır
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {actionMessage && (
+                        <p className="text-sm mt-4 text-[#c2410c]">{actionMessage}</p>
+                      )}
+
+                      <div className="mt-5 pt-4 border-t border-black/6">
+                        <div className="space-y-2 mb-4">
+                          {Object.entries(cartGrouped).map(([groupName, group]) => (
+                            <div key={`${groupName}-summary`} className="flex items-center justify-between text-sm">
+                              <span className="font-medium text-[#3d2b1f]">{groupName}</span>
+                              <span className="font-semibold text-[#3d2b1f]">{formatPrice(group.total)}</span>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between pt-2 border-t border-black/6">
+                            <span className="text-sm font-semibold text-[#3d2b1f]">Masa Toplamı</span>
+                            <span className="text-xl font-bold text-[#d4a017]">{formatPrice(cartTotal)}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={sendOrder}
+                          disabled={orderSending || cart.length === 0 || !customerName}
+                          className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
+                          style={{ background: '#d4a017', color: '#3d2b1f' }}
+                        >
+                          {orderSending ? 'Gönderiliyor...' : 'Siparişi Gönder'}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>

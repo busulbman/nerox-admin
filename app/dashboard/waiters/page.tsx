@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { deleteDoc, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
 import { ref as dbRef, onValue } from 'firebase/database'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -10,7 +10,7 @@ import {
   getRestaurantRecentRatingsQuery,
   getRestaurantWaiterUsersQuery,
 } from '@/lib/firestore-queries'
-import { auth, createFirebaseUser, db, rtdb, RESTAURANT_ID } from '@/lib/firebase'
+import { auth, createFirebaseUser, db, ensureRealtimeDatabaseAuth, rtdb, RESTAURANT_ID } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import type { Rating, UserProfile, WaiterCall } from '@/lib/types'
 
@@ -91,10 +91,12 @@ const inputCls =
 
 export default function WaitersPage() {
   const { user, profile } = useAuth()
+  const restaurantId = profile?.restaurantId || RESTAURANT_ID
   const [waiters, setWaiters] = useState<UserProfile[]>([])
   const [ratings, setRatings] = useState<Rating[]>([])
   const [recentCompletedCalls, setRecentCompletedCalls] = useState<WaiterCall[]>([])
   const [presence, setPresence] = useState<Record<string, PresenceData>>({})
+  const [presenceWarning, setPresenceWarning] = useState('')
 
   const [form, setForm] = useState<WaiterForm>(EMPTY_FORM)
   const [adding, setAdding] = useState(false)
@@ -109,25 +111,25 @@ export default function WaitersPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  async function loadWaiters() {
-    logFirestoreRead('dashboard/waiters', RESTAURANT_ID)
-    const snap = await getDocs(getRestaurantWaiterUsersQuery(RESTAURANT_ID))
+  const loadWaiters = useCallback(async () => {
+    logFirestoreRead('dashboard/waiters', restaurantId)
+    const snap = await getDocs(getRestaurantWaiterUsersQuery(restaurantId))
     setWaiters(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserProfile)))
-  }
+  }, [restaurantId])
 
-  async function loadRatings() {
-    logFirestoreRead('dashboard/waiters ratings', RESTAURANT_ID)
-    const snap = await getDocs(getRestaurantRecentRatingsQuery(RESTAURANT_ID))
+  const loadRatings = useCallback(async () => {
+    logFirestoreRead('dashboard/waiters ratings', restaurantId)
+    const snap = await getDocs(getRestaurantRecentRatingsQuery(restaurantId))
     setRatings(snap.docs.map((d) => normalizeRating(d.id, d.data() as Record<string, unknown>)))
-  }
+  }, [restaurantId])
 
-  async function loadRecentCompletedCalls() {
-    logFirestoreRead('dashboard/waiters completed calls', RESTAURANT_ID)
-    const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID))
+  const loadRecentCompletedCalls = useCallback(async () => {
+    logFirestoreRead('dashboard/waiters completed calls', restaurantId)
+    const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(restaurantId))
     setRecentCompletedCalls(
       snap.docs.map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
     )
-  }
+  }, [restaurantId])
 
   useEffect(() => {
     let cancelled = false
@@ -142,29 +144,63 @@ export default function WaitersPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadRatings, loadRecentCompletedCalls, loadWaiters])
 
   // RTDB presence listener - only start after auth is ready
   useEffect(() => {
     if (!user || !profile || profile.role !== 'admin') return
 
-    const presenceRef = dbRef(rtdb, `presence/${RESTAURANT_ID}/waiters`)
-    const unsubscribe = onValue(
-      presenceRef,
-      (snap) => {
-        const data = snap.val() as Record<string, PresenceData> | null
-        setPresence(data ?? {})
-      },
-      (error) => {
-        console.error('RTDB PRESENCE READ ERROR', {
-          path: `presence/${RESTAURANT_ID}/waiters`,
-          uid: auth.currentUser?.uid,
-          error,
-        })
+    let unsubscribe: (() => void) | null = null
+    let cancelled = false
+
+    async function startPresenceListener() {
+      try {
+        await ensureRealtimeDatabaseAuth()
+        if (cancelled) return
+
+        const path = `presence/${restaurantId}/waiters`
+        const presenceRef = dbRef(rtdb, path)
+        unsubscribe = onValue(
+          presenceRef,
+          (snap) => {
+            const data = snap.val() as Record<string, PresenceData> | null
+            setPresence(data ?? {})
+            setPresenceWarning('')
+          },
+          (error) => {
+            if (process.env.NODE_ENV !== 'production') {
+              console.error('RTDB PRESENCE READ ERROR', {
+                path,
+                uid: auth.currentUser?.uid,
+                error,
+              })
+            }
+            setPresence({})
+            setPresenceWarning('Canlı durum bilgisi alınamadı.')
+          }
+        )
+      } catch (error) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('RTDB PRESENCE INIT ERROR', {
+            path: `presence/${restaurantId}/waiters`,
+            uid: auth.currentUser?.uid,
+            error,
+          })
+        }
+        if (!cancelled) {
+          setPresence({})
+          setPresenceWarning('Canlı durum bilgisi alınamadı.')
+        }
       }
-    )
-    return () => unsubscribe()
-  }, [user, profile])
+    }
+
+    void startPresenceListener()
+
+    return () => {
+      cancelled = true
+      if (unsubscribe) unsubscribe()
+    }
+  }, [profile, restaurantId, user])
 
   async function handleAdd() {
     if (!form.name.trim() || !form.email.trim() || form.password.length < 6) {
@@ -183,7 +219,7 @@ export default function WaitersPage() {
         email: form.email.trim(),
         role: 'waiter',
         name: form.name.trim(),
-        restaurantId: RESTAURANT_ID,
+        restaurantId,
         active: true,
         avgRating: 0,
         totalCalls: 0,
@@ -339,6 +375,15 @@ export default function WaitersPage() {
             sub="garson bazlı tamamlanan çağrı"
           />
         </div>
+
+        {presenceWarning && (
+          <div
+            className="rounded-2xl px-4 py-3 text-sm"
+            style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }}
+          >
+            {presenceWarning}
+          </div>
+        )}
 
         {showForm && (
           <div className="bg-white rounded-2xl border border-gray-100 p-6 max-w-lg shadow-[0_12px_30px_rgba(0,0,0,0.04)]">

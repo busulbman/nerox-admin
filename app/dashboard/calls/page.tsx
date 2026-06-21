@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getDocs } from 'firebase/firestore'
+import { deleteDoc, doc, getDocs, writeBatch } from 'firebase/firestore'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { getCallCompletedAt, getCallTableLabel, isOpenWaiterCallStatus, normalizeWaiterCall } from '@/lib/firestore-models'
 import { getRestaurantRecentCompletedCallsQuery } from '@/lib/firestore-queries'
-import { RESTAURANT_ID } from '@/lib/firebase'
+import { db, RESTAURANT_ID } from '@/lib/firebase'
 import type { WaiterCall } from '@/lib/types'
 
 const TIP_CONFIG: Record<string, { label: string; icon: string; border: string; bg: string }> = {
@@ -48,36 +49,31 @@ export default function CallsPage() {
   const [tab, setTab] = useState<CallsTab>('open')
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([])
   const [completedLoading, setCompletedLoading] = useState(false)
+  const [completedError, setCompletedError] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [deleteBusyId, setDeleteBusyId] = useState<string | 'bulk' | null>(null)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedCompletedIds, setSelectedCompletedIds] = useState<Set<string>>(new Set())
   const [, setTick] = useState(0)
 
-  useEffect(() => {
-    if (tab !== 'completed') return
-
-    let cancelled = false
-
-    async function loadCompletedCalls() {
-      setCompletedLoading(true)
-      try {
-        logFirestoreRead('dashboard/completed calls', RESTAURANT_ID)
-        const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID))
-        if (cancelled) return
-        setCompletedCalls(
-          snap.docs
-            .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
-            .sort((a, b) => getCallCompletedAt(b) - getCallCompletedAt(a))
-        )
-      } finally {
-        if (!cancelled) setCompletedLoading(false)
-      }
+  async function loadCompletedCalls() {
+    setCompletedLoading(true)
+    setCompletedError('')
+    try {
+      logFirestoreRead('dashboard/completed calls', RESTAURANT_ID)
+      const snap = await getDocs(getRestaurantRecentCompletedCallsQuery(RESTAURANT_ID))
+      setCompletedCalls(
+        snap.docs
+          .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
+          .sort((a, b) => getCallCompletedAt(b) - getCallCompletedAt(a))
+      )
+    } catch (error) {
+      console.error('Tamamlanan çağrılar yüklenemedi:', error)
+      setCompletedError('Tamamlanan çağrılar yüklenemedi. Lütfen tekrar deneyin.')
+    } finally {
+      setCompletedLoading(false)
     }
-
-    void loadCompletedCalls()
-
-    return () => {
-      cancelled = true
-    }
-  }, [tab])
+  }
 
   useEffect(() => {
     if (tab !== 'open' || openCalls.length === 0) return
@@ -98,6 +94,89 @@ export default function CallsPage() {
     }
   }
 
+  function toggleCompletedSelection(callId: string) {
+    setSelectedCompletedIds((current) => {
+      const next = new Set(current)
+      if (next.has(callId)) next.delete(callId)
+      else next.add(callId)
+      return next
+    })
+  }
+
+  function toggleSelectAllCompleted() {
+    if (selectedCompletedIds.size === completedCalls.length) {
+      setSelectedCompletedIds(new Set())
+      return
+    }
+    setSelectedCompletedIds(new Set(completedCalls.map((call) => call.id)))
+  }
+
+  async function deleteCompletedCall(call: WaiterCall) {
+    const restaurantId = call.restaurantId || RESTAURANT_ID
+    const confirmed = window.confirm(`Masa ${getCallTableLabel(call)} için tamamlanan çağrıyı silmek istiyor musunuz?`)
+    if (!confirmed) return
+
+    setDeleteBusyId(call.id)
+    setCompletedError('')
+    try {
+      logFirestoreWrite('dashboard/delete completed call', { restaurantId, callId: call.id })
+      await deleteDoc(doc(db, 'restaurants', restaurantId, 'calls', call.id))
+      setCompletedCalls((current) => current.filter((completedCall) => completedCall.id !== call.id))
+      setSelectedCompletedIds((current) => {
+        const next = new Set(current)
+        next.delete(call.id)
+        return next
+      })
+    } catch (error) {
+      console.error('Tamamlanan çağrı silinemedi:', error)
+      setCompletedError('Çağrı silinemedi. Lütfen tekrar deneyin.')
+    } finally {
+      setDeleteBusyId(null)
+    }
+  }
+
+  async function deleteSelectedCompletedCalls() {
+    if (selectedCompletedIds.size === 0) return
+
+    const confirmed = window.confirm(`${selectedCompletedIds.size} tamamlanan çağrıyı silmek istiyor musunuz?`)
+    if (!confirmed) return
+
+    const selectedIds = new Set(selectedCompletedIds)
+    const callsToDelete = completedCalls.filter((call) => selectedIds.has(call.id))
+
+    if (callsToDelete.length === 0) return
+
+    setDeleteBusyId('bulk')
+    setCompletedError('')
+    try {
+      const batch = writeBatch(db)
+      for (const call of callsToDelete) {
+        batch.delete(doc(db, 'restaurants', call.restaurantId || RESTAURANT_ID, 'calls', call.id))
+      }
+      logFirestoreWrite('dashboard/bulk delete completed calls', callsToDelete.map((call) => call.id))
+      await batch.commit()
+      setCompletedCalls((current) => current.filter((call) => !selectedIds.has(call.id)))
+      setSelectedCompletedIds(new Set())
+      setSelectionMode(false)
+    } catch (error) {
+      console.error('Toplu çağrı silme başarısız:', error)
+      setCompletedError('Seçili çağrılar silinemedi. Lütfen tekrar deneyin.')
+    } finally {
+      setDeleteBusyId(null)
+    }
+  }
+
+  function handleTabChange(nextTab: CallsTab) {
+    setTab(nextTab)
+    if (nextTab === 'completed') {
+      void loadCompletedCalls()
+      return
+    }
+    setSelectionMode(false)
+    setSelectedCompletedIds(new Set())
+    setCompletedError('')
+  }
+
   const sortedOpenCalls = openCalls
     .filter((call) => isOpenWaiterCallStatus(call.durum))
     .sort((a, b) => a.createdAt - b.createdAt)
@@ -115,7 +194,7 @@ export default function CallsPage() {
 
         <div className="inline-flex rounded-2xl bg-white p-1.5 border border-gray-100 shadow-sm">
           <button
-            onClick={() => setTab('open')}
+            onClick={() => handleTabChange('open')}
             className="rounded-xl px-4 py-2 text-sm font-semibold"
             style={tab === 'open' ? { background: '#3d2b1f', color: '#fff' } : { color: '#6b7280' }}
           >
@@ -123,7 +202,7 @@ export default function CallsPage() {
             {openCalls.length > 0 ? ` (${openCalls.length})` : ''}
           </button>
           <button
-            onClick={() => setTab('completed')}
+            onClick={() => handleTabChange('completed')}
             className="rounded-xl px-4 py-2 text-sm font-semibold"
             style={tab === 'completed' ? { background: '#d4a017', color: '#3d2b1f' } : { color: '#6b7280' }}
           >
@@ -132,6 +211,51 @@ export default function CallsPage() {
           </button>
         </div>
       </div>
+
+      {tab === 'completed' && (
+        <div className="flex flex-wrap gap-2 mb-5">
+          <button
+            onClick={() => {
+              setSelectionMode((current) => !current)
+              setSelectedCompletedIds(new Set())
+            }}
+            className="rounded-xl px-4 py-2 text-sm font-semibold"
+            style={selectionMode ? { background: '#d4a017', color: '#3d2b1f' } : { background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb' }}
+          >
+            {selectionMode ? 'Seçimi İptal' : 'Seç'}
+          </button>
+
+          {selectionMode && completedCalls.length > 0 && (
+            <button
+              onClick={toggleSelectAllCompleted}
+              className="rounded-xl px-4 py-2 text-sm font-semibold"
+              style={{ background: '#fff', color: '#3d2b1f', border: '1px solid #e5e7eb' }}
+            >
+              {selectedCompletedIds.size === completedCalls.length ? 'Seçimi Kaldır' : 'Tümünü Seç'}
+            </button>
+          )}
+
+          {selectionMode && selectedCompletedIds.size > 0 && (
+            <button
+              onClick={() => void deleteSelectedCompletedCalls()}
+              disabled={deleteBusyId === 'bulk'}
+              className="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: '#dc2626' }}
+            >
+              {deleteBusyId === 'bulk' ? 'Siliniyor...' : `Seçilenleri Sil (${selectedCompletedIds.size})`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {completedError && tab === 'completed' && (
+        <div
+          className="rounded-xl px-4 py-3 text-sm mb-5"
+          style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }}
+        >
+          {completedError}
+        </div>
+      )}
 
       {tab === 'completed' && completedLoading ? (
         <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
@@ -147,7 +271,7 @@ export default function CallsPage() {
         </div>
       ) : tab === 'open' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {openCalls.map((call) => {
+          {sortedOpenCalls.map((call) => {
             const cfg = TIP_CONFIG[call.tip] ?? TIP_CONFIG.yardım
             return (
               <div
@@ -182,6 +306,14 @@ export default function CallsPage() {
                   </p>
                 )}
 
+                {call.customerName && call.tip !== 'sipariş' && (
+                  <p className="text-xs text-gray-500">
+                    Müşteri: <span className="font-semibold text-[#3d2b1f]">{call.customerName}</span>
+                  </p>
+                )}
+
+                <OrderBreakdown call={call} />
+
                 {call.note && <p className="text-gray-500 text-sm italic">&quot;{call.note}&quot;</p>}
 
                 <div className="flex items-center justify-between gap-3">
@@ -204,13 +336,23 @@ export default function CallsPage() {
           {completedCalls.map((call) => {
             const cfg = TIP_CONFIG[call.tip] ?? TIP_CONFIG.yardım
             const completedAt = getCallCompletedAt(call)
+            const selected = selectedCompletedIds.has(call.id)
 
             return (
               <div
                 key={call.id}
-                className="bg-white rounded-2xl border border-gray-100 px-5 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+                className="bg-white rounded-2xl border px-5 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+                style={{ borderColor: selected ? '#d4a017' : '#f3f4f6', boxShadow: selected ? '0 0 0 2px rgba(212,160,23,0.15)' : undefined }}
               >
                 <div className="flex items-start gap-4">
+                  {selectionMode && (
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleCompletedSelection(call.id)}
+                      className="mt-3 h-4 w-4 accent-[#d4a017]"
+                    />
+                  )}
                   <div
                     className="w-11 h-11 rounded-2xl flex items-center justify-center text-2xl"
                     style={{ background: cfg.bg }}
@@ -230,6 +372,12 @@ export default function CallsPage() {
                       {cfg.label}
                       {call.waiterName ? ` • ${call.waiterName}` : ''}
                     </p>
+                    {call.customerName && call.tip !== 'sipariş' && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Müşteri: <span className="font-semibold text-[#3d2b1f]">{call.customerName}</span>
+                      </p>
+                    )}
+                    <OrderBreakdown call={call} className="mt-3" />
                     {call.note && <p className="text-sm text-gray-500 mt-2 italic">&quot;{call.note}&quot;</p>}
                   </div>
                 </div>
@@ -237,6 +385,16 @@ export default function CallsPage() {
                 <div className="text-sm text-gray-500 md:text-right">
                   <p>{formatDate(completedAt)}</p>
                   <p className="mt-1">Toplam süre: {formatDuration(completedAt - call.createdAt)}</p>
+                  {!selectionMode && (
+                    <button
+                      onClick={() => void deleteCompletedCall(call)}
+                      disabled={deleteBusyId === call.id}
+                      className="mt-3 inline-flex rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                      style={{ background: '#fee2e2', color: '#b91c1c' }}
+                    >
+                      {deleteBusyId === call.id ? 'Siliniyor...' : 'Sil'}
+                    </button>
+                  )}
                 </div>
               </div>
             )

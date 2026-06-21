@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
 import {
-  deleteDoc, getDocs, runTransaction, serverTimestamp, writeBatch,
+  getDocs, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -75,7 +75,19 @@ export default function TablesPage() {
   }
 
   useEffect(() => {
-    void loadTables()
+    let cancelled = false
+
+    async function loadInitialTables() {
+      await Promise.resolve()
+      if (cancelled) return
+      await loadTables()
+    }
+
+    void loadInitialTables()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const callsByTable = openCalls.reduce<Record<string, TableCallStatus[]>>((acc, call) => {

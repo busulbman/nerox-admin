@@ -14,6 +14,9 @@ import { db } from '@/lib/firebase'
 import type { TableStatus, WaiterCall } from '@/lib/types'
 
 type SyncableTableStatus = Extract<TableStatus, 'aktif' | 'çağrı var' | 'hesap istendi'>
+type CompleteCallActor = {
+  uid: string
+}
 
 export function getTableStatusFromOpenCalls(calls: WaiterCall[]): SyncableTableStatus {
   // Sadece bekliyor durumundaki çağrılar masa durumunu etkiler
@@ -23,7 +26,7 @@ export function getTableStatusFromOpenCalls(calls: WaiterCall[]): SyncableTableS
   return 'aktif'
 }
 
-export async function completeRestaurantCall(restaurantId: string, call: WaiterCall) {
+export async function completeRestaurantCall(restaurantId: string, call: WaiterCall, actor?: CompleteCallActor) {
   const callRef = doc(db, 'restaurants', restaurantId, 'calls', call.id)
   const liveCallSnap = await getDoc(callRef)
 
@@ -37,6 +40,16 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
     return
   }
 
+  if (actor) {
+    if (liveCall.durum !== 'kabul edildi') {
+      throw new Error('Bu çağrı tamamlanacak durumda değil.')
+    }
+
+    if (liveCall.waiterId !== actor.uid) {
+      throw new Error('Bu çağrıyı yalnızca kabul eden garson tamamlayabilir.')
+    }
+  }
+
   const batch = writeBatch(db)
   const completionTimestamp = serverTimestamp()
 
@@ -47,8 +60,10 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
     resolvedAt: completionTimestamp,
   })
 
-  if (liveCall.waiterId) {
-    batch.update(doc(db, 'users', liveCall.waiterId), {
+  const creditedWaiterId = actor?.uid ?? liveCall.waiterId
+
+  if (creditedWaiterId) {
+    batch.update(doc(db, 'users', creditedWaiterId), {
       totalCalls: increment(1),
     })
   }

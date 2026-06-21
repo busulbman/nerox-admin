@@ -363,7 +363,7 @@ export default function WaiterPage() {
     setCallError('')
     try {
       logFirestoreWrite('waiter/complete call', { restaurantId: profile.restaurantId, callId: call.id })
-      await completeRestaurantCall(profile.restaurantId, call)
+      await completeRestaurantCall(profile.restaurantId, call, { uid: profile.uid })
       setActive((current) => current.filter((activeCall) => activeCall.id !== call.id))
       if (activeTab === 'calls' && openSection === 'done') {
         const allCompleted = await fetchDoneCalls(profile.uid, profile.restaurantId)

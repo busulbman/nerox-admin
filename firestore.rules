@@ -33,6 +33,27 @@ service cloud.firestore {
       return isAdmin(rid) || isWaiter(rid);
     }
 
+    function waiterCanAcceptCall(rid) {
+      return isWaiter(rid)
+        && resource.data.durum == 'bekliyor'
+        && request.resource.data.durum == 'kabul edildi'
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.waiterId == request.auth.uid
+        && request.resource.data.waiterName is string
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['durum', 'status', 'waiterId', 'waiterName', 'acceptedAt']);
+    }
+
+    function waiterCanCompleteOwnCall(rid) {
+      return isWaiter(rid)
+        && resource.data.durum == 'kabul edildi'
+        && resource.data.waiterId == request.auth.uid
+        && request.resource.data.durum == 'tamamlandı'
+        && request.resource.data.status == 'completed'
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['durum', 'status', 'completedAt', 'resolvedAt']);
+    }
+
     // ─── Users collection ───────────────────────────────────────────────────────
 
     match /users/{uid} {
@@ -132,9 +153,9 @@ service cloud.firestore {
         // Public can read calls (for session status checking)
         allow read: if true;
 
-        // Staff can do any write
-        allow create, update: if isStaff(rid);
-        allow delete: if isAdmin(rid);
+        // Admin can manage all calls, waiters only their own accept/complete flow
+        allow create, update, delete: if isAdmin(rid);
+        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid);
 
         // Customer: create new call with restricted fields
         allow create: if !signedIn()
@@ -145,6 +166,13 @@ service cloud.firestore {
           && request.resource.data.waiterId == null
           && request.resource.data.waiterName == null
           && request.resource.data.keys().hasAll(['tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip', 'durum', 'createdAt', 'waiterId', 'waiterName', 'note']);
+      }
+
+      // ── Menu Settings ─────────────────────────────────────────────────────────
+
+      match /settings/{settingId} {
+        allow read: if settingId == 'menu' || isStaff(rid);
+        allow write: if isAdmin(rid);
       }
 
       // ── Ratings ───────────────────────────────────────────────────────────────

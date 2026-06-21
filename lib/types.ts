@@ -27,6 +27,13 @@ export interface Product {
   available: boolean
 }
 
+export interface MenuThemeSettings {
+  displayName: string
+  logoUrl: string
+  primaryColor: string
+  updatedAt?: number | null
+}
+
 export interface CartItem {
   productId: string
   name: string

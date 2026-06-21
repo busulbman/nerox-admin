@@ -22,8 +22,15 @@ import { getSessionOpenCallsQuery, getSessionPaymentCallsQuery } from '@/lib/fir
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
-import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
-import type { CartItem, Category, Product, Table, WaiterCall } from '@/lib/types'
+import {
+  DEFAULT_MENU_PRIMARY_COLOR,
+  EMPTY_MENU_THEME_SETTINGS,
+  getMenuPrimaryTextColor,
+  normalizeMenuThemeSettings,
+  resolveMenuDisplayName,
+} from '@/lib/menu-theme'
+import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
+import type { CartItem, Category, MenuThemeSettings, Product, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -45,10 +52,10 @@ const TIP_OPTIONS: { tip: CallTip; icon: string; label: string; desc: string }[]
   { tip: 'yardım', icon: '🙋', label: 'Yardım', desc: 'Yardıma ihtiyacım var' },
 ]
 
-const SESSION_COOLDOWN_MS = 2 * 60 * 1000
 const ACTIVE_SESSION_MESSAGE = 'Bu masada aktif oturum var. Lütfen garsondan yardım isteyin.'
 const CLEANING_MESSAGE = 'Bu masa şu anda hazırlanıyor. Lütfen garsondan yardım isteyin.'
-const ACTIVE_REQUEST_MESSAGE = 'Zaten aktif talebiniz var. Garsonunuz geliyor, lütfen bekleyin.'
+const ACTIVE_HELP_REQUEST_MESSAGE = 'Zaten aktif yardım talebiniz var. Garsonunuz geliyor, lütfen bekleyin.'
+const ACTIVE_PAYMENT_REQUEST_MESSAGE = 'Hesap talebiniz zaten iletildi. Lütfen garsonunuzu bekleyin.'
 const SESSION_CLOSED_MESSAGE = 'Bu masa oturumu kapatıldı. Lütfen garsondan yardım isteyin.'
 const STAFF_RATING_MESSAGE = 'Personel hesabı ile müşteri puanlaması gönderilemez.'
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
@@ -143,19 +150,10 @@ function formatPrice(price: number) {
   return `₺${price.toLocaleString('tr-TR')}`
 }
 
-function getCooldownRemainingMs(createdAt: number | null): number {
-  if (!createdAt) return 0
-  const remaining = createdAt + SESSION_COOLDOWN_MS - Date.now()
-  return remaining > 0 ? remaining : 0
-}
-
-function formatRemaining(ms: number): string {
-  const totalSeconds = Math.max(1, Math.ceil(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes === 0) return `${seconds} sn`
-  if (seconds === 0) return `${minutes} dk`
-  return `${minutes} dk ${seconds} sn`
+function getTipLockMessage(tip: CallTip | null): string | null {
+  if (tip === 'yardım') return ACTIVE_HELP_REQUEST_MESSAGE
+  if (tip === 'hesap') return ACTIVE_PAYMENT_REQUEST_MESSAGE
+  return null
 }
 
 function getProductMeta(product: Product, categoryName: string): ProductMeta {
@@ -304,6 +302,7 @@ export default function MenuPage() {
 
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
@@ -315,7 +314,6 @@ export default function MenuPage() {
   const [sessionCalls, setSessionCalls] = useState<WaiterCall[]>([])
   const [paymentCalls, setPaymentCalls] = useState<WaiterCall[]>([])
   const [ratedCallIds, setRatedCallIds] = useState<Record<string, true>>({})
-  const [lastSessionCallAt, setLastSessionCallAt] = useState<number | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
@@ -343,8 +341,6 @@ export default function MenuPage() {
   const [ratingSending, setRatingSending] = useState(false)
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
   const [ratingMessage, setRatingMessage] = useState<string | null>(null)
-  const [, setTick] = useState(0)
-
   const refreshSessionActivity = useEffectEvent(async (nextSessionId: string, nextTableDocId: string) => {
     const activity = await fetchSessionActivity(restaurantId, nextTableDocId, nextSessionId)
 
@@ -354,18 +350,15 @@ export default function MenuPage() {
 
     setSessionCalls(activity.openCalls)
     setPaymentCalls(activity.paymentCalls)
-
-    if (activity.latestCallAt) {
-      setLastSessionCallAt((current) => Math.max(current ?? 0, activity.latestCallAt))
-    }
   })
 
   useEffect(() => {
     async function loadMenu() {
       logFirestoreRead('menu/products + categories', restaurantId)
-      const [catSnap, prodSnap] = await Promise.all([
+      const [catSnap, prodSnap, settingsSnap] = await Promise.all([
         getDocs(query(collection(db, 'restaurants', restaurantId, 'categories'), orderBy('order', 'asc'))),
         getDocs(collection(db, 'restaurants', restaurantId, 'products')),
+        getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'menu')),
       ])
 
       const nextCategories = catSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Category))
@@ -373,6 +366,7 @@ export default function MenuPage() {
 
       setCategories(nextCategories)
       setProducts(nextProducts)
+      setMenuSettings(settingsSnap.exists() ? normalizeMenuThemeSettings(settingsSnap.data()) : { ...EMPTY_MENU_THEME_SETTINGS })
       setActiveCat(nextCategories[0]?.id ?? null)
       setLoading(false)
     }
@@ -393,7 +387,6 @@ export default function MenuPage() {
       setSessionCalls([])
       setPaymentCalls([])
       setRatedCallIds({})
-      setLastSessionCallAt(null)
       setCustomerName(null)
       setCustomerNameInput('')
       setCustomerNameModal(false)
@@ -581,49 +574,6 @@ export default function MenuPage() {
     if (!sessionId || !tableDocId) return
     saveCart(restaurantId, tableId, sessionId, cart)
   }, [cart, restaurantId, tableId, tableDocId, sessionId])
-
-  useEffect(() => {
-    if (!lastSessionCallAt || getCooldownRemainingMs(lastSessionCallAt) <= 0) return
-
-    const interval = window.setInterval(() => {
-      setTick((current) => current + 1)
-      if (getCooldownRemainingMs(lastSessionCallAt) <= 0) {
-        window.clearInterval(interval)
-      }
-    }, 1000)
-
-    return () => window.clearInterval(interval)
-  }, [lastSessionCallAt])
-
-  useEffect(() => {
-    if (!sessionId) return
-
-    let cancelled = false
-
-    async function loadLastSessionCall() {
-      logFirestoreRead('menu/last session call', { restaurantId, sessionId })
-      const snap = await getDocs(
-        query(
-          collection(db, 'restaurants', restaurantId, 'calls'),
-          where('sessionId', '==', sessionId),
-          orderBy('createdAt', 'desc'),
-          limit(1)
-        )
-      )
-
-      if (cancelled) return
-      const lastCall = snap.docs[0]
-      if (!lastCall) return
-      const normalizedCall = normalizeWaiterCall(lastCall.id, lastCall.data() as Record<string, unknown>)
-      setLastSessionCallAt(normalizedCall.createdAt)
-    }
-
-    void loadLastSessionCall()
-
-    return () => {
-      cancelled = true
-    }
-  }, [restaurantId, sessionId])
 
   useEffect(() => {
     if (!sessionId || !tableDocId) return
@@ -842,52 +792,27 @@ export default function MenuPage() {
 
       const grouped = groupCartItemsByCustomer(cart)
       const totalPrice = calculateCartTotal(cart)
-      const sessionSnap = await getDocs(
-        query(
-          collection(db, 'restaurants', restaurantId, 'calls'),
-          where('sessionId', '==', sessionId),
-          orderBy('createdAt', 'desc'),
-          limit(50)
-        )
-      )
-
-      const openOrderCall = sessionSnap.docs
-        .map((snap) => normalizeWaiterCall(snap.id, snap.data() as Record<string, unknown>))
-        .find((call) => call.tableId === tableDocId && call.tip === 'sipariş' && call.durum === 'bekliyor')
-
       const batch = writeBatch(db)
+      const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
+      const newCallRef = doc(callsCollection)
 
-      if (openOrderCall) {
-        const mergedItems = mergeCartItems(openOrderCall.items ?? [], cart)
-        batch.update(doc(db, 'restaurants', restaurantId, 'calls', openOrderCall.id), {
-          customerName,
-          items: mergedItems,
-          groupedByCustomer: groupCartItemsByCustomer(mergedItems),
-          totalPrice: calculateCartTotal(mergedItems),
-          status: 'open',
-        })
-      } else {
-        const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
-        const newCallRef = doc(callsCollection)
-
-        batch.set(newCallRef, {
-          tableId: tableDocId,
-          tableNumber: table?.number ?? 0,
-          sessionId,
-          restaurantId,
-          tip: 'sipariş',
-          durum: 'bekliyor',
-          status: 'open',
-          customerName,
-          createdAt: serverTimestamp(),
-          waiterId: null,
-          waiterName: null,
-          note: '',
-          items: cart,
-          totalPrice,
-          groupedByCustomer: grouped,
-        })
-      }
+      batch.set(newCallRef, {
+        tableId: tableDocId,
+        tableNumber: table?.number ?? 0,
+        sessionId,
+        restaurantId,
+        tip: 'sipariş',
+        durum: 'bekliyor',
+        status: 'open',
+        customerName,
+        createdAt: serverTimestamp(),
+        waiterId: null,
+        waiterName: null,
+        note: '',
+        items: cart,
+        totalPrice,
+        groupedByCustomer: grouped,
+      })
 
       if (liveTable.status === 'aktif') {
         batch.update(tableRef, {
@@ -899,7 +824,6 @@ export default function MenuPage() {
       logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: cart.length })
       await batch.commit()
 
-      setLastSessionCallAt(Date.now())
       setOrderSent(true)
       setCart([])
       const activity = await fetchSessionActivity(restaurantId, tableDocId, sessionId)
@@ -908,10 +832,6 @@ export default function MenuPage() {
       }
       setSessionCalls(activity.openCalls)
       setPaymentCalls(activity.paymentCalls)
-      if (activity.latestCallAt) {
-        setLastSessionCallAt((current) => Math.max(current ?? 0, activity.latestCallAt))
-      }
-
       window.setTimeout(() => {
         setOrderSent(false)
         setCartDrawer(false)
@@ -964,34 +884,25 @@ export default function MenuPage() {
         return
       }
 
-      logFirestoreRead('menu/session calls before create', { restaurantId, sessionId: activeSessionId })
-      const sessionQuery = query(
-        collection(db, 'restaurants', restaurantId, 'calls'),
-        where('sessionId', '==', activeSessionId),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      )
-      const sessionSnap = await getDocs(sessionQuery)
-      const liveSessionCalls = sessionSnap.docs
-        .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
-        .filter((call) => call.tableId === tableDocId)
-        .sort((a, b) => b.createdAt - a.createdAt)
+      if (selectedTip === 'yardım' || selectedTip === 'hesap') {
+        logFirestoreRead('menu/session calls before create', { restaurantId, sessionId: activeSessionId, tip: selectedTip })
+        const sessionQuery = query(
+          collection(db, 'restaurants', restaurantId, 'calls'),
+          where('sessionId', '==', activeSessionId),
+          orderBy('createdAt', 'desc'),
+          limit(50)
+        )
+        const sessionSnap = await getDocs(sessionQuery)
+        const liveSessionCalls = sessionSnap.docs
+          .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
+          .filter((call) => call.tableId === tableDocId && call.tip === selectedTip)
+          .sort((a, b) => b.createdAt - a.createdAt)
 
-      if (liveSessionCalls[0]?.createdAt) {
-        setLastSessionCallAt((current) => Math.max(current ?? 0, liveSessionCalls[0].createdAt))
-      }
-
-      const openRequest = liveSessionCalls.find((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
-      if (openRequest) {
-        setActionMessage(ACTIVE_REQUEST_MESSAGE)
-        return
-      }
-
-      const lastCallAt = liveSessionCalls[0]?.createdAt ?? null
-      const remainingCooldownMs = getCooldownRemainingMs(lastCallAt)
-      if (remainingCooldownMs > 0) {
-        setActionMessage(`Yeni talep için ${formatRemaining(remainingCooldownMs)} bekleyin.`)
-        return
+        const openRequest = liveSessionCalls.find((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
+        if (openRequest) {
+          setActionMessage(getTipLockMessage(selectedTip))
+          return
+        }
       }
 
       const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
@@ -1025,7 +936,6 @@ export default function MenuPage() {
       logFirestoreWrite('menu/create call', { restaurantId, tableId: tableDocId, tip: selectedTip })
       await batch.commit()
       setSessionId(activeSessionId)
-      setLastSessionCallAt(Date.now())
       const newOpenCall: WaiterCall = {
           id: newCallRef.id,
           tableId: tableDocId,
@@ -1142,14 +1052,21 @@ export default function MenuPage() {
   )
 
   const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.name]))
+  const menuDisplayName = resolveMenuDisplayName(menuSettings)
+  const menuPrimaryColor = menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR
+  const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
   const cartTotal = calculateCartTotal(cart)
   const cartGrouped = groupCartItemsByCustomer(cart)
-
-  const hasActiveRequest = sessionCalls.some((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
-  const latestCallAt = sessionCalls[0]?.createdAt ?? paymentCalls[0]?.createdAt ?? lastSessionCallAt
-  const cooldownRemainingMs = hasActiveRequest ? 0 : getCooldownRemainingMs(latestCallAt)
+  const hasActiveHelpRequest = sessionCalls.some((call) => call.tip === 'yardım')
+  const hasActivePaymentRequest = sessionCalls.some((call) => call.tip === 'hesap')
+  const selectedTipLockMessage =
+    selectedTip === 'yardım' && hasActiveHelpRequest
+      ? ACTIVE_HELP_REQUEST_MESSAGE
+      : selectedTip === 'hesap' && hasActivePaymentRequest
+        ? ACTIVE_PAYMENT_REQUEST_MESSAGE
+        : null
   const sessionMatchesTable = !!table && !!sessionId && table.sessionId === sessionId
   const isPreparing = table?.status === 'temizlik'
   const isDifferentActiveSession =
@@ -1179,19 +1096,13 @@ export default function MenuPage() {
 
   const infoMessage =
     derivedAccessMessage ??
-    (hasActiveRequest
-      ? ACTIVE_REQUEST_MESSAGE
-      : cooldownRemainingMs > 0
-        ? `Yeni talep için ${formatRemaining(cooldownRemainingMs)} bekleyin.`
-        : actionMessage)
+    actionMessage
 
   const callButtonDisabled =
     accessState === 'checking' ||
     accessState === 'missing' ||
     accessState === 'error' ||
     !!derivedAccessMessage ||
-    hasActiveRequest ||
-    cooldownRemainingMs > 0 ||
     sending
 
   const displayTableLabel = table?.number ? String(table.number) : tableId
@@ -1200,8 +1111,7 @@ export default function MenuPage() {
     !selectedTip ||
     sending ||
     !!derivedAccessMessage ||
-    hasActiveRequest ||
-    cooldownRemainingMs > 0
+    !!selectedTipLockMessage
 
   if (loading) {
     return (
@@ -1244,11 +1154,21 @@ export default function MenuPage() {
               </button>
 
               <div className="text-center">
+                {menuSettings.logoUrl && (
+                  <div className="mb-2 flex justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={menuSettings.logoUrl}
+                      alt={menuDisplayName}
+                      className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                    />
+                  </div>
+                )}
                 <p
                   className="text-[1.2rem] font-semibold leading-none"
                   style={{ fontFamily: 'var(--font-playfair), serif', color: '#3d2b1f' }}
                 >
-                  Varina Chocolate
+                  {menuDisplayName}
                 </p>
               </div>
 
@@ -1261,7 +1181,10 @@ export default function MenuPage() {
                   <span className="text-lg">👜</span>
                 </button>
                 {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[#d4a017] text-white text-[10px] font-bold flex items-center justify-center">
+                  <span
+                    className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                  >
                     {cartCount}
                   </span>
                 )}
@@ -1302,7 +1225,7 @@ export default function MenuPage() {
                         className="shrink-0 rounded-full px-4 py-2.5 flex items-center gap-2 border transition-all"
                         style={
                           active
-                            ? { background: '#d4a017', color: '#fff', borderColor: '#d4a017' }
+                            ? { background: menuPrimaryColor, color: menuPrimaryTextColor, borderColor: menuPrimaryColor }
                             : { background: '#fff', color: '#888888', borderColor: 'rgba(0,0,0,0.06)' }
                         }
                       >
@@ -1387,14 +1310,15 @@ export default function MenuPage() {
                       </p>
 
                       <div className="mt-3 flex items-center justify-between gap-2">
-                        <span className="text-[15px] font-bold text-[#d4a017]">{formatPrice(product.price)}</span>
+                        <span className="text-[15px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(product.price)}</span>
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation()
                             handleQuickAdd(product)
                           }}
-                          className="h-9 w-9 rounded-full bg-[#d4a017] text-[#3d2b1f] font-black text-lg flex items-center justify-center shadow-[0_8px_16px_rgba(212,160,23,0.28)]"
+                          className="h-9 w-9 rounded-full font-black text-lg flex items-center justify-center shadow-[0_8px_16px_rgba(212,160,23,0.28)]"
+                          style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                           aria-label="Hızlı ekle"
                         >
                           +
@@ -1423,15 +1347,11 @@ export default function MenuPage() {
                 className={`rounded-[22px] px-5 py-4 font-bold text-sm shadow-[0_12px_24px_rgba(61,43,31,0.18)] transition-all ${
                   cartCount > 0 ? 'flex-[1.1]' : 'flex-1'
                 } disabled:opacity-50`}
-                style={{ background: '#3d2b1f', color: '#fefaf3' }}
+                style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
               >
                 {accessState === 'checking'
                   ? 'Masa kontrol ediliyor...'
-                  : hasActiveRequest
-                    ? 'Talebiniz Aktif'
-                    : cooldownRemainingMs > 0
-                      ? `Tekrar Çağrı ${formatRemaining(cooldownRemainingMs)}`
-                      : 'Garson Çağır'}
+                  : 'Garson Çağır'}
               </button>
 
               {cartCount > 0 && (
@@ -1446,7 +1366,7 @@ export default function MenuPage() {
                       <p className="text-sm font-bold text-[#1a1a1a]">{cartCount} ürün</p>
                       <p className="text-xs text-[#888888]">Siparişe hazır</p>
                     </div>
-                    <p className="text-[15px] font-bold text-[#d4a017]">{formatPrice(cartTotal)}</p>
+                    <p className="text-[15px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(cartTotal)}</p>
                   </div>
                 </button>
               )}
@@ -1495,7 +1415,7 @@ export default function MenuPage() {
 
                           <div className="flex items-center gap-2 mt-3">
                             <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#3d2b1f] shadow-[0_8px_20px_rgba(0,0,0,0.05)]">
-                              <span className="text-[#d4a017]">★</span>
+                              <span style={{ color: menuPrimaryColor }}>★</span>
                               {meta.rating}
                             </span>
                             {meta.popular && (
@@ -1506,7 +1426,7 @@ export default function MenuPage() {
                           </div>
                         </div>
 
-                        <p className="text-[28px] font-bold text-[#d4a017]">{formatPrice(selectedProduct.price)}</p>
+                        <p className="text-[28px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(selectedProduct.price)}</p>
                       </div>
 
                       <div className="h-px bg-black/6 my-6" />
@@ -1564,7 +1484,8 @@ export default function MenuPage() {
                     <span className="w-12 text-center text-base font-bold text-[#1a1a1a]">{detailQuantity}</span>
                     <button
                       onClick={() => adjustDetailQuantity('inc')}
-                      className="h-9 w-9 rounded-full bg-[#d4a017] text-[#3d2b1f] text-xl flex items-center justify-center"
+                      className="h-9 w-9 rounded-full text-xl flex items-center justify-center"
+                      style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                     >
                       +
                     </button>
@@ -1573,7 +1494,7 @@ export default function MenuPage() {
                   <button
                     onClick={handleAddFromSheet}
                     className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
-                    style={{ background: '#d4a017', color: '#3d2b1f' }}
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                   >
                     Sepete Ekle — {formatPrice(selectedProduct.price * detailQuantity)}
                   </button>
@@ -1639,7 +1560,7 @@ export default function MenuPage() {
                   onClick={handleSaveCustomerName}
                   disabled={!customerNameInput.trim()}
                   className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-bold disabled:opacity-50"
-                  style={{ background: '#d4a017', color: '#3d2b1f' }}
+                  style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                 >
                   Kaydet
                 </button>
@@ -1683,24 +1604,42 @@ export default function MenuPage() {
                   </div>
 
                   <div className="grid grid-cols-3 gap-3">
-                    {TIP_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.tip}
-                        onClick={() => setSelectedTip(opt.tip)}
-                        className="rounded-[22px] px-3 py-4 text-left border shadow-[0_8px_20px_rgba(0,0,0,0.05)] transition-all"
-                        style={
-                          selectedTip === opt.tip
-                            ? { background: '#3d2b1f', borderColor: '#3d2b1f', color: '#fefaf3' }
-                            : { background: '#fff', borderColor: 'rgba(0,0,0,0.06)', color: '#1a1a1a' }
-                        }
-                      >
-                        <div className="text-2xl mb-3">{opt.icon}</div>
-                        <p className="text-sm font-bold">{opt.label}</p>
-                        <p className={`text-[11px] mt-1 leading-4 ${selectedTip === opt.tip ? 'text-white/65' : 'text-[#888888]'}`}>
-                          {opt.desc}
-                        </p>
-                      </button>
-                    ))}
+                    {TIP_OPTIONS.map((opt) => {
+                      const tipDisabled =
+                        (opt.tip === 'yardım' && hasActiveHelpRequest) ||
+                        (opt.tip === 'hesap' && hasActivePaymentRequest)
+
+                      return (
+                        <button
+                          key={opt.tip}
+                          onClick={() => {
+                            if (tipDisabled) return
+                            setSelectedTip(opt.tip)
+                            setActionMessage(null)
+                          }}
+                          disabled={tipDisabled}
+                          className="rounded-[22px] px-3 py-4 text-left border shadow-[0_8px_20px_rgba(0,0,0,0.05)] transition-all disabled:opacity-60"
+                          style={
+                            selectedTip === opt.tip && !tipDisabled
+                              ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor }
+                              : { background: '#fff', borderColor: 'rgba(0,0,0,0.06)', color: '#1a1a1a' }
+                          }
+                        >
+                          <div className="text-2xl mb-3">{opt.icon}</div>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-bold">{opt.label}</p>
+                            {tipDisabled && (
+                              <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-semibold text-[#a16207]">
+                                Aktif
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-[11px] mt-1 leading-4 ${selectedTip === opt.tip && !tipDisabled ? 'text-white/65' : 'text-[#888888]'}`}>
+                            {tipDisabled ? getTipLockMessage(opt.tip) : opt.desc}
+                          </p>
+                        </button>
+                      )
+                    })}
                   </div>
 
                   <textarea
@@ -1711,15 +1650,15 @@ export default function MenuPage() {
                     rows={3}
                   />
 
-                  {actionMessage && (
-                    <p className="text-sm mt-3 text-[#c2410c]">{actionMessage}</p>
+                  {(selectedTipLockMessage || actionMessage) && (
+                    <p className="text-sm mt-3 text-[#c2410c]">{selectedTipLockMessage ?? actionMessage}</p>
                   )}
 
                   <button
                     onClick={sendCall}
                     disabled={modalSendDisabled}
                     className="w-full mt-4 rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50"
-                    style={{ background: '#d4a017', color: '#3d2b1f' }}
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                   >
                     {sending ? 'Gönderiliyor...' : 'Talebi Gönder'}
                   </button>
@@ -1798,7 +1737,7 @@ export default function MenuPage() {
                                 <p className="font-semibold text-base text-[#3d2b1f]">{groupName}</p>
                                 <p className="text-xs text-[#888888] mt-1">{group.items.length} kalem ürün</p>
                               </div>
-                              <p className="font-bold text-[#d4a017] shrink-0">{formatPrice(group.total)}</p>
+                              <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(group.total)}</p>
                             </div>
 
                             <div className="space-y-3">
@@ -1809,7 +1748,7 @@ export default function MenuPage() {
                                       <p className="font-semibold text-sm text-[#3d2b1f]">{item.name}</p>
                                       <p className="text-xs text-[#888888] mt-1">Birim: {formatPrice(item.price)}</p>
                                     </div>
-                                    <p className="font-bold text-[#d4a017] shrink-0">{formatPrice(item.price * item.quantity)}</p>
+                                    <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(item.price * item.quantity)}</p>
                                   </div>
                                   <div className="flex items-center justify-between mt-3">
                                     <div className="flex items-center gap-2">
@@ -1822,7 +1761,8 @@ export default function MenuPage() {
                                       <span className="w-8 text-center text-sm font-bold text-[#1a1a1a]">{item.quantity}</span>
                                       <button
                                         onClick={() => updateCartItemQuantity(item.productId, item.customerName, 1)}
-                                        className="h-8 w-8 rounded-full bg-[#d4a017] text-[#3d2b1f] text-lg flex items-center justify-center"
+                                        className="h-8 w-8 rounded-full text-lg flex items-center justify-center"
+                                        style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                                       >
                                         +
                                       </button>
@@ -1855,14 +1795,14 @@ export default function MenuPage() {
                           ))}
                           <div className="flex items-center justify-between pt-2 border-t border-black/6">
                             <span className="text-sm font-semibold text-[#3d2b1f]">Masa Toplamı</span>
-                            <span className="text-xl font-bold text-[#d4a017]">{formatPrice(cartTotal)}</span>
+                            <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(cartTotal)}</span>
                           </div>
                         </div>
                         <button
                           onClick={sendOrder}
                           disabled={orderSending || cart.length === 0 || !customerName}
                           className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
-                          style={{ background: '#d4a017', color: '#3d2b1f' }}
+                          style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                         >
                           {orderSending ? 'Gönderiliyor...' : 'Siparişi Gönder'}
                         </button>
@@ -1915,11 +1855,13 @@ export default function MenuPage() {
                     <StarRatingField
                       label="Genel hizmet puanı"
                       value={ratingForm.serviceRating}
+                      activeColor={menuPrimaryColor}
                       onChange={(value) => setRatingForm((current) => ({ ...current, serviceRating: value }))}
                     />
                     <StarRatingField
                       label="Garson puanı"
                       value={ratingForm.waiterRating}
+                      activeColor={menuPrimaryColor}
                       onChange={(value) => setRatingForm((current) => ({ ...current, waiterRating: value }))}
                     />
 
@@ -2039,10 +1981,12 @@ function InfoTile({ label, value }: { label: string; value: string }) {
 function StarRatingField({
   label,
   value,
+  activeColor = DEFAULT_MENU_PRIMARY_COLOR,
   onChange,
 }: {
   label: string
   value: number
+  activeColor?: string
   onChange: (value: number) => void
 }) {
   return (
@@ -2062,7 +2006,7 @@ function StarRatingField({
             type="button"
             onClick={() => onChange(star)}
             className="text-3xl transition-transform active:scale-90"
-            style={{ color: star <= value ? '#d4a017' : '#d1d5db' }}
+            style={{ color: star <= value ? activeColor : '#d1d5db' }}
           >
             ★
           </button>

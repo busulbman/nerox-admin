@@ -455,7 +455,7 @@ export default function WaiterPage() {
         <div className="px-5 pt-4 pb-3">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{businessName}</p>
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{businessName} Garson Paneli</p>
               <p className="font-bold text-lg leading-tight mt-0.5" style={{ color: GOLD }}>
                 Merhaba, {profile.name.split(' ')[0]} 👋
               </p>

@@ -24,6 +24,8 @@ import {
   getRestaurantRecentCompletedCallsQuery,
   getRestaurantTablesQuery,
 } from "@/lib/firestore-queries";
+import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
+import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { WaiterCall, Table } from "@/lib/types";
 
 const BROWN = "#3d2b1f";
@@ -64,6 +66,7 @@ function buildHourlyData(calls: WaiterCall[]) {
 
 export default function DashboardPage() {
   const { pendingCalls } = useOpenCalls();
+  const { settings } = useRestaurantSettingsContext()
   const router = useRouter();
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
@@ -72,6 +75,7 @@ export default function DashboardPage() {
 
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState("");
+  const businessName = resolveRestaurantBusinessName(settings)
 
   useEffect(() => {
     let cancelled = false;
@@ -213,7 +217,7 @@ export default function DashboardPage() {
           Genel Bakış
         </h1>
         <p className="text-gray-400 text-sm mt-0.5">
-          mrssimone Chocolate — Canlı veriler
+          {businessName} — Canlı veriler
         </p>
       </div>
 

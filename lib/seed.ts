@@ -58,8 +58,8 @@ const PRODUCTS_BY_CAT: Record<
   ],
   "Çikolata Özel": [
     {
-      name: "mrssimone Signature",
-      description: "El yapımı özel çikolata, mrssimone'ya özgü tat",
+      name: "Mrs.Simone Signature",
+      description: "El yapımı özel çikolata, Mrs.Simone'a özgü tat",
       price: 125,
     },
     {

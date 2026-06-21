@@ -2,9 +2,10 @@ import type { RestaurantGeneralSettings } from '@/lib/types'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
-export const DEFAULT_BUSINESS_NAME = 'İşletme'
+export const DEFAULT_BUSINESS_NAME = 'Mrs.Simone'
 export const DEFAULT_PRIMARY_COLOR = '#3d2b1f'
 export const DEFAULT_ACCENT_COLOR = '#d4a017'
+export const DEFAULT_BRAND_LOGO_PATH = '/mrs-simone-logo.png'
 
 export const EMPTY_RESTAURANT_GENERAL_SETTINGS: RestaurantGeneralSettings = {
   businessName: '',
@@ -73,6 +74,12 @@ export function resolveRestaurantBusinessName(
   settings: Pick<RestaurantGeneralSettings, 'businessName'> | null | undefined
 ) {
   return settings?.businessName?.trim() || DEFAULT_BUSINESS_NAME
+}
+
+export function resolveRestaurantLogoUrl(
+  settings: Pick<RestaurantGeneralSettings, 'logoUrl'> | null | undefined
+) {
+  return settings?.logoUrl?.trim() || DEFAULT_BRAND_LOGO_PATH
 }
 
 export function getContrastColor(hexColor: string): string {

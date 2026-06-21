@@ -42,9 +42,10 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
       <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm border border-gray-100">
         <div className="text-center mb-8">
-          <div className="text-5xl mb-3">☕</div>
-          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>Admin Girişi</h1>
-          <p className="text-gray-400 text-sm mt-1">Yönetim Paneli</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/mrs-simone-logo.png" alt="Mrs.Simone" className="h-14 w-14 rounded-2xl object-cover mx-auto mb-3" />
+          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>Mrs.Simone Admin</h1>
+          <p className="text-gray-400 text-sm mt-1">Yönetim Girişi</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

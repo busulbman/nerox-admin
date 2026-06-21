@@ -46,16 +46,12 @@ export default function WaiterLoginPage() {
     >
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div
-            className="w-20 h-20 rounded-full flex items-center justify-center text-4xl mx-auto mb-4"
-            style={{ background: '#3d2b1f' }}
-          >
-            ☕
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/mrs-simone-logo.png" alt="Mrs.Simone" className="h-20 w-20 rounded-3xl object-cover mx-auto mb-4" />
           <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>
-            Garson Girişi
+            Mrs.Simone Garson Paneli
           </h1>
-          <p className="text-gray-400 text-sm mt-1">Garson Paneli</p>
+          <p className="text-gray-400 text-sm mt-1">Garson Girişi</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">

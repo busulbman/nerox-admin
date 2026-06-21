@@ -2,7 +2,7 @@ import type { MenuThemeSettings } from '@/lib/types'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
-export const DEFAULT_MENU_DISPLAY_NAME = 'İşletme'
+export const DEFAULT_MENU_DISPLAY_NAME = 'Mrs.Simone'
 export const DEFAULT_MENU_PRIMARY_COLOR = '#d4a017'
 export const EMPTY_MENU_THEME_SETTINGS: MenuThemeSettings = {
   displayName: '',

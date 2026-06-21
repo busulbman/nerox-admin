@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { Upload, Trash2, Link as LinkIcon } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { db, RESTAURANT_ID } from '@/lib/firebase'
 import {
+  DEFAULT_BRAND_LOGO_PATH,
   DEFAULT_BUSINESS_NAME,
   DEFAULT_PRIMARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
@@ -29,7 +30,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
-  const [suggestedSlug, setSuggestedSlug] = useState('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const formInitialized = useRef(false)
@@ -41,12 +41,9 @@ export default function SettingsPage() {
     }
   }, [settings, settingsLoading])
 
-  useEffect(() => {
-    if (form.businessName && !form.slug) {
-      setSuggestedSlug(generateSlug(form.businessName))
-    } else {
-      setSuggestedSlug('')
-    }
+  const suggestedSlug = useMemo(() => {
+    if (!form.businessName || form.slug) return ''
+    return generateSlug(form.businessName)
   }, [form.businessName, form.slug])
 
   async function uploadToImgBB(file: File): Promise<string | null> {
@@ -172,6 +169,7 @@ export default function SettingsPage() {
   const previewColor = form.primaryColor || DEFAULT_PRIMARY_COLOR
   const previewTextColor = getContrastColor(previewColor)
   const previewBusinessName = form.businessName.trim() || DEFAULT_BUSINESS_NAME
+  const previewLogoUrl = form.logoUrl.trim() || DEFAULT_BRAND_LOGO_PATH
   const menuLink = form.slug ? `/menu/${form.slug}/1` : `/menu/${restaurantId}/1`
 
   const inputCls =
@@ -355,15 +353,13 @@ export default function SettingsPage() {
           <div className="rounded-[20px] overflow-hidden border border-gray-100">
             <div className="p-5" style={{ background: previewColor }}>
               <div className="flex items-center gap-3">
-                {form.logoUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={form.logoUrl}
-                    alt={previewBusinessName}
-                    className="h-12 w-12 rounded-xl object-cover"
-                    style={{ border: `1px solid ${previewTextColor}20` }}
-                  />
-                )}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={previewLogoUrl}
+                  alt={previewBusinessName}
+                  className="h-12 w-12 rounded-xl object-cover"
+                  style={{ border: `1px solid ${previewTextColor}20` }}
+                />
                 <div>
                   <p className="font-bold text-lg" style={{ color: previewTextColor }}>
                     {previewBusinessName} Admin

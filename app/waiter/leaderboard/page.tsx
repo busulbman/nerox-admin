@@ -8,6 +8,8 @@ import { logFirestoreRead } from "@/lib/firestore-debug";
 import { getRestaurantActiveWaitersQuery } from "@/lib/firestore-queries";
 import { auth, rtdb, RESTAURANT_ID } from "@/lib/firebase";
 import { useAuth } from "@/components/AuthProvider";
+import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { UserProfile } from "@/lib/types";
 
 type PresenceData = {
@@ -44,10 +46,12 @@ function formatLastSeen(ts: unknown): string {
 export default function LeaderboardPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
+  const { settings } = useRestaurantSettings(profile?.restaurantId || RESTAURANT_ID)
   const [waiters, setWaiters] = useState<UserProfile[]>([]);
   const [presence, setPresence] = useState<Record<string, PresenceData>>({});
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState("");
+  const businessName = resolveRestaurantBusinessName(settings)
 
   useEffect(() => {
     if (loading) return;
@@ -146,13 +150,13 @@ export default function LeaderboardPage() {
         <div className="px-5 pt-4 pb-4 flex items-center justify-between">
           <div>
             <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
-              mrssimone Chocolate
+              {businessName}
             </p>
             <p
               className="font-bold text-lg leading-tight mt-0.5"
               style={{ color: GOLD }}
             >
-              Sıralama 🏆
+              Garson Sıralaması
             </p>
           </div>
           <button

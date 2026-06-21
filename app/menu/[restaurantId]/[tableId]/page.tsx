@@ -34,6 +34,7 @@ import {
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
 import {
+  DEFAULT_BRAND_LOGO_PATH,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
   normalizeRestaurantGeneralSettings,
   resolveRestaurantBusinessName,
@@ -293,7 +294,7 @@ export default function MenuPage() {
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
-  const restaurantId = resolvedRestaurantId || slugOrId
+  const restaurantId = resolvedRestaurantId ?? ''
 
   const [tableDocId, setTableDocId] = useState<string | null>(null)
   const [table, setTable] = useState<Table | null>(null)
@@ -344,6 +345,10 @@ export default function MenuPage() {
     let cancelled = false
 
     async function resolveRestaurant() {
+      setLoading(true)
+      setRestaurantNotFound(false)
+      setResolvedRestaurantId(null)
+
       const resolved = await resolveRestaurantBySlugOrId(slugOrId)
       if (cancelled) return
 
@@ -351,6 +356,7 @@ export default function MenuPage() {
         setResolvedRestaurantId(resolved.id)
         setRestaurantNotFound(false)
       } else {
+        setResolvedRestaurantId(null)
         setRestaurantNotFound(true)
         setLoading(false)
       }
@@ -364,15 +370,17 @@ export default function MenuPage() {
   }, [slugOrId])
 
   useEffect(() => {
-    if (!resolvedRestaurantId) return
+    if (!restaurantId) return
+
+    const currentRestaurantId = restaurantId
 
     async function loadMenu() {
-      logFirestoreRead('menu/products + categories + settings', resolvedRestaurantId)
+      logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
       const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'restaurants', resolvedRestaurantId, 'categories'), orderBy('order', 'asc'))),
-        getDocs(collection(db, 'restaurants', resolvedRestaurantId, 'products')),
-        getDoc(doc(db, 'restaurants', resolvedRestaurantId, 'settings', 'menu')),
-        getDoc(doc(db, 'restaurants', resolvedRestaurantId, 'settings', 'general')),
+        getDocs(query(collection(db, 'restaurants', currentRestaurantId, 'categories'), orderBy('order', 'asc'))),
+        getDocs(collection(db, 'restaurants', currentRestaurantId, 'products')),
+        getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
+        getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
       ])
 
       const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
@@ -395,9 +403,12 @@ export default function MenuPage() {
     }
 
     void loadMenu()
-  }, [resolvedRestaurantId])
+  }, [restaurantId])
 
   useEffect(() => {
+    if (!restaurantId || restaurantNotFound) return
+
+    const currentRestaurantId = restaurantId
     let cancelled = false
 
     async function initSession() {
@@ -423,8 +434,8 @@ export default function MenuPage() {
       setRatingForm(EMPTY_RATING_FORM)
 
       try {
-        logFirestoreRead('menu/find table', { restaurantId, tableId })
-        const resolved = await findTableForMenu(restaurantId, tableId)
+        logFirestoreRead('menu/find table', { restaurantId: currentRestaurantId, tableId })
+        const resolved = await findTableForMenu(currentRestaurantId, tableId)
         if (!resolved) {
           if (cancelled) return
           setAccessState('missing')
@@ -437,11 +448,15 @@ export default function MenuPage() {
         setTableDocId(resolved.tableDocId)
         setTable(resolved.table)
 
-        const localSessionId = readStoredSessionId(tableId, restaurantId, resolved.tableDocId)
-        const tableRef = doc(db, 'restaurants', restaurantId, 'tables', resolved.tableDocId)
+        const localSessionId = readStoredSessionId(tableId, currentRestaurantId, resolved.tableDocId)
+        const tableRef = doc(db, 'restaurants', currentRestaurantId, 'tables', resolved.tableDocId)
 
         const result = await runTransaction(db, async (transaction) => {
-          logFirestoreWrite('menu/init session transaction', { restaurantId, tableId: resolved.tableDocId, storedSessionId: localSessionId })
+          logFirestoreWrite('menu/init session transaction', {
+            restaurantId: currentRestaurantId,
+            tableId: resolved.tableDocId,
+            storedSessionId: localSessionId,
+          })
           const snap = await transaction.get(tableRef)
 
           if (!snap.exists()) {
@@ -532,7 +547,7 @@ export default function MenuPage() {
         }
 
         if (result.state === 'ready' && result.sessionId) {
-          persistSessionId(tableId, restaurantId, resolved.tableDocId, result.sessionId)
+          persistSessionId(tableId, currentRestaurantId, resolved.tableDocId, result.sessionId)
           setSessionId(result.sessionId)
           setAccessState('ready')
           setAccessMessage(null)
@@ -540,7 +555,7 @@ export default function MenuPage() {
           return
         }
 
-        clearStoredSessionId(tableId, restaurantId, resolved.tableDocId)
+        clearStoredSessionId(tableId, currentRestaurantId, resolved.tableDocId)
         setAccessState(result.state)
         setAccessMessage(result.message)
       } catch (error) {
@@ -555,7 +570,7 @@ export default function MenuPage() {
     return () => {
       cancelled = true
     }
-  }, [restaurantId, tableId])
+  }, [restaurantId, restaurantNotFound, tableId])
 
   // Load customer name and cart from localStorage when session is ready
   useEffect(() => {
@@ -1099,7 +1114,7 @@ export default function MenuPage() {
     : resolveMenuDisplayName(menuSettings)
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
     ? generalSettings.logoUrl
-    : menuSettings.logoUrl
+    : (menuSettings.logoUrl || DEFAULT_BRAND_LOGO_PATH)
   const menuPrimaryColor = menuPrimaryColorOverride
     ? menuPrimaryColorOverride
     : hasGeneralSettings && generalSettings.primaryColor
@@ -1166,8 +1181,8 @@ export default function MenuPage() {
       <div className="min-h-screen flex items-center justify-center bg-[#fafafa]">
         <div className="text-center text-[#3d2b1f] px-6">
           <div className="text-4xl mb-3">🔍</div>
-          <p className="font-semibold text-lg mb-2">İşletme Bulunamadı</p>
-          <p className="text-sm text-gray-500">Bu link geçersiz veya işletme mevcut değil.</p>
+          <p className="font-semibold text-lg mb-2">Menü bulunamadı</p>
+          <p className="text-sm text-gray-500">İşletme bağlantısı geçersiz olabilir.</p>
         </div>
       </div>
     )

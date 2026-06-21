@@ -87,7 +87,7 @@ export async function resolveRestaurantBySlugOrId(
     }
   }
 
-  if (slugOrId === RESTAURANT_ID || slugOrId === "mrssimone") {
+  if (slugOrId === RESTAURANT_ID || slugOrId === "mrssimone" || slugOrId === "varina") {
     return {
       id: RESTAURANT_ID,
       slug: null,

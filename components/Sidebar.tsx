@@ -14,9 +14,11 @@ import {
   LogOut,
   X,
 } from 'lucide-react'
+import { useAuth } from '@/components/AuthProvider'
+import ViewMenuButton from '@/components/dashboard/ViewMenuButton'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
-import { auth } from '@/lib/firebase'
-import { resolveRestaurantBusinessName, getContrastColor } from '@/lib/restaurant-settings'
+import { auth, RESTAURANT_ID } from '@/lib/firebase'
+import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl, getContrastColor } from '@/lib/restaurant-settings'
 
 const NAV = [
   { href: '/dashboard',          label: 'Genel Bakış',   Icon: LayoutDashboard },
@@ -34,11 +36,14 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+  const { profile } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
   const { settings, primaryColor } = useRestaurantSettingsContext()
 
+  const restaurantId = profile?.restaurantId || RESTAURANT_ID
   const businessName = resolveRestaurantBusinessName(settings)
+  const logoUrl = resolveRestaurantLogoUrl(settings)
   const textColor = getContrastColor(primaryColor)
   const activeItemBg = textColor === '#ffffff' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'
 
@@ -81,10 +86,10 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
         <div className="hidden md:block px-6 py-5 border-b" style={{ borderColor: `${textColor}20` }}>
           <div className="flex items-center gap-3">
-            {settings?.logoUrl && (
+            {logoUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={settings.logoUrl}
+                src={logoUrl}
                 alt={businessName}
                 className="h-10 w-10 rounded-xl object-cover"
                 style={{ border: `1px solid ${textColor}20` }}
@@ -118,6 +123,13 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             )
           })}
         </nav>
+
+        <ViewMenuButton
+          restaurantId={restaurantId}
+          slug={settings?.slug}
+          textColor={textColor}
+          onNavigate={onClose}
+        />
 
         <div className="px-3 py-4 border-t" style={{ borderColor: `${textColor}20` }}>
           <button

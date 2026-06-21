@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { getDocs } from 'firebase/firestore'
-import { logFirestoreRead } from '@/lib/firestore-debug'
-import { getRestaurantRecentRatingsQuery } from '@/lib/firestore-queries'
+import { useEffect, useMemo, useState } from 'react'
+import { deleteDoc, doc, onSnapshot, writeBatch } from 'firebase/firestore'
+import { useAuth } from '@/components/AuthProvider'
+import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeRating } from '@/lib/firestore-models'
-import { RESTAURANT_ID } from '@/lib/firebase'
+import { getRestaurantRecentRatingsQuery } from '@/lib/firestore-queries'
+import { db, RESTAURANT_ID } from '@/lib/firebase'
 import type { Rating } from '@/lib/types'
 
 const BROWN = '#3d2b1f'
@@ -45,34 +46,49 @@ function average(values: number[]): string {
 }
 
 export default function RatingsPage() {
+  const { profile } = useAuth()
+  const restaurantId = profile?.restaurantId || RESTAURANT_ID
+
   const [ratings, setRatings] = useState<Rating[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [waiterFilter, setWaiterFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [deleteBusyId, setDeleteBusyId] = useState<string | 'bulk' | null>(null)
 
   useEffect(() => {
-    let cancelled = false
+    logFirestoreRead('dashboard/ratings', restaurantId)
+    const unsubscribe = onSnapshot(
+      getRestaurantRecentRatingsQuery(restaurantId),
+      (snap) => {
+        setRatings(
+          snap.docs
+            .map((ratingDoc) => normalizeRating(ratingDoc.id, ratingDoc.data() as Record<string, unknown>))
+            .sort((left, right) => right.createdAt - left.createdAt)
+        )
+        setError('')
+        setLoading(false)
+      },
+      (snapshotError) => {
+        console.error('Yorumlar yüklenemedi:', snapshotError)
+        setRatings([])
+        setError('Yorumlar yüklenemedi. Lütfen tekrar deneyin.')
+        setLoading(false)
+      }
+    )
 
-    async function loadRatings() {
-      logFirestoreRead('dashboard/ratings', RESTAURANT_ID)
-      const snap = await getDocs(getRestaurantRecentRatingsQuery(RESTAURANT_ID))
-      if (cancelled) return
-      const nextRatings = snap.docs
-        .map((doc) => normalizeRating(doc.id, doc.data() as Record<string, unknown>))
-        .sort((a, b) => b.createdAt - a.createdAt)
+    return () => unsubscribe()
+  }, [restaurantId])
 
-      setRatings(nextRatings)
-    }
-
-    void loadRatings()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const waiterOptions = Array.from(
-    new Set(ratings.map((rating) => rating.waiterName).filter((value): value is string => !!value))
-  ).sort((a, b) => a.localeCompare(b, 'tr'))
+  const waiterOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(ratings.map((rating) => rating.waiterName).filter((value): value is string => !!value))
+      ).sort((a, b) => a.localeCompare(b, 'tr')),
+    [ratings]
+  )
 
   const threshold = getDateThreshold(dateFilter)
   const filteredRatings = ratings.filter((rating) => {
@@ -83,19 +99,138 @@ export default function RatingsPage() {
 
   const approvedRatings = filteredRatings.filter((rating) => rating.status === 'approved')
   const suspiciousRatings = filteredRatings.filter((rating) => rating.status === 'suspicious')
-
   const averageService = average(approvedRatings.map((rating) => rating.serviceRating))
   const averageWaiter = average(approvedRatings.map((rating) => rating.waiterRating))
+  const allVisibleSelected =
+    filteredRatings.length > 0 && filteredRatings.every((rating) => selectedIds.has(rating.id))
+
+  function toggleSelection(ratingId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(ratingId)) next.delete(ratingId)
+      else next.add(ratingId)
+      return next
+    })
+  }
+
+  function toggleSelectAllVisible() {
+    if (allVisibleSelected) {
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        for (const rating of filteredRatings) {
+          next.delete(rating.id)
+        }
+        return next
+      })
+      return
+    }
+
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      for (const rating of filteredRatings) {
+        next.add(rating.id)
+      }
+      return next
+    })
+  }
+
+  async function deleteSingleRating(rating: Rating) {
+    const confirmed = window.confirm(`Masa ${rating.tableNumber > 0 ? rating.tableNumber : rating.tableId} yorumunu silmek istiyor musunuz?`)
+    if (!confirmed) return
+
+    setDeleteBusyId(rating.id)
+    setError('')
+    try {
+      logFirestoreWrite('dashboard/delete rating', { restaurantId, ratingId: rating.id })
+      await deleteDoc(doc(db, 'restaurants', restaurantId, 'ratings', rating.id))
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        next.delete(rating.id)
+        return next
+      })
+    } catch (deleteError) {
+      console.error('Yorum silinemedi:', deleteError)
+      setError('Yorum silinemedi. Lütfen tekrar deneyin.')
+    } finally {
+      setDeleteBusyId(null)
+    }
+  }
+
+  async function deleteSelectedRatings() {
+    if (selectedIds.size === 0) return
+
+    const confirmed = window.confirm(`${selectedIds.size} yorumu silmek istiyor musunuz?`)
+    if (!confirmed) return
+
+    const idsToDelete = new Set(selectedIds)
+    setDeleteBusyId('bulk')
+    setError('')
+
+    try {
+      const batch = writeBatch(db)
+      for (const ratingId of idsToDelete) {
+        batch.delete(doc(db, 'restaurants', restaurantId, 'ratings', ratingId))
+      }
+      logFirestoreWrite('dashboard/bulk delete ratings', [...idsToDelete])
+      await batch.commit()
+      setSelectedIds(new Set())
+      setSelectionMode(false)
+    } catch (deleteError) {
+      console.error('Toplu yorum silme başarısız:', deleteError)
+      setError('Seçili yorumlar silinemedi. Lütfen tekrar deneyin.')
+    } finally {
+      setDeleteBusyId(null)
+    }
+  }
+
+  const noRatings = !loading && ratings.length === 0
+  const noFilteredRatings = !loading && ratings.length > 0 && filteredRatings.length === 0
 
   return (
     <div className="p-8">
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex flex-col gap-4 mb-6 md:flex-row md:items-start md:justify-between">
         <div>
           <h1 className="font-bold text-2xl" style={{ color: BROWN }}>Yorumlar</h1>
           <p className="text-gray-400 text-sm mt-0.5">
-            {filteredRatings.length} değerlendirme görüntüleniyor
+            {loading ? 'Yorumlar yükleniyor...' : `${filteredRatings.length} değerlendirme görüntüleniyor`}
           </p>
         </div>
+
+        {!loading && ratings.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                setSelectionMode((current) => !current)
+                setSelectedIds(new Set())
+              }}
+              className="rounded-xl px-4 py-2 text-sm font-semibold"
+              style={selectionMode ? { background: GOLD, color: BROWN } : { background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb' }}
+            >
+              {selectionMode ? 'Seçimi İptal' : 'Seç'}
+            </button>
+
+            {selectionMode && filteredRatings.length > 0 && (
+              <button
+                onClick={toggleSelectAllVisible}
+                className="rounded-xl px-4 py-2 text-sm font-semibold"
+                style={{ background: '#fff', color: BROWN, border: '1px solid #e5e7eb' }}
+              >
+                {allVisibleSelected ? 'Seçimi Kaldır' : 'Görünenleri Seç'}
+              </button>
+            )}
+
+            {selectionMode && selectedIds.size > 0 && (
+              <button
+                onClick={() => void deleteSelectedRatings()}
+                disabled={deleteBusyId === 'bulk'}
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: '#dc2626' }}
+              >
+                {deleteBusyId === 'bulk' ? 'Siliniyor...' : `Seçilenleri Sil (${selectedIds.size})`}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -142,47 +277,90 @@ export default function RatingsPage() {
         </div>
       </div>
 
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-lg" style={{ color: BROWN }}>Son Yorumlar</h2>
-          <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: '#faf5e6', color: BROWN }}>
-            {approvedRatings.length} kayıt
-          </span>
+      {error && (
+        <div
+          className="rounded-xl px-4 py-3 text-sm mb-6"
+          style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }}
+        >
+          {error}
         </div>
+      )}
 
-        {approvedRatings.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-gray-400 text-sm">
-            Filtrelere uygun yorum bulunamadı.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {approvedRatings.map((rating) => (
-              <RatingCard key={rating.id} rating={rating} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-lg" style={{ color: BROWN }}>Şüpheli Yorumlar</h2>
-          <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: '#fff7ed', color: '#c2410c' }}>
-            {suspiciousRatings.length} kayıt
-          </span>
+      {loading ? (
+        <div className="space-y-6">
+          <RatingsLoadingSection title="Son Yorumlar" />
+          <RatingsLoadingSection title="Şüpheli Yorumlar" />
         </div>
+      ) : noRatings ? (
+        <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-gray-400 text-sm">
+          Henüz yorum bulunmuyor.
+        </div>
+      ) : noFilteredRatings ? (
+        <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-gray-400 text-sm">
+          Filtrelere uygun yorum bulunamadı.
+        </div>
+      ) : (
+        <>
+          <section className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg" style={{ color: BROWN }}>Son Yorumlar</h2>
+              <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: '#faf5e6', color: BROWN }}>
+                {approvedRatings.length} kayıt
+              </span>
+            </div>
 
-        {suspiciousRatings.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
-            Şüpheli yorum yok.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {suspiciousRatings.map((rating) => (
-              <RatingCard key={rating.id} rating={rating} suspicious />
-            ))}
-          </div>
-        )}
-      </section>
+            {approvedRatings.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
+                Onaylı yorum yok.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {approvedRatings.map((rating) => (
+                  <RatingCard
+                    key={rating.id}
+                    rating={rating}
+                    selectionMode={selectionMode}
+                    selected={selectedIds.has(rating.id)}
+                    busy={deleteBusyId === rating.id}
+                    onToggleSelect={() => toggleSelection(rating.id)}
+                    onDelete={() => void deleteSingleRating(rating)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-lg" style={{ color: BROWN }}>Şüpheli Yorumlar</h2>
+              <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: '#fff7ed', color: '#c2410c' }}>
+                {suspiciousRatings.length} kayıt
+              </span>
+            </div>
+
+            {suspiciousRatings.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
+                Şüpheli yorum yok.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {suspiciousRatings.map((rating) => (
+                  <RatingCard
+                    key={rating.id}
+                    rating={rating}
+                    suspicious
+                    selectionMode={selectionMode}
+                    selected={selectedIds.has(rating.id)}
+                    busy={deleteBusyId === rating.id}
+                    onToggleSelect={() => toggleSelection(rating.id)}
+                    onDelete={() => void deleteSingleRating(rating)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   )
 }
@@ -198,33 +376,100 @@ function StatCard({ label, value }: { label: string; value: string }) {
   )
 }
 
-function RatingCard({ rating, suspicious }: { rating: Rating; suspicious?: boolean }) {
+function RatingsLoadingSection({ title }: { title: string }) {
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-lg" style={{ color: BROWN }}>{title}</h2>
+        <span className="text-xs font-semibold px-3 py-1 rounded-full bg-gray-100 text-gray-400">Yükleniyor</span>
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {[1, 2].map((item) => (
+          <div key={item} className="bg-white rounded-xl border border-gray-100 p-5 animate-pulse">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="space-y-2">
+                <div className="h-5 w-28 rounded bg-gray-100" />
+                <div className="h-4 w-24 rounded bg-gray-100" />
+              </div>
+              <div className="h-4 w-20 rounded bg-gray-100" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <div className="h-18 rounded-xl bg-gray-100" />
+              <div className="h-18 rounded-xl bg-gray-100" />
+            </div>
+            <div className="h-12 rounded bg-gray-100" />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function RatingCard({
+  rating,
+  suspicious,
+  selectionMode,
+  selected,
+  busy,
+  onToggleSelect,
+  onDelete,
+}: {
+  rating: Rating
+  suspicious?: boolean
+  selectionMode: boolean
+  selected: boolean
+  busy: boolean
+  onToggleSelect: () => void
+  onDelete: () => void
+}) {
   return (
     <div
       className="bg-white rounded-xl border p-5"
       style={{
-        borderColor: suspicious ? '#fdba74' : '#f0ede9',
+        borderColor: suspicious ? '#fdba74' : selected ? GOLD : '#f0ede9',
         background: suspicious ? '#fffaf4' : '#fff',
+        boxShadow: selected ? '0 0 0 2px rgba(212,160,23,0.15)' : undefined,
       }}
     >
       <div className="flex items-start justify-between gap-4 mb-4">
-        <div>
-          <p className="font-semibold text-lg" style={{ color: BROWN }}>
-            Masa {rating.tableNumber > 0 ? rating.tableNumber : rating.tableId}
-          </p>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {rating.waiterName ?? 'Garson bilgisi yok'}
-          </p>
+        <div className="flex items-start gap-3">
+          {selectionMode && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              className="mt-1 h-4 w-4 accent-[#d4a017]"
+            />
+          )}
+          <div>
+            <p className="font-semibold text-lg" style={{ color: BROWN }}>
+              Masa {rating.tableNumber > 0 ? rating.tableNumber : rating.tableId}
+            </p>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {rating.waiterName ?? 'Garson bilgisi yok'}
+            </p>
+          </div>
         </div>
+
         <div className="text-right">
           <p className="text-xs font-semibold" style={{ color: suspicious ? '#c2410c' : '#6b7280' }}>
             {formatDate(rating.createdAt)}
           </p>
-          {suspicious && (
-            <span className="inline-block mt-2 text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#ffedd5', color: '#c2410c' }}>
-              Şüpheli
-            </span>
-          )}
+          <div className="mt-2 flex items-center justify-end gap-2">
+            {suspicious && (
+              <span className="inline-block text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#ffedd5', color: '#c2410c' }}>
+                Şüpheli
+              </span>
+            )}
+            <button
+              onClick={onDelete}
+              disabled={busy}
+              className="inline-flex rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50"
+              style={{ background: '#fee2e2', color: '#b91c1c' }}
+            >
+              {busy ? 'Siliniyor...' : 'Sil'}
+            </button>
+          </div>
         </div>
       </div>
 

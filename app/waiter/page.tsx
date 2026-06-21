@@ -475,6 +475,15 @@ export default function WaiterPage() {
         </div>
       )}
 
+      {!rtdb && (
+        <div
+          className="px-4 py-2 text-center text-sm"
+          style={{ background: '#eff6ff', color: '#1d4ed8' }}
+        >
+          Canlı durum kapalı.
+        </div>
+      )}
+
       {/* ── Tab content ── */}
       <div className="px-4 py-5 max-w-lg mx-auto">
 

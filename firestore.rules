@@ -198,25 +198,22 @@ service cloud.firestore {
         // Staff can do any write
         allow write: if isStaff(rid);
 
-        // Customer: open session on empty table (boş -> aktif)
-        allow update: if !signedIn()
-          && resource.data.status == 'boş'
+        // QR menu session open on empty table (boş -> aktif)
+        allow update: if resource.data.status == 'boş'
           && request.resource.data.status == 'aktif'
           && request.resource.data.sessionId is string
           && request.resource.data.sessionId.size() > 0
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'sessionId', 'openedAt', 'updatedAt']);
 
-        // Customer: update table status for call (aktif -> çağrı var, aktif -> hesap istendi)
-        allow update: if !signedIn()
-          && resource.data.status == 'aktif'
+        // QR menu: update table status for call (aktif -> çağrı var, aktif -> hesap istendi)
+        allow update: if resource.data.status == 'aktif'
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
 
-        // Customer: update table status for call from existing call states
-        allow update: if !signedIn()
-          && resource.data.status in ['çağrı var', 'hesap istendi']
+        // QR menu: update table status for call from existing call states
+        allow update: if resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
@@ -235,9 +232,8 @@ service cloud.firestore {
         allow create, update, delete: if isAdmin(rid);
         allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid);
 
-        // Customer: create new call with tip-specific restricted fields
-        allow create: if !signedIn()
-          && (validPublicOrderCall(rid) || validPublicServiceCall(rid));
+        // QR menu: create new call with tip-specific restricted fields
+        allow create: if validPublicOrderCall(rid) || validPublicServiceCall(rid);
       }
 
       // ── Settings (menu, general) ───────────────────────────────────────────

@@ -285,20 +285,7 @@ async function findTableForMenu(restaurantId: string, tableId: string): Promise<
     )
   )
 
-  if (numberSnap.empty) {
-    return {
-      tableDocId: tableId,
-      table: {
-        id: tableId,
-        number: parsedNumber,
-        status: 'boş',
-        sessionId: null,
-        openedAt: null,
-        createdAt: null,
-        updatedAt: null,
-      },
-    }
-  }
+  if (numberSnap.empty) return null
 
   const matchedDoc = numberSnap.docs[0]
   return {
@@ -947,6 +934,7 @@ export default function MenuPage() {
         return
       }
 
+      const effectiveTableNumber = liveTable.number > 0 ? liveTable.number : (table?.number ?? Number.parseInt(tableId, 10))
       const grouped = groupCartItemsByCustomer(activeCart)
       const totalPrice = calculateCartTotal(activeCart)
       const batch = writeBatch(db)
@@ -955,7 +943,7 @@ export default function MenuPage() {
 
       batch.set(newCallRef, {
         tableId: tableDocId,
-        tableNumber: table?.number ?? liveTable.number,
+        tableNumber: effectiveTableNumber,
         sessionId,
         restaurantId,
         tip: 'sipariş',
@@ -1069,11 +1057,11 @@ export default function MenuPage() {
       const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
       const newCallRef = doc(callsCollection)
       const batch = writeBatch(db)
-      const parsedTableNumber = Number.parseInt(tableId, 10)
+      const effectiveTableNumber = liveTable.number > 0 ? liveTable.number : (table?.number ?? Number.parseInt(tableId, 10))
 
       batch.set(newCallRef, {
         tableId: tableDocId,
-        tableNumber: Number.isFinite(parsedTableNumber) ? parsedTableNumber : liveTable.number,
+        tableNumber: effectiveTableNumber,
         sessionId: activeSessionId,
         restaurantId,
         tip: selectedTip,
@@ -1100,7 +1088,7 @@ export default function MenuPage() {
       const newOpenCall: WaiterCall = {
           id: newCallRef.id,
           tableId: tableDocId,
-          tableNumber: Number.isFinite(parsedTableNumber) ? parsedTableNumber : liveTable.number,
+          tableNumber: effectiveTableNumber,
           sessionId: activeSessionId,
           restaurantId,
           tip: selectedTip,

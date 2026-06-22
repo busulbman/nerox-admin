@@ -22,7 +22,7 @@ import { ShoppingBag } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
-import { resolveRestaurantBySlugOrId } from '@/lib/restaurant-resolver'
+import { resolveRestaurantBySlugOrId, type ResolvedRestaurant } from '@/lib/restaurant-resolver'
 import { getMenuCategoriesQuery, getMenuProductsQuery } from '@/lib/firestore-queries'
 import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
 import {
@@ -34,11 +34,9 @@ import {
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
 import {
-  DEFAULT_BRAND_LOGO_PATH,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
   getRestaurantAccessBlockMessage,
   mergeRestaurantGeneralSettings,
-  normalizeRestaurantDocument,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
@@ -302,7 +300,7 @@ export default function MenuPage() {
   const { restaurantId: slugOrId, tableId } = params
   useAuth()
 
-  const [resolvedRestaurantId, setResolvedRestaurantId] = useState<string | null>(null)
+  const [resolvedRestaurant, setResolvedRestaurant] = useState<ResolvedRestaurant | null>(null)
   const [restaurantNotFound, setRestaurantNotFound] = useState(false)
   const [restaurantAccessReason, setRestaurantAccessReason] = useState<string | null>(null)
 
@@ -314,7 +312,7 @@ export default function MenuPage() {
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
-  const restaurantId = resolvedRestaurantId ?? ''
+  const restaurantId = resolvedRestaurant?.id ?? ''
 
   const [tableDocId, setTableDocId] = useState<string | null>(null)
   const [table, setTable] = useState<Table | null>(null)
@@ -358,16 +356,21 @@ export default function MenuPage() {
     async function resolveRestaurant() {
       setLoading(true)
       setRestaurantNotFound(false)
-      setResolvedRestaurantId(null)
+      setResolvedRestaurant(null)
+      setRestaurantAccessReason(null)
 
       const resolved = await resolveRestaurantBySlugOrId(slugOrId)
       if (cancelled) return
 
       if (resolved) {
-        setResolvedRestaurantId(resolved.id)
+        setResolvedRestaurant(resolved)
         setRestaurantNotFound(false)
+        setRestaurantAccessReason(getRestaurantAccessBlockMessage({
+          status: resolved.status,
+          subscriptionExpiresAt: resolved.subscriptionExpiresAt,
+        }))
       } else {
-        setResolvedRestaurantId(null)
+        setResolvedRestaurant(null)
         setRestaurantNotFound(true)
         setLoading(false)
       }
@@ -381,7 +384,7 @@ export default function MenuPage() {
   }, [slugOrId])
 
   useEffect(() => {
-    if (!restaurantId) return
+    if (!restaurantId || restaurantAccessReason) return
 
     const currentRestaurantId = restaurantId
 
@@ -398,70 +401,55 @@ export default function MenuPage() {
         return
       }
 
-      logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
-      const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap, restaurantSnap] = await Promise.all([
-        getDocs(getMenuCategoriesQuery(currentRestaurantId)),
-        getDocs(getMenuProductsQuery(currentRestaurantId)),
-        getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
-        getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
-        getDoc(doc(db, 'restaurants', currentRestaurantId)),
-      ])
+      try {
+        logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
+        const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
+          getDocs(getMenuCategoriesQuery(currentRestaurantId)),
+          getDocs(getMenuProductsQuery(currentRestaurantId)),
+          getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
+          getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
+        ])
 
-      const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
-      const nextProducts = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product))
-      const nextMenuSettings = menuSettingsSnap.exists()
-        ? normalizeMenuThemeSettings(menuSettingsSnap.data())
-        : { ...EMPTY_MENU_THEME_SETTINGS }
-      const nextGeneralSettings = mergeRestaurantGeneralSettings(
-        generalSettingsSnap.exists() ? generalSettingsSnap.data() : null,
-        restaurantSnap.exists() ? restaurantSnap.data() : null,
-      )
-      const nextRestaurantAccessReason = restaurantSnap.exists()
-        ? getRestaurantAccessBlockMessage(normalizeRestaurantDocument(restaurantSnap.data(), restaurantSnap.id))
-        : null
-      const nextMenuPrimaryColorOverride =
-        menuSettingsSnap.exists()
-        && typeof menuSettingsSnap.data().menuPrimaryColor === 'string'
-        && isValidMenuPrimaryColor(menuSettingsSnap.data().menuPrimaryColor)
-          ? menuSettingsSnap.data().menuPrimaryColor
-          : null
+        const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
+        const nextProducts = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product))
+        const nextMenuSettings = menuSettingsSnap.exists()
+          ? normalizeMenuThemeSettings(menuSettingsSnap.data())
+          : { ...EMPTY_MENU_THEME_SETTINGS }
+        const nextGeneralSettings = mergeRestaurantGeneralSettings(
+          generalSettingsSnap.exists() ? generalSettingsSnap.data() : null,
+          null,
+        )
+        const nextMenuPrimaryColorOverride =
+          menuSettingsSnap.exists()
+          && typeof menuSettingsSnap.data().menuPrimaryColor === 'string'
+          && isValidMenuPrimaryColor(menuSettingsSnap.data().menuPrimaryColor)
+            ? menuSettingsSnap.data().menuPrimaryColor
+            : null
 
-      menuDataCache.set(currentRestaurantId, {
-        categories: nextCategories,
-        products: nextProducts,
-        menuSettings: nextMenuSettings,
-        generalSettings: nextGeneralSettings,
-        menuPrimaryColorOverride: nextMenuPrimaryColorOverride,
-      })
+        menuDataCache.set(currentRestaurantId, {
+          categories: nextCategories,
+          products: nextProducts,
+          menuSettings: nextMenuSettings,
+          generalSettings: nextGeneralSettings,
+          menuPrimaryColorOverride: nextMenuPrimaryColorOverride,
+        })
 
-      setCategories(nextCategories)
-      setProducts(nextProducts)
-      setMenuSettings(nextMenuSettings)
-      setGeneralSettings(nextGeneralSettings)
-      setMenuPrimaryColorOverride(nextMenuPrimaryColorOverride)
-      setRestaurantAccessReason(nextRestaurantAccessReason)
-      setActiveCat(nextCategories[0]?.id ?? null)
-      setLoading(false)
+        setCategories(nextCategories)
+        setProducts(nextProducts)
+        setMenuSettings(nextMenuSettings)
+        setGeneralSettings(nextGeneralSettings)
+        setMenuPrimaryColorOverride(nextMenuPrimaryColorOverride)
+        setActiveCat(nextCategories[0]?.id ?? null)
+      } catch (error) {
+        console.error('Menu load error:', error)
+        setRestaurantAccessReason('Bu menü şu anda kullanılamıyor.')
+      } finally {
+        setLoading(false)
+      }
     }
 
     void loadMenu()
-  }, [restaurantId])
-
-  useEffect(() => {
-    if (!restaurantId) return
-
-    const unsubscribe = onSnapshot(doc(db, 'restaurants', restaurantId), (snapshot) => {
-      if (!snapshot.exists()) {
-        setRestaurantAccessReason(null)
-        return
-      }
-
-      const restaurant = normalizeRestaurantDocument(snapshot.data(), snapshot.id)
-      setRestaurantAccessReason(getRestaurantAccessBlockMessage(restaurant))
-    })
-
-    return () => unsubscribe()
-  }, [restaurantId])
+  }, [restaurantAccessReason, restaurantId])
 
   useEffect(() => {
     if (!restaurantId || restaurantNotFound) return
@@ -494,19 +482,6 @@ export default function MenuPage() {
       setRatingForm(EMPTY_RATING_FORM)
 
       try {
-        const restaurantSnap = await getDoc(doc(db, 'restaurants', currentRestaurantId))
-        const liveRestaurantAccessReason = restaurantSnap.exists()
-          ? getRestaurantAccessBlockMessage(normalizeRestaurantDocument(restaurantSnap.data(), restaurantSnap.id))
-          : null
-
-        if (liveRestaurantAccessReason) {
-          if (cancelled) return
-          setRestaurantAccessReason(liveRestaurantAccessReason)
-          setAccessState('locked')
-          setAccessMessage(MENU_UNAVAILABLE_MESSAGE)
-          return
-        }
-
         logFirestoreRead('menu/find table', { restaurantId: currentRestaurantId, tableId })
         const resolved = await findTableForMenu(currentRestaurantId, tableId)
         if (!resolved) {
@@ -1248,7 +1223,7 @@ export default function MenuPage() {
     : resolveMenuDisplayName(menuSettings)
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
     ? generalSettings.logoUrl
-    : (menuSettings.logoUrl || DEFAULT_BRAND_LOGO_PATH)
+    : menuSettings.logoUrl
   const menuPrimaryColor = menuPrimaryColorOverride
     ? menuPrimaryColorOverride
     : hasGeneralSettings && generalSettings.primaryColor
@@ -1466,7 +1441,9 @@ export default function MenuPage() {
           {visibleProducts.length === 0 ? (
             <div className="rounded-[28px] bg-white px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
               <p className="text-4xl mb-3">🍽️</p>
-              <p className="text-sm text-[#888888]">Bu kategoride ürün bulunamadı.</p>
+              <p className="text-sm text-[#888888]">
+                {products.some((product) => product.available) ? 'Bu kategoride ürün bulunamadı.' : 'Henüz ürün eklenmedi.'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4">

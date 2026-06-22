@@ -18,10 +18,6 @@ export function useRestaurantSettings(restaurantId: string | null | undefined) {
 
   useEffect(() => {
     if (!restaurantId) {
-      setSettings(EMPTY_RESTAURANT_GENERAL_SETTINGS)
-      setRestaurant(null)
-      setLoadedRestaurantId(null)
-      setError('')
       return
     }
 
@@ -30,11 +26,6 @@ export function useRestaurantSettings(restaurantId: string | null | undefined) {
     let settingsReady = false
     let rawRestaurant: unknown = null
     let rawSettings: unknown = null
-
-    setLoadedRestaurantId(null)
-    setSettings(EMPTY_RESTAURANT_GENERAL_SETTINGS)
-    setRestaurant(null)
-    setError('')
 
     const syncSettings = () => {
       if (!active) return

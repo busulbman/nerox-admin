@@ -33,6 +33,23 @@ service cloud.firestore {
       return isAdmin(rid) || isWaiter(rid);
     }
 
+    function restaurantDoc(rid) {
+      return get(/databases/$(database)/documents/restaurants/$(rid)).data;
+    }
+
+    function restaurantExists(rid) {
+      return exists(/databases/$(database)/documents/restaurants/$(rid));
+    }
+
+    function restaurantAllowsPublicAccess(rid) {
+      return restaurantExists(rid)
+        && restaurantDoc(rid).status != 'passive'
+        && (
+          !(restaurantDoc(rid).subscriptionExpiresAt is timestamp)
+          || restaurantDoc(rid).subscriptionExpiresAt >= request.time
+        );
+    }
+
     function waiterCanAcceptCall(rid) {
       return isWaiter(rid)
         && resource.data.durum == 'bekliyor'
@@ -72,7 +89,8 @@ service cloud.firestore {
     }
 
     function validPublicCallBase(rid) {
-      return publicCallTargetsLiveTableSession(rid)
+      return restaurantAllowsPublicAccess(rid)
+        && publicCallTargetsLiveTableSession(rid)
         && request.resource.data.durum == 'bekliyor'
         && request.resource.data.status == 'open'
         && request.resource.data.waiterId == null
@@ -152,23 +170,10 @@ service cloud.firestore {
         && request.resource.data.totalCalls == ((resource.data.totalCalls is int ? resource.data.totalCalls : 0) + 1);
     }
 
-    // ─── Root menu data ─────────────────────────────────────────────────────────
-
-    match /categories/{catId} {
-      allow read: if true;
-      allow write: if signedIn() && role() == 'admin';
-    }
-
-    match /products/{prodId} {
-      allow read: if true;
-      allow write: if signedIn() && role() == 'admin';
-    }
-
     // ─── Restaurant data ────────────────────────────────────────────────────────
 
     match /restaurants/{rid} {
-      // Restaurant doc is public for slug/name/logo/theme resolution in QR menu/login
-      allow read: if true;
+      allow get, list: if isStaff(rid);
       allow create: if isAdmin(rid);
       allow update: if isAdmin(rid);
       allow delete: if isAdmin(rid);
@@ -176,15 +181,13 @@ service cloud.firestore {
       // ── Categories & Products (Menu) ──────────────────────────────────────────
 
       match /categories/{catId} {
-        // Public read for menu display
-        allow read: if true;
+        allow read: if restaurantAllowsPublicAccess(rid);
         // Only admin can modify
         allow write: if isAdmin(rid);
       }
 
       match /products/{prodId} {
-        // Public read for menu display
-        allow read: if true;
+        allow read: if restaurantAllowsPublicAccess(rid);
         // Only admin can modify
         allow write: if isAdmin(rid);
       }
@@ -192,14 +195,14 @@ service cloud.firestore {
       // ── Tables ────────────────────────────────────────────────────────────────
 
       match /tables/{tableId} {
-        // Public read for menu page
-        allow read: if true;
+        allow read: if isStaff(rid) || restaurantAllowsPublicAccess(rid);
 
         // Staff can do any write
         allow write: if isStaff(rid);
 
         // QR menu session open on empty table (boş -> aktif)
-        allow update: if resource.data.status == 'boş'
+        allow update: if restaurantAllowsPublicAccess(rid)
+          && resource.data.status == 'boş'
           && request.resource.data.status == 'aktif'
           && request.resource.data.sessionId is string
           && request.resource.data.sessionId.size() > 0
@@ -207,13 +210,15 @@ service cloud.firestore {
               .hasOnly(['status', 'sessionId', 'openedAt', 'updatedAt']);
 
         // QR menu: update table status for call (aktif -> çağrı var, aktif -> hesap istendi)
-        allow update: if resource.data.status == 'aktif'
+        allow update: if restaurantAllowsPublicAccess(rid)
+          && resource.data.status == 'aktif'
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
 
         // QR menu: update table status for call from existing call states
-        allow update: if resource.data.status in ['çağrı var', 'hesap istendi']
+        allow update: if restaurantAllowsPublicAccess(rid)
+          && resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
@@ -226,7 +231,7 @@ service cloud.firestore {
         allow read: if isStaff(rid);
 
         // Public can read calls (for session status checking)
-        allow read: if true;
+        allow read: if restaurantAllowsPublicAccess(rid);
 
         // Admin can manage all calls, waiters only their own accept/complete flow
         allow create, update, delete: if isAdmin(rid);
@@ -240,7 +245,10 @@ service cloud.firestore {
 
       match /settings/{settingId} {
         // Public read for menu and general settings (QR menu needs logo/colors)
-        allow read: if settingId == 'menu' || settingId == 'general' || isStaff(rid);
+        allow read: if isStaff(rid) || (
+          restaurantAllowsPublicAccess(rid)
+          && (settingId == 'menu' || settingId == 'general')
+        );
         allow write: if isAdmin(rid);
       }
 
@@ -254,7 +262,8 @@ service cloud.firestore {
         allow write: if isAdmin(rid);
 
         // Public rating create (QR menu customers, signed-in or not)
-        allow create: if request.resource.data.serviceRating is int
+        allow create: if restaurantAllowsPublicAccess(rid)
+          && request.resource.data.serviceRating is int
           && request.resource.data.serviceRating >= 1
           && request.resource.data.serviceRating <= 5
           && request.resource.data.waiterRating is int

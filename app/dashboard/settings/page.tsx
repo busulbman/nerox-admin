@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore'
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { Upload, Trash2, Link as LinkIcon } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { db } from '@/lib/firebase'
@@ -10,76 +10,100 @@ import {
   DEFAULT_BUSINESS_NAME,
   DEFAULT_PRIMARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
-  getUniqueRestaurantSlug,
+  generateSlug,
   getContrastColor,
   isValidRestaurantThemeColor,
 } from '@/lib/restaurant-settings'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import type { Restaurant, RestaurantGeneralSettings } from '@/lib/types'
+import type { RestaurantGeneralSettings } from '@/lib/types'
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
 
 export default function SettingsPage() {
-  const { profile } = useAuth()
+  const { user, profile } = useAuth()
   const restaurantId = profile?.restaurantId || ''
 
   const { settings, loading: settingsLoading } = useRestaurantSettings(restaurantId)
 
   const [form, setForm] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([])
+  const [generatedSlugResult, setGeneratedSlugResult] = useState<{
+    restaurantId: string
+    businessName: string
+    value: string
+  } | null>(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const formInitialized = useRef(false)
+  const initializedRestaurantId = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!settingsLoading && !formInitialized.current) {
-      setForm({ ...settings })
-      formInitialized.current = true
+    if (!restaurantId) {
+      initializedRestaurantId.current = null
+      return
     }
-  }, [settings, settingsLoading])
+
+    if (!settingsLoading && initializedRestaurantId.current !== restaurantId) {
+      setForm({ ...settings })
+      initializedRestaurantId.current = restaurantId
+    }
+  }, [restaurantId, settings, settingsLoading])
+
+  const businessNameValue = form.businessName.trim() || settings.businessName.trim() || DEFAULT_BUSINESS_NAME
+  const localSlugFallback = useMemo(() => generateSlug(businessNameValue) || 'isletme', [businessNameValue])
+  const generatedSlug =
+    generatedSlugResult?.restaurantId === restaurantId
+    && generatedSlugResult.businessName === businessNameValue
+      ? generatedSlugResult.value
+      : localSlugFallback
 
   useEffect(() => {
-    if (!restaurantId) return
+    if (!restaurantId || !user) return
 
     let cancelled = false
-
-    async function loadRestaurants() {
-      try {
-        const snap = await getDocs(collection(db, 'restaurants'))
-        if (cancelled) return
-
-        setRestaurants(
-          snap.docs.map((restaurantDoc) => {
-            const data = restaurantDoc.data()
-            return {
-              id: restaurantDoc.id,
-              name: typeof data.name === 'string' ? data.name : '',
-              slug: typeof data.slug === 'string' ? data.slug : '',
-              logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : '',
-              primaryColor: typeof data.primaryColor === 'string' ? data.primaryColor : '',
-            }
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const token = await user.getIdToken()
+          const response = await fetch('/api/restaurants/slug', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            cache: 'no-store',
+            body: JSON.stringify({
+              businessName: businessNameValue,
+              currentRestaurantId: restaurantId,
+            }),
           })
-        )
-      } catch (error) {
-        console.error('Restaurant list load error:', error)
-      }
-    }
 
-    void loadRestaurants()
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(typeof payload.error === 'string' ? payload.error : 'Slug oluşturulamadı.')
+          }
+
+          if (!cancelled && typeof payload.slug === 'string' && payload.slug.trim()) {
+            setGeneratedSlugResult({
+              restaurantId,
+              businessName: businessNameValue,
+              value: payload.slug.trim().toLowerCase(),
+            })
+          }
+        } catch (error) {
+          if (!cancelled) {
+            console.error('Restaurant slug resolve error:', error)
+          }
+        }
+      })()
+    }, 250)
 
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
-  }, [restaurantId])
-
-  const businessNameValue = form.businessName.trim() || settings.businessName.trim() || DEFAULT_BUSINESS_NAME
-  const generatedSlug = useMemo(
-    () => getUniqueRestaurantSlug(businessNameValue, restaurants, restaurantId),
-    [businessNameValue, restaurantId, restaurants]
-  )
+  }, [businessNameValue, restaurantId, user])
 
   async function uploadToImgBB(file: File): Promise<string | null> {
     if (!IMGBB_API_KEY) {
@@ -141,6 +165,11 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
+    if (!restaurantId) {
+      setMessage({ tone: 'error', text: 'İşletme hesabı bulunamadı.' })
+      return
+    }
+
     const trimmedPrimary = form.primaryColor.trim()
     const trimmedSlug = generatedSlug
 

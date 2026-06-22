@@ -33,25 +33,34 @@ service cloud.firestore {
       return isAdmin(rid) || isWaiter(rid);
     }
 
-    function restaurantDoc(rid) {
-      return get(/databases/$(database)/documents/restaurants/$(rid)).data;
+    function restaurantPath(rid) {
+      return /databases/$(database)/documents/restaurants/$(rid);
     }
 
     function restaurantExists(rid) {
-      return exists(/databases/$(database)/documents/restaurants/$(rid));
+      return exists(restaurantPath(rid));
+    }
+
+    function restaurantDoc(rid) {
+      return get(restaurantPath(rid)).data;
+    }
+
+    function isRestaurantActive(rid) {
+      let status = get(restaurantPath(rid)).data.status;
+      return status == null || status == 'active';
+    }
+
+    function isSubscriptionValid(rid) {
+      let expires = get(restaurantPath(rid)).data.subscriptionExpiresAt;
+      return expires == null
+        || (expires is timestamp && expires >= request.time)
+        || (expires is int && expires >= request.time.toMillis());
     }
 
     function restaurantAllowsPublicAccess(rid) {
-      let doc = restaurantDoc(rid);
-      let expires = doc.subscriptionExpiresAt;
-      return restaurantExists(rid)
-        && doc.status != 'passive'
-        && (
-          expires == null
-          || !(expires is timestamp || expires is int)
-          || (expires is timestamp && expires >= request.time)
-          || (expires is int && expires >= request.time.toMillis())
-        );
+      return exists(restaurantPath(rid))
+        && isRestaurantActive(rid)
+        && isSubscriptionValid(rid);
     }
 
     function waiterCanAcceptCall(rid) {

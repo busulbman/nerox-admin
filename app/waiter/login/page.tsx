@@ -5,29 +5,24 @@ import { signInWithEmailAndPassword } from 'firebase/auth'
 import { useRouter } from 'next/navigation'
 import { auth } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
-import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import { DEFAULT_RESTAURANT_SLUG, resolveRestaurantBusinessName, resolveRestaurantLogoUrl } from '@/lib/restaurant-settings'
+import { DEFAULT_BRAND_LOGO_PATH } from '@/lib/restaurant-settings'
 
 export default function WaiterLoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [lastRestaurantId] = useState<string | null>(() => (
-    typeof window === 'undefined' ? null : window.localStorage.getItem('nerox:last-restaurant-id')
-  ))
   const { user, profile, loading } = useAuth()
-  const restaurantSettingsId = lastRestaurantId?.trim().toLowerCase() === 'varina'
-    ? DEFAULT_RESTAURANT_SLUG
-    : (lastRestaurantId || DEFAULT_RESTAURANT_SLUG)
-  const { settings } = useRestaurantSettings(restaurantSettingsId)
   const router = useRouter()
-  const businessName = resolveRestaurantBusinessName(settings)
-  const logoUrl = resolveRestaurantLogoUrl(settings)
+  const businessName = 'Nerox'
+  const logoUrl = DEFAULT_BRAND_LOGO_PATH
+  const panelTitle = 'Garson Paneli'
 
   useEffect(() => {
     if (loading || !user) return
-    if (profile?.role === 'admin') {
+    if (profile?.role === 'super_admin') {
+      router.replace('/super-admin')
+    } else if (profile?.role === 'admin') {
       router.replace('/dashboard')
     } else if (profile?.role === 'waiter') {
       if (profile.active === false) return
@@ -60,7 +55,7 @@ export default function WaiterLoginPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={logoUrl} alt={businessName} className="h-20 w-20 rounded-3xl object-cover mx-auto mb-4" />
           <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>
-            {businessName} Garson Paneli
+            {panelTitle}
           </h1>
           <p className="text-gray-400 text-sm mt-1">Garson Girişi</p>
         </div>

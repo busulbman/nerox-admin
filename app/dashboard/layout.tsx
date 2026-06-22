@@ -9,18 +9,42 @@ import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCall
 import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { auth } from '@/lib/firebase'
 import { requestPermission, showLocalNotification } from '@/lib/notifications'
-import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { getRestaurantAccessBlockMessage, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
+  const router = useRouter()
 
-  if (loading || !user || !profile?.restaurantId) {
+  useEffect(() => {
+    if (loading) return
+    if (!user) {
+      router.replace('/login')
+      return
+    }
+
+    if (profile?.role === 'super_admin') {
+      router.replace('/super-admin')
+    }
+  }, [loading, profile?.role, router, user])
+
+  if (loading || !user || profile?.role === 'super_admin') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
         <p className="text-sm" style={{ color: 'rgba(61,43,31,0.4)' }}>Yükleniyor...</p>
+      </div>
+    )
+  }
+
+  if (!profile?.restaurantId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: '#faf7f4' }}>
+        <div className="max-w-sm rounded-2xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-sm">
+          <p className="font-semibold text-lg" style={{ color: '#3d2b1f' }}>İşletme hesabı bulunamadı.</p>
+          <p className="mt-2 text-sm text-gray-500">Kullanıcı profilinizde `restaurantId` tanımlı değil.</p>
+        </div>
       </div>
     )
   }
@@ -37,9 +61,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const { pendingCalls, pendingCount, connectionLost } = useOpenCalls()
-  const { settings, primaryColor, textColor } = useRestaurantSettingsContext()
+  const { settings, restaurant, primaryColor, textColor } = useRestaurantSettingsContext()
   const router = useRouter()
   const businessName = resolveRestaurantBusinessName(settings)
+  const panelTitle = `${businessName} Yönetim Paneli`
+  const accessBlockMessage = getRestaurantAccessBlockMessage(restaurant)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -49,6 +75,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (loading) return
     if (!user) { router.replace('/login'); return }
+    if (profile?.role === 'super_admin') { router.replace('/super-admin'); return }
     if (profile?.role === 'waiter') { router.replace('/waiter'); return }
   }, [user, profile, loading, router])
 
@@ -105,7 +132,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
           <Menu size={20} />
         </button>
 
-        <p className="font-bold text-sm" style={{ color: textColor }}>{businessName} Admin</p>
+        <p className="font-bold text-sm" style={{ color: textColor }}>{panelTitle}</p>
 
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -147,6 +174,14 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
             style={{ background: '#fef3c7', color: '#a16207' }}
           >
             Bağlantı koptu, yeniden bağlanılıyor...
+          </div>
+        )}
+        {accessBlockMessage && (
+          <div
+            className="px-4 py-3 text-center text-sm"
+            style={{ background: '#fff4e5', color: '#b54708' }}
+          >
+            {accessBlockMessage} QR menü geçici olarak kullanılamıyor.
           </div>
         )}
         {children}

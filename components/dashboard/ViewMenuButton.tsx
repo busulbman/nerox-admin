@@ -6,7 +6,6 @@ import { ExternalLink, UtensilsCrossed } from 'lucide-react'
 import { logFirestoreRead } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
-import { DEFAULT_RESTAURANT_SLUG } from '@/lib/restaurant-settings'
 
 interface ViewMenuButtonProps {
   restaurantId: string
@@ -66,8 +65,8 @@ export default function ViewMenuButton({
 
   const menuPath = useMemo(() => {
     if (!firstTableId) return null
-    return `/menu/${slug?.trim() || DEFAULT_RESTAURANT_SLUG}/${firstTableId}`
-  }, [firstTableId, slug])
+    return `/menu/${slug?.trim() || restaurantId}/${firstTableId}`
+  }, [firstTableId, restaurantId, slug])
 
   const mutedTextColor = `${textColor}80`
   const disabled = loading || !menuPath

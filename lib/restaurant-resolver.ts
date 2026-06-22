@@ -1,18 +1,9 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  where,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
-
 export type ResolvedRestaurant = {
   id: string;
   slug: string | null;
   name: string | null;
+  status: "active" | "passive";
+  subscriptionExpiresAt: number | null;
 };
 
 export async function resolveRestaurantBySlugOrId(
@@ -20,50 +11,27 @@ export async function resolveRestaurantBySlugOrId(
 ): Promise<ResolvedRestaurant | null> {
   const normalizedSlugOrId = slugOrId.trim().toLowerCase();
 
-  if (!normalizedSlugOrId || normalizedSlugOrId === "varina") {
+  if (!normalizedSlugOrId) {
     return null;
   }
 
-  const directRef = doc(db, "restaurants", slugOrId);
-  const directSnap = await getDoc(directRef);
+  try {
+    const response = await fetch(`/api/public/restaurant-resolve?slugOrId=${encodeURIComponent(normalizedSlugOrId)}`, {
+      cache: "no-store",
+    });
 
-  if (directSnap.exists()) {
-    const data = directSnap.data();
-    return {
-      id: directSnap.id,
-      slug: typeof data.slug === "string" ? data.slug : null,
-      name: typeof data.name === "string" ? data.name : null,
-    };
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error("Restaurant resolve failed");
+    }
+
+    const payload = (await response.json()) as { restaurant?: ResolvedRestaurant };
+    return payload.restaurant ?? null;
+  } catch (error) {
+    console.error("Restaurant resolve error:", error);
+    return null;
   }
-
-  const slugQuery = query(
-    collection(db, "restaurants"),
-    where("slug", "==", normalizedSlugOrId),
-    limit(1),
-  );
-  const slugSnap = await getDocs(slugQuery);
-
-  if (!slugSnap.empty) {
-    const matchedDoc = slugSnap.docs[0];
-    const data = matchedDoc.data();
-    return {
-      id: matchedDoc.id,
-      slug: typeof data.slug === "string" ? data.slug : null,
-      name: typeof data.name === "string" ? data.name : null,
-    };
-  }
-
-  const settingsRef = doc(db, "restaurants", slugOrId, "settings", "general");
-  const settingsSnap = await getDoc(settingsRef);
-
-  if (settingsSnap.exists()) {
-    const data = settingsSnap.data();
-    return {
-      id: slugOrId,
-      slug: typeof data.slug === "string" ? data.slug : null,
-      name: typeof data.businessName === "string" ? data.businessName : null,
-    };
-  }
-
-  return null;
 }

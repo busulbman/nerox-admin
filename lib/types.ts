@@ -1,9 +1,9 @@
 export interface UserProfile {
   uid: string
   email: string
-  role: 'admin' | 'waiter'
+  role: 'admin' | 'waiter' | 'super_admin'
   name: string
-  restaurantId: string
+  restaurantId?: string
   active: boolean
   avgRating?: number
   totalCalls?: number
@@ -43,12 +43,20 @@ export interface RestaurantGeneralSettings {
   updatedAt?: number | null
 }
 
+export type RestaurantStatus = 'active' | 'passive'
+
 export interface Restaurant {
   id: string
   name: string
   slug: string
   logoUrl?: string
   primaryColor?: string
+  status?: RestaurantStatus
+  subscriptionExpiresAt?: number | null
+  createdAt?: number | null
+  updatedAt?: number | null
+  phone?: string
+  adminEmail?: string
 }
 
 export interface CartItem {

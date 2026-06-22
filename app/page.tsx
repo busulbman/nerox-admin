@@ -101,10 +101,10 @@ export default function HomePage() {
               </Link>
 
               <Link
-                href="/menu/mrssimone/1"
+                href="/login"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[#d8bca1] bg-white/85 px-6 py-3.5 text-sm font-semibold text-[#3e2a1d] transition hover:bg-white"
               >
-                Demo Menüyü Gör
+                Paneli İncele
                 <QrCode className="h-4 w-4" />
               </Link>
             </div>

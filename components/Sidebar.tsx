@@ -46,6 +46,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const logoUrl = resolveRestaurantLogoUrl(settings)
   const textColor = getContrastColor(primaryColor)
   const activeItemBg = textColor === '#ffffff' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'
+  const panelTitle = `${businessName} Yönetim Paneli`
 
   async function handleLogout() {
     await signOut(auth).catch(() => {})
@@ -73,7 +74,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         style={{ background: primaryColor }}
       >
         <div className="md:hidden flex items-center justify-between px-5 pt-4 pb-1">
-          <p className="font-bold text-base" style={{ color: textColor }}>{businessName} Admin</p>
+          <p className="font-bold text-base" style={{ color: textColor }}>{panelTitle}</p>
           <button
             onClick={onClose}
             className="p-1 rounded-lg transition-colors"
@@ -96,8 +97,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               />
             )}
             <div>
-              <p className="font-bold text-lg" style={{ color: textColor }}>{businessName} Admin</p>
-              <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>Yönetim Paneli</p>
+              <p className="font-bold text-lg" style={{ color: textColor }}>{panelTitle}</p>
+              <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>Yönetim</p>
             </div>
           </div>
         </div>

@@ -49,16 +49,16 @@ export function getRestaurantTablesQuery(restaurantId: string, max = DEFAULT_TAB
   )
 }
 
-export function getMenuCategoriesQuery() {
+export function getMenuCategoriesQuery(restaurantId: string) {
   return query(
-    collection(db, 'categories'),
+    collection(db, 'restaurants', restaurantId, 'categories'),
     orderBy('order', 'asc')
   )
 }
 
-export function getMenuProductsQuery() {
+export function getMenuProductsQuery(restaurantId: string) {
   return query(
-    collection(db, 'products'),
+    collection(db, 'restaurants', restaurantId, 'products'),
     orderBy('name', 'asc')
   )
 }

@@ -1,18 +1,17 @@
-import type { RestaurantGeneralSettings } from '@/lib/types'
+import type { Restaurant, RestaurantGeneralSettings, RestaurantStatus } from '@/lib/types'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
-export const DEFAULT_BUSINESS_NAME = 'Mrs.Simone'
-export const DEFAULT_RESTAURANT_SLUG = 'mrssimone'
+export const DEFAULT_BUSINESS_NAME = 'İşletme'
 export const DEFAULT_PRIMARY_COLOR = '#3d2b1f'
 export const DEFAULT_ACCENT_COLOR = '#d4a017'
-export const DEFAULT_BRAND_LOGO_PATH = '/mrs-simone-logo.png'
+export const DEFAULT_BRAND_LOGO_PATH = '/icon.png'
 
 export const EMPTY_RESTAURANT_GENERAL_SETTINGS: RestaurantGeneralSettings = {
   businessName: '',
   slug: '',
   logoUrl: '',
-  primaryColor: DEFAULT_PRIMARY_COLOR,
+  primaryColor: '',
   updatedAt: null,
 }
 
@@ -25,6 +24,10 @@ function toMillis(value: unknown): number | null {
     return value.toDate().getTime()
   }
   return null
+}
+
+function normalizeRestaurantStatus(value: unknown): RestaurantStatus {
+  return value === 'passive' ? 'passive' : 'active'
 }
 
 export function isValidRestaurantThemeColor(value: string) {
@@ -88,7 +91,7 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
   const primaryColor =
     typeof data.primaryColor === 'string' && isValidRestaurantThemeColor(data.primaryColor)
       ? data.primaryColor.trim()
-      : DEFAULT_PRIMARY_COLOR
+      : ''
 
   return {
     businessName,
@@ -97,6 +100,75 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
     primaryColor,
     updatedAt: toMillis(data.updatedAt),
   }
+}
+
+export function normalizeRestaurantDocument(value: unknown, id = ''): Restaurant {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      id,
+      name: '',
+      slug: '',
+      logoUrl: '',
+      primaryColor: '',
+      status: 'active',
+      subscriptionExpiresAt: null,
+      createdAt: null,
+      updatedAt: null,
+      phone: '',
+      adminEmail: '',
+    }
+  }
+
+  const data = value as Record<string, unknown>
+  return {
+    id,
+    name: typeof data.name === 'string' ? data.name.trim() : '',
+    slug: typeof data.slug === 'string' ? data.slug.trim().toLowerCase() : '',
+    logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl.trim() : '',
+    primaryColor:
+      typeof data.primaryColor === 'string' && isValidRestaurantThemeColor(data.primaryColor)
+        ? data.primaryColor.trim()
+        : '',
+    status: normalizeRestaurantStatus(data.status),
+    subscriptionExpiresAt: toMillis(data.subscriptionExpiresAt),
+    createdAt: toMillis(data.createdAt),
+    updatedAt: toMillis(data.updatedAt),
+    phone: typeof data.phone === 'string' ? data.phone.trim() : '',
+    adminEmail: typeof data.adminEmail === 'string' ? data.adminEmail.trim() : '',
+  }
+}
+
+export function mergeRestaurantGeneralSettings(
+  settingsValue: unknown,
+  restaurantValue?: unknown,
+): RestaurantGeneralSettings {
+  const settings = normalizeRestaurantGeneralSettings(settingsValue)
+  const restaurant = normalizeRestaurantDocument(restaurantValue)
+
+  return {
+    businessName: settings.businessName || restaurant.name,
+    slug: settings.slug || restaurant.slug,
+    logoUrl: settings.logoUrl || restaurant.logoUrl || '',
+    primaryColor: settings.primaryColor || restaurant.primaryColor || DEFAULT_PRIMARY_COLOR,
+    updatedAt: settings.updatedAt,
+  }
+}
+
+export function isRestaurantSubscriptionExpired(
+  restaurant: Pick<Restaurant, 'subscriptionExpiresAt'> | null | undefined,
+  now = Date.now(),
+) {
+  return typeof restaurant?.subscriptionExpiresAt === 'number' && restaurant.subscriptionExpiresAt < now
+}
+
+export function getRestaurantAccessBlockMessage(
+  restaurant: Pick<Restaurant, 'status' | 'subscriptionExpiresAt'> | null | undefined,
+  now = Date.now(),
+) {
+  if (!restaurant) return null
+  if (restaurant.status === 'passive') return 'Aboneliğiniz pasif.'
+  if (isRestaurantSubscriptionExpired(restaurant, now)) return 'Aboneliğinizin süresi dolmuş.'
+  return null
 }
 
 export function resolveRestaurantBusinessName(
@@ -108,7 +180,7 @@ export function resolveRestaurantBusinessName(
 export function resolveRestaurantLogoUrl(
   settings: Pick<RestaurantGeneralSettings, 'logoUrl'> | null | undefined
 ) {
-  return settings?.logoUrl?.trim() || DEFAULT_BRAND_LOGO_PATH
+  return settings?.logoUrl?.trim() || ''
 }
 
 export function getContrastColor(hexColor: string): string {

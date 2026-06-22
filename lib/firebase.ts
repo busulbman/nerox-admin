@@ -7,8 +7,6 @@ import {
 } from "firebase/auth";
 import { getDatabase, type Database } from "firebase/database";
 
-const ROOT_MENU_COLLECTIONS = new Set(["categories", "products"]);
-
 const realtimeDatabaseUrl =
   process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL?.trim() || "";
 
@@ -41,16 +39,10 @@ export async function ensureRealtimeDatabaseAuth() {
 }
 
 export function rc(restaurantId: string, colName: string) {
-  if (ROOT_MENU_COLLECTIONS.has(colName)) {
-    return collection(db, colName);
-  }
   return collection(db, "restaurants", restaurantId, colName);
 }
 
 export function rd(restaurantId: string, colName: string, docId: string) {
-  if (ROOT_MENU_COLLECTIONS.has(colName)) {
-    return doc(db, colName, docId);
-  }
   return doc(db, "restaurants", restaurantId, colName, docId);
 }
 

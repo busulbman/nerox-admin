@@ -61,7 +61,7 @@ export default function LeaderboardPage() {
       return;
     }
     if (profile.role !== "waiter") {
-      router.replace(profile.role === "admin" ? "/dashboard" : "/waiter/login");
+      router.replace(profile.role === "super_admin" ? "/super-admin" : profile.role === "admin" ? "/dashboard" : "/waiter/login");
       return;
     }
   }, [user, profile, loading, router]);
@@ -141,6 +141,17 @@ export default function LeaderboardPage() {
         >
           Yükleniyor...
         </p>
+      </div>
+    );
+  }
+
+  if (!restaurantId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "#faf7f4" }}>
+        <div className="max-w-sm rounded-2xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-sm">
+          <p className="font-semibold text-lg" style={{ color: "#3d2b1f" }}>İşletme hesabı bulunamadı.</p>
+          <p className="mt-2 text-sm text-gray-500">Garson profilinde `restaurantId` alanı eksik.</p>
+        </div>
       </div>
     );
   }

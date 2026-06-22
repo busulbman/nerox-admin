@@ -7,7 +7,7 @@ import { DEFAULT_BRAND_LOGO_PATH } from '@/lib/restaurant-settings'
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 
 export const metadata: Metadata = {
-  title: 'Mrs.Simone Admin',
+  title: 'Yönetim Paneli',
   description: 'QR Menü ve Sipariş Yönetim Sistemi',
   icons: {
     icon: DEFAULT_BRAND_LOGO_PATH,
@@ -15,13 +15,13 @@ export const metadata: Metadata = {
     apple: DEFAULT_BRAND_LOGO_PATH,
   },
   openGraph: {
-    title: 'Mrs.Simone Admin',
+    title: 'Yönetim Paneli',
     description: 'QR Menü ve Sipariş Yönetim Sistemi',
     images: [DEFAULT_BRAND_LOGO_PATH],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Mrs.Simone Admin',
+    title: 'Yönetim Paneli',
     description: 'QR Menü ve Sipariş Yönetim Sistemi',
     images: [DEFAULT_BRAND_LOGO_PATH],
   },

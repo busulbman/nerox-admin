@@ -81,6 +81,7 @@ export default function WaiterPage() {
   const BROWN = restaurantSettings?.primaryColor || DEFAULT_PRIMARY_COLOR
   const GOLD = DEFAULT_ACCENT_COLOR
   const businessName = resolveRestaurantBusinessName(restaurantSettings)
+  const panelTitle = `${businessName} Garson Paneli`
   const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
 
   const [activeTab,  setActiveTab]  = useState<Tab>('calls')
@@ -124,7 +125,7 @@ export default function WaiterPage() {
     if (loading) return
     if (!user || !profile) { router.replace('/waiter/login'); return }
     if (profile.role !== 'waiter') {
-      router.replace(profile.role === 'admin' ? '/dashboard' : '/waiter/login'); return
+      router.replace(profile.role === 'super_admin' ? '/super-admin' : profile.role === 'admin' ? '/dashboard' : '/waiter/login'); return
     }
     if (profile.active === false) { router.replace('/waiter/login'); return }
   }, [user, profile, loading, router])
@@ -289,8 +290,8 @@ export default function WaiterPage() {
     if (!profile || menuLoaded || !restaurantId) return
     async function loadMenu() {
       const [catSnap, prodSnap] = await Promise.all([
-        getDocs(getMenuCategoriesQuery()),
-        getDocs(getMenuProductsQuery()),
+        getDocs(getMenuCategoriesQuery(restaurantId)),
+        getDocs(getMenuProductsQuery(restaurantId)),
       ])
       const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
       setCategories(cats)
@@ -418,6 +419,17 @@ export default function WaiterPage() {
     )
   }
 
+  if (!restaurantId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: '#faf7f4' }}>
+        <div className="max-w-sm rounded-2xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-sm">
+          <p className="font-semibold text-lg" style={{ color: '#3d2b1f' }}>İşletme hesabı bulunamadı.</p>
+          <p className="mt-2 text-sm text-gray-500">Garson hesabı için geçerli bir `restaurantId` tanımlanmalı.</p>
+        </div>
+      </div>
+    )
+  }
+
   const tipLabel: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
   const todayTs = getTodayStartTs()
   const todayRatingsCount  = myRatings.filter((r) => r.createdAt >= todayTs).length
@@ -432,7 +444,7 @@ export default function WaiterPage() {
         <div className="px-5 pt-4 pb-3">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{businessName} Garson Paneli</p>
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{panelTitle}</p>
               <p className="font-bold text-lg leading-tight mt-0.5" style={{ color: GOLD }}>
                 Merhaba, {profile.name.split(' ')[0]} 👋
               </p>

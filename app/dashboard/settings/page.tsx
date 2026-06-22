@@ -235,7 +235,7 @@ export default function SettingsPage() {
                 className={inputCls}
                 value={form.businessName}
                 onChange={(event) => setForm((current) => ({ ...current, businessName: event.target.value }))}
-                placeholder="Örnek: Mrs.Simone"
+                placeholder="Örnek: Local Cafe"
               />
             </div>
 
@@ -364,7 +364,7 @@ export default function SettingsPage() {
                 />
                 <div>
                   <p className="font-bold text-lg" style={{ color: previewTextColor }}>
-                    {previewBusinessName} Admin
+                    {previewBusinessName} Yönetim Paneli
                   </p>
                   <p className="text-sm" style={{ color: `${previewTextColor}80` }}>Yönetim Paneli</p>
                 </div>

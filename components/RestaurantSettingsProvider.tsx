@@ -3,10 +3,11 @@
 import { createContext, useContext, useMemo } from 'react'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import { DEFAULT_PRIMARY_COLOR, getContrastColor } from '@/lib/restaurant-settings'
-import type { RestaurantGeneralSettings } from '@/lib/types'
+import type { Restaurant, RestaurantGeneralSettings } from '@/lib/types'
 
 interface RestaurantSettingsContextValue {
   settings: RestaurantGeneralSettings | null
+  restaurant: Restaurant | null
   loading: boolean
   error: string
   primaryColor: string
@@ -22,19 +23,20 @@ export function RestaurantSettingsProvider({
   restaurantId: string | null | undefined
   children: React.ReactNode
 }) {
-  const { settings, loading, error } = useRestaurantSettings(restaurantId)
+  const { settings, restaurant, loading, error } = useRestaurantSettings(restaurantId)
 
   const value = useMemo(() => {
     const primaryColor = settings.primaryColor || DEFAULT_PRIMARY_COLOR
 
     return {
       settings,
+      restaurant,
       loading,
       error,
       primaryColor,
       textColor: getContrastColor(primaryColor),
     }
-  }, [settings, loading, error])
+  }, [settings, restaurant, loading, error])
 
   return (
     <RestaurantSettingsContext.Provider value={value}>
@@ -49,6 +51,7 @@ export function useRestaurantSettingsContext() {
   if (!context) {
     return {
       settings: null,
+      restaurant: null,
       loading: false,
       error: '',
       primaryColor: DEFAULT_PRIMARY_COLOR,

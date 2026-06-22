@@ -36,7 +36,9 @@ import {
 import {
   DEFAULT_BRAND_LOGO_PATH,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
-  normalizeRestaurantGeneralSettings,
+  getRestaurantAccessBlockMessage,
+  mergeRestaurantGeneralSettings,
+  normalizeRestaurantDocument,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
@@ -77,6 +79,7 @@ const CLEANING_MESSAGE = 'Bu masa şu anda hazırlanıyor. Lütfen garsondan yar
 const ACTIVE_HELP_REQUEST_MESSAGE = 'Zaten aktif yardım talebiniz var. Garsonunuz geliyor, lütfen bekleyin.'
 const ACTIVE_PAYMENT_REQUEST_MESSAGE = 'Hesap talebiniz zaten iletildi. Lütfen garsonunuzu bekleyin.'
 const SESSION_CLOSED_MESSAGE = 'Bu masa oturumu kapatıldı. Lütfen garsondan yardım isteyin.'
+const MENU_UNAVAILABLE_MESSAGE = 'Menü geçici olarak kullanılamıyor'
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
 const DEFAULT_CUSTOMER_NAME = 'Müşteri'
 const ANONYMOUS_CUSTOMER_NAME_PATTERN = /^Müşteri(?:\s+(\d+))?$/
@@ -301,6 +304,7 @@ export default function MenuPage() {
 
   const [resolvedRestaurantId, setResolvedRestaurantId] = useState<string | null>(null)
   const [restaurantNotFound, setRestaurantNotFound] = useState(false)
+  const [restaurantAccessReason, setRestaurantAccessReason] = useState<string | null>(null)
 
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -395,11 +399,12 @@ export default function MenuPage() {
       }
 
       logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
-      const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
-        getDocs(getMenuCategoriesQuery()),
-        getDocs(getMenuProductsQuery()),
+      const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap, restaurantSnap] = await Promise.all([
+        getDocs(getMenuCategoriesQuery(currentRestaurantId)),
+        getDocs(getMenuProductsQuery(currentRestaurantId)),
         getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
         getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
+        getDoc(doc(db, 'restaurants', currentRestaurantId)),
       ])
 
       const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
@@ -407,9 +412,13 @@ export default function MenuPage() {
       const nextMenuSettings = menuSettingsSnap.exists()
         ? normalizeMenuThemeSettings(menuSettingsSnap.data())
         : { ...EMPTY_MENU_THEME_SETTINGS }
-      const nextGeneralSettings = generalSettingsSnap.exists()
-        ? normalizeRestaurantGeneralSettings(generalSettingsSnap.data())
-        : { ...EMPTY_RESTAURANT_GENERAL_SETTINGS }
+      const nextGeneralSettings = mergeRestaurantGeneralSettings(
+        generalSettingsSnap.exists() ? generalSettingsSnap.data() : null,
+        restaurantSnap.exists() ? restaurantSnap.data() : null,
+      )
+      const nextRestaurantAccessReason = restaurantSnap.exists()
+        ? getRestaurantAccessBlockMessage(normalizeRestaurantDocument(restaurantSnap.data(), restaurantSnap.id))
+        : null
       const nextMenuPrimaryColorOverride =
         menuSettingsSnap.exists()
         && typeof menuSettingsSnap.data().menuPrimaryColor === 'string'
@@ -430,6 +439,7 @@ export default function MenuPage() {
       setMenuSettings(nextMenuSettings)
       setGeneralSettings(nextGeneralSettings)
       setMenuPrimaryColorOverride(nextMenuPrimaryColorOverride)
+      setRestaurantAccessReason(nextRestaurantAccessReason)
       setActiveCat(nextCategories[0]?.id ?? null)
       setLoading(false)
     }
@@ -438,7 +448,24 @@ export default function MenuPage() {
   }, [restaurantId])
 
   useEffect(() => {
+    if (!restaurantId) return
+
+    const unsubscribe = onSnapshot(doc(db, 'restaurants', restaurantId), (snapshot) => {
+      if (!snapshot.exists()) {
+        setRestaurantAccessReason(null)
+        return
+      }
+
+      const restaurant = normalizeRestaurantDocument(snapshot.data(), snapshot.id)
+      setRestaurantAccessReason(getRestaurantAccessBlockMessage(restaurant))
+    })
+
+    return () => unsubscribe()
+  }, [restaurantId])
+
+  useEffect(() => {
     if (!restaurantId || restaurantNotFound) return
+    if (restaurantAccessReason) return
 
     const currentRestaurantId = restaurantId
     let cancelled = false
@@ -467,6 +494,19 @@ export default function MenuPage() {
       setRatingForm(EMPTY_RATING_FORM)
 
       try {
+        const restaurantSnap = await getDoc(doc(db, 'restaurants', currentRestaurantId))
+        const liveRestaurantAccessReason = restaurantSnap.exists()
+          ? getRestaurantAccessBlockMessage(normalizeRestaurantDocument(restaurantSnap.data(), restaurantSnap.id))
+          : null
+
+        if (liveRestaurantAccessReason) {
+          if (cancelled) return
+          setRestaurantAccessReason(liveRestaurantAccessReason)
+          setAccessState('locked')
+          setAccessMessage(MENU_UNAVAILABLE_MESSAGE)
+          return
+        }
+
         logFirestoreRead('menu/find table', { restaurantId: currentRestaurantId, tableId })
         const resolved = await findTableForMenu(currentRestaurantId, tableId)
         if (!resolved) {
@@ -602,7 +642,7 @@ export default function MenuPage() {
     return () => {
       cancelled = true
     }
-  }, [restaurantId, restaurantNotFound, tableId])
+  }, [restaurantAccessReason, restaurantId, restaurantNotFound, tableId])
 
   // Load customer name and cart from localStorage when session is ready
   useEffect(() => {
@@ -1288,6 +1328,24 @@ export default function MenuPage() {
         <div className="text-center text-[#3d2b1f]">
           <div className="text-4xl mb-3 animate-pulse">☕</div>
           <p style={{ fontFamily: 'var(--font-playfair), serif', fontSize: '1.1rem' }}>Yükleniyor...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (restaurantAccessReason) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#fafafa] px-6">
+        <div className="w-full max-w-md rounded-[2rem] border border-[#eadfd5] bg-white px-6 py-10 text-center shadow-[0_18px_50px_rgba(61,43,31,0.08)]">
+          <p
+            className="text-[1.5rem] font-semibold"
+            style={{ fontFamily: 'var(--font-playfair), serif', color: '#3d2b1f' }}
+          >
+            {MENU_UNAVAILABLE_MESSAGE}
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[#7b5b46]">
+            {restaurantAccessReason}
+          </p>
         </div>
       </div>
     )

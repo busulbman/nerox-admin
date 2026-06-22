@@ -350,13 +350,46 @@ export default function MenuPage() {
         return
       }
       try {
-        logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
-        const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
-          getDocs(getMenuCategoriesQuery(currentRestaurantId)),
-          getDocs(getMenuProductsQuery(currentRestaurantId)),
-          getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
-          getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
-        ])
+        console.log('[MENU DEBUG] Loading categories...', currentRestaurantId)
+        let catSnap
+        try {
+          catSnap = await getDocs(getMenuCategoriesQuery(currentRestaurantId))
+          console.log('[MENU DEBUG] categories OK, count:', catSnap.docs.length)
+        } catch (e) {
+          console.error('[MENU DEBUG] FAILED categories:', e)
+          throw e
+        }
+
+        console.log('[MENU DEBUG] Loading products...')
+        let prodSnap
+        try {
+          prodSnap = await getDocs(getMenuProductsQuery(currentRestaurantId))
+          console.log('[MENU DEBUG] products OK, count:', prodSnap.docs.length)
+        } catch (e) {
+          console.error('[MENU DEBUG] FAILED products:', e)
+          throw e
+        }
+
+        console.log('[MENU DEBUG] Loading settings/menu...')
+        let menuSettingsSnap
+        try {
+          menuSettingsSnap = await getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu'))
+          console.log('[MENU DEBUG] settings/menu OK, exists:', menuSettingsSnap.exists())
+        } catch (e) {
+          console.error('[MENU DEBUG] FAILED settings/menu:', e)
+          throw e
+        }
+
+        console.log('[MENU DEBUG] Loading settings/general...')
+        let generalSettingsSnap
+        try {
+          generalSettingsSnap = await getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general'))
+          console.log('[MENU DEBUG] settings/general OK, exists:', generalSettingsSnap.exists())
+        } catch (e) {
+          console.error('[MENU DEBUG] FAILED settings/general:', e)
+          throw e
+        }
+
         const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
         const nextProducts = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product))
         const nextMenuSettings = menuSettingsSnap.exists()
@@ -377,6 +410,7 @@ export default function MenuPage() {
         setMenuSettings(nextMenuSettings)
         setGeneralSettings(nextGeneralSettings)
         setActiveCat(nextCategories[0]?.id ?? null)
+        console.log('[MENU DEBUG] All loaded successfully!')
       } catch (error) {
         console.error('Menu load error:', error)
         setRestaurantAccessReason(t(language, 'menuUnavailable'))

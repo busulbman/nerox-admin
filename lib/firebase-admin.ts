@@ -8,8 +8,13 @@ function getFirebaseAdminEnv() {
   const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL?.trim()
   const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n').trim()
 
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error('Firebase Admin SDK env değişkenleri eksik.')
+  const missing: string[] = []
+  if (!projectId) missing.push('FIREBASE_ADMIN_PROJECT_ID')
+  if (!clientEmail) missing.push('FIREBASE_ADMIN_CLIENT_EMAIL')
+  if (!privateKey) missing.push('FIREBASE_ADMIN_PRIVATE_KEY')
+
+  if (missing.length > 0) {
+    throw new Error(`Firebase Admin SDK env eksik: ${missing.join(', ')}`)
   }
 
   return {

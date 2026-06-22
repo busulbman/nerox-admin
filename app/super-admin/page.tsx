@@ -20,6 +20,9 @@ import { useAuth } from '@/components/AuthProvider'
 import { auth } from '@/lib/firebase'
 import { generateSlug, getUniqueRestaurantSlug } from '@/lib/restaurant-settings'
 import type { RestaurantStatus } from '@/lib/types'
+import { buildThemeStyleVars } from '@/lib/ui-theme'
+
+const SUPER_ADMIN_THEME_COLOR = '#5c3d2e'
 
 type SuperAdminRestaurant = {
   id: string
@@ -47,7 +50,7 @@ type FeedbackState = {
   text: string
 } | null
 
-const BROWN = '#3d2b1f'
+const themeVars = buildThemeStyleVars(SUPER_ADMIN_THEME_COLOR)
 
 function getDefaultSubscriptionDate() {
   const date = new Date()
@@ -88,15 +91,15 @@ function StatCard({
   icon: typeof Building2
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-[#eadfd5] bg-white p-5 shadow-[0_12px_30px_rgba(61,43,31,0.04)]">
+    <div className="rounded-[1.5rem] border bg-white p-5 shadow-[0_12px_30px_rgba(61,43,31,0.04)]" style={{ borderColor: 'var(--border-soft)' }}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9a7a62]">{label}</p>
-          <p className="mt-3 text-3xl font-semibold tracking-[-0.04em]" style={{ color: BROWN }}>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--muted)' }}>{label}</p>
+          <p className="mt-3 text-3xl font-semibold tracking-[-0.04em]" style={{ color: 'var(--text)' }}>
             {value}
           </p>
         </div>
-        <div className="rounded-2xl bg-[#f6eee7] p-3 text-[#7b5b46]">
+        <div className="rounded-2xl p-3" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
           <Icon className="h-5 w-5" />
         </div>
       </div>
@@ -263,8 +266,8 @@ export default function SuperAdminPage() {
 
   if (loading || (!user && !profile)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f6f1ea]">
-        <div className="flex items-center gap-3 text-sm text-[#7b5b46]">
+      <div className="flex min-h-screen items-center justify-center" style={{ ...themeVars, background: 'var(--page-bg)' }}>
+        <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--muted)' }}>
           <Loader2 className="h-4 w-4 animate-spin" />
           Yükleniyor...
         </div>
@@ -274,28 +277,28 @@ export default function SuperAdminPage() {
 
   if (!user || profile?.role !== 'super_admin') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f6f1ea]">
-        <div className="rounded-3xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-[0_18px_40px_rgba(61,43,31,0.06)]">
-          <p className="text-sm text-[#7b5b46]">Yetki kontrol ediliyor...</p>
+      <div className="flex min-h-screen items-center justify-center" style={{ ...themeVars, background: 'var(--page-bg)' }}>
+        <div className="rounded-3xl bg-white px-6 py-8 text-center shadow-[0_18px_40px_rgba(61,43,31,0.06)]" style={{ border: '1px solid var(--border-soft)' }}>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>Yetki kontrol ediliyor...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f1ea] px-4 py-6 md:px-8 md:py-8">
+    <main className="min-h-screen px-4 py-6 md:px-8 md:py-8" style={{ ...themeVars, background: 'var(--page-bg)' }}>
       <div className="mx-auto max-w-7xl">
-        <section className="rounded-[2rem] border border-[#eadfd5] bg-[linear-gradient(180deg,#fffdf9_0%,#f7efe6_100%)] p-6 shadow-[0_18px_50px_rgba(61,43,31,0.06)] md:p-8">
+        <section className="rounded-[2rem] p-6 shadow-[0_18px_50px_rgba(61,43,31,0.06)] md:p-8" style={{ border: '1px solid var(--border-soft)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-muted) 100%)' }}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#e7d7c8] bg-white/90 px-3.5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#8b6b54]">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3.5 py-2 text-xs font-semibold uppercase tracking-[0.2em]" style={{ border: '1px solid var(--border-soft)', color: 'var(--primary-soft-foreground)' }}>
                 <Shield className="h-4 w-4" />
                 Super Admin
               </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl" style={{ color: BROWN }}>
+              <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl" style={{ color: 'var(--text)' }}>
                 İşletme yönetimi tek panelde
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-[#6d5748] sm:text-base">
+              <p className="mt-3 max-w-2xl text-sm leading-7 sm:text-base" style={{ color: 'var(--text-secondary)' }}>
                 Yeni işletme açılışı, abonelik durumu ve operasyon metrikleri bu ekrandan yönetilir.
               </p>
             </div>
@@ -305,7 +308,7 @@ export default function SuperAdminPage() {
                 type="button"
                 onClick={() => void loadRestaurants({ silent: true })}
                 disabled={refreshing}
-                className="inline-flex items-center gap-2 rounded-2xl border border-[#d8c4af] bg-white px-4 py-2.5 text-sm font-semibold text-[#5f4636] transition hover:bg-[#fcfaf7] disabled:opacity-60"
+                className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-60"
               >
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                 Yenile
@@ -314,7 +317,7 @@ export default function SuperAdminPage() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-2xl bg-[#2f1f15] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#20150f]"
+                className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition"
               >
                 <LogOut className="h-4 w-4" />
                 Çıkış
@@ -335,8 +338,8 @@ export default function SuperAdminPage() {
             className="mt-6 rounded-[1.5rem] border px-5 py-4 text-sm shadow-[0_12px_30px_rgba(61,43,31,0.04)]"
             style={
               feedback.tone === 'success'
-                ? { borderColor: '#b7dfc4', background: '#f0fbf3', color: '#166534' }
-                : { borderColor: '#f4c7c3', background: '#fff4f3', color: '#b42318' }
+                ? { background: 'var(--success-soft)', borderColor: 'var(--success)', color: 'var(--success)' }
+                : { background: 'var(--error-soft)', borderColor: 'var(--error)', color: 'var(--error)' }
             }
           >
             {feedback.text}
@@ -344,17 +347,17 @@ export default function SuperAdminPage() {
         )}
 
         <div className="mt-6 grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-          <section className="rounded-[1.75rem] border border-[#eadfd5] bg-white p-6 shadow-[0_12px_30px_rgba(61,43,31,0.04)]">
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-[0_12px_30px_rgba(61,43,31,0.04)]" style={{ border: '1px solid var(--border-soft)' }}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold" style={{ color: BROWN }}>
+                <h2 className="text-xl font-semibold" style={{ color: 'var(--text)' }}>
                   Yeni işletme oluştur
                 </h2>
-                <p className="mt-1 text-sm text-[#7b5b46]">
+                <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
                   Auth kullanıcısı ve ilk Firestore kayıtları otomatik açılır.
                 </p>
               </div>
-              <div className="rounded-2xl bg-[#f6eee7] p-3 text-[#7b5b46]">
+              <div className="rounded-2xl p-3" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
                 <Building2 className="h-5 w-5" />
               </div>
             </div>
@@ -368,12 +371,12 @@ export default function SuperAdminPage() {
                 required
               />
 
-              <div className="rounded-2xl border border-dashed border-[#dbc8b8] bg-[#fbf7f3] px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8d6d57]">Slug önizleme</p>
-                <p className="mt-2 text-sm font-semibold" style={{ color: BROWN }}>
+              <div className="rounded-2xl border border-dashed px-4 py-3" style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-muted)' }}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--muted)' }}>Slug önizleme</p>
+                <p className="mt-2 text-sm font-semibold" style={{ color: 'var(--text)' }}>
                   {slugPreview || generateSlug(form.restaurantName) || 'isletme'}
                 </p>
-                <p className="mt-1 text-xs text-[#8b7768]">
+                <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
                   Slug otomatik oluşturulur ve benzersiz değilse sonuna sıra numarası eklenir.
                 </p>
               </div>
@@ -422,8 +425,7 @@ export default function SuperAdminPage() {
               <button
                 type="submit"
                 disabled={creating}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-60"
-                style={{ background: BROWN }}
+                className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60"
               >
                 {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
                 İşletmeyi Oluştur
@@ -431,37 +433,37 @@ export default function SuperAdminPage() {
             </form>
           </section>
 
-          <section className="rounded-[1.75rem] border border-[#eadfd5] bg-white p-6 shadow-[0_12px_30px_rgba(61,43,31,0.04)]">
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-[0_12px_30px_rgba(61,43,31,0.04)]" style={{ border: '1px solid var(--border-soft)' }}>
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div>
-                <h2 className="text-xl font-semibold" style={{ color: BROWN }}>
+                <h2 className="text-xl font-semibold" style={{ color: 'var(--text)' }}>
                   İşletme listesi
                 </h2>
-                <p className="mt-1 text-sm text-[#7b5b46]">
+                <p className="mt-1 text-sm" style={{ color: 'var(--muted)' }}>
                   Restoranlar, abonelik durumu ve operasyon yoğunluğu burada görünür.
                 </p>
               </div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#97755e]">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--muted)' }}>
                 {restaurants.length} kayıt
               </p>
             </div>
 
             {listLoading ? (
               <div className="flex min-h-[260px] items-center justify-center">
-                <div className="flex items-center gap-3 text-sm text-[#7b5b46]">
+                <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--muted)' }}>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   İşletmeler yükleniyor...
                 </div>
               </div>
             ) : restaurants.length === 0 ? (
-              <div className="mt-6 rounded-[1.5rem] border border-dashed border-[#e3d4c8] bg-[#fbf8f4] px-6 py-16 text-center">
-                <p className="text-sm text-[#7b5b46]">Henüz işletme bulunmuyor.</p>
+              <div className="mt-6 rounded-[1.5rem] border border-dashed px-6 py-16 text-center" style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-muted)' }}>
+                <p className="text-sm" style={{ color: 'var(--muted)' }}>Henüz işletme bulunmuyor.</p>
               </div>
             ) : (
-              <div className="mt-6 overflow-hidden rounded-[1.5rem] border border-[#eee4db]">
+              <div className="mt-6 overflow-hidden rounded-[1.5rem]" style={{ border: '1px solid var(--border-soft)' }}>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
-                    <thead className="bg-[#faf6f1] text-[#7b5b46]">
+                    <thead style={{ background: 'var(--surface-muted)', color: 'var(--text-secondary)' }}>
                       <tr>
                         <th className="px-4 py-3 font-semibold">İşletme</th>
                         <th className="px-4 py-3 font-semibold">Durum</th>
@@ -479,18 +481,18 @@ export default function SuperAdminPage() {
                         const statusBusy = statusTarget === restaurant.id
 
                         return (
-                          <tr key={restaurant.id} className="border-t border-[#f1e9e1] align-top">
+                          <tr key={restaurant.id} className="align-top" style={{ borderTop: '1px solid var(--border-soft)' }}>
                             <td className="px-4 py-4">
                               <div className="flex items-start gap-3">
-                                <div className="rounded-2xl bg-[#f6eee7] p-2.5 text-[#7b5b46]">
+                                <div className="rounded-2xl p-2.5" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
                                   <Building2 className="h-4 w-4" />
                                 </div>
                                 <div>
-                                  <p className="font-semibold" style={{ color: BROWN }}>
+                                  <p className="font-semibold" style={{ color: 'var(--text)' }}>
                                     {restaurant.name}
                                   </p>
-                                  <p className="mt-1 text-xs text-[#8b7768]">Slug: {restaurant.slug}</p>
-                                  <p className="mt-1 text-xs text-[#8b7768]">ID: {restaurant.id}</p>
+                                  <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>Slug: {restaurant.slug}</p>
+                                  <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>ID: {restaurant.id}</p>
                                 </div>
                               </div>
                             </td>
@@ -501,21 +503,21 @@ export default function SuperAdminPage() {
                                   className="inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold"
                                   style={
                                     restaurant.status === 'active'
-                                      ? { background: '#e8f7ee', color: '#166534' }
-                                      : { background: '#f3f4f6', color: '#475467' }
+                                      ? { background: 'var(--success-soft)', color: 'var(--success)' }
+                                      : { background: 'var(--surface-muted)', color: 'var(--muted)' }
                                   }
                                 >
                                   {restaurant.status === 'active' ? 'Aktif' : 'Pasif'}
                                 </span>
                                 {expired && (
-                                  <span className="inline-flex w-fit rounded-full bg-[#fff4e5] px-2.5 py-1 text-xs font-semibold text-[#b54708]">
+                                  <span className="inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
                                     Süresi doldu
                                   </span>
                                 )}
                               </div>
                             </td>
 
-                            <td className="px-4 py-4 text-[#5f4636]">
+                            <td className="px-4 py-4" style={{ color: 'var(--text)' }}>
                               {formatSubscriptionDate(restaurant.subscriptionExpiresAt)}
                             </td>
 
@@ -536,7 +538,7 @@ export default function SuperAdminPage() {
                                 href={restaurant.menuLink}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1.5 font-semibold text-[#7b5b46] underline decoration-[#d4a017]/50 underline-offset-4"
+                                className="theme-link inline-flex items-center gap-1.5 font-semibold underline-offset-4"
                               >
                                 Menüyü aç
                                 <ArrowUpRight className="h-3.5 w-3.5" />
@@ -551,8 +553,8 @@ export default function SuperAdminPage() {
                                 className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-semibold transition disabled:opacity-60"
                                 style={
                                   restaurant.status === 'active'
-                                    ? { borderColor: '#efc7c1', background: '#fff3f2', color: '#b42318' }
-                                    : { borderColor: '#d3dfd8', background: '#f3faf6', color: '#166534' }
+                                    ? { borderColor: 'var(--error)', background: 'var(--error-soft)', color: 'var(--error)' }
+                                    : { borderColor: 'var(--success)', background: 'var(--success-soft)', color: 'var(--success)' }
                                 }
                               >
                                 {statusBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
@@ -591,7 +593,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium" style={{ color: BROWN }}>
+      <label className="mb-1.5 block text-sm font-medium" style={{ color: 'var(--text)' }}>
         {label}
       </label>
       <input
@@ -599,7 +601,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-[#e7ddd4] bg-white px-4 py-3 text-sm text-[#2d1f16] outline-none transition focus:border-[#c9a26c] focus:ring-2 focus:ring-[#e7c58d]/45"
+        className="theme-input rounded-xl"
         required={required}
       />
     </div>
@@ -614,7 +616,7 @@ function CountPill({
   value: number
 }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-[#f8f2eb] px-3 py-1.5 text-xs font-semibold text-[#6b5242]">
+    <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold" style={{ background: 'var(--surface-muted)', color: 'var(--text-secondary)' }}>
       <Icon className="h-3.5 w-3.5" />
       {value}
     </span>

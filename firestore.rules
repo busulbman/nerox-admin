@@ -42,11 +42,15 @@ service cloud.firestore {
     }
 
     function restaurantAllowsPublicAccess(rid) {
+      let doc = restaurantDoc(rid);
+      let expires = doc.subscriptionExpiresAt;
       return restaurantExists(rid)
-        && restaurantDoc(rid).status != 'passive'
+        && doc.status != 'passive'
         && (
-          !(restaurantDoc(rid).subscriptionExpiresAt is timestamp)
-          || restaurantDoc(rid).subscriptionExpiresAt >= request.time
+          expires == null
+          || !(expires is timestamp || expires is int)
+          || (expires is timestamp && expires >= request.time)
+          || (expires is int && expires >= request.time.toMillis())
         );
     }
 
@@ -225,15 +229,26 @@ service cloud.firestore {
 
         // ── Shared Cart Items ─────────────────────────────────────────────────────
         match /cartItems/{cartItemId} {
+          // Helper to get parent table data
+          function parentTable() {
+            return get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(tableId)).data;
+          }
+
+          function tableIsActive() {
+            return exists(/databases/$(database)/documents/restaurants/$(rid)/tables/$(tableId))
+              && parentTable().status in ['aktif', 'çağrı var', 'hesap istendi'];
+          }
+
           // Staff can read/write all cart items
           allow read, write: if isStaff(rid);
 
-          // Public can read cart items if restaurant allows public access
-          allow read: if restaurantAllowsPublicAccess(rid);
+          // Public can read cart items if restaurant allows and table is active
+          allow read: if restaurantAllowsPublicAccess(rid) && tableIsActive();
 
-          // Public can create cart items with valid data
+          // Public can create cart items with valid data and matching session
           allow create: if restaurantAllowsPublicAccess(rid)
-            && request.resource.data.sessionId is string
+            && tableIsActive()
+            && request.resource.data.sessionId == parentTable().sessionId
             && request.resource.data.customerId is string
             && request.resource.data.customerId.size() > 0
             && request.resource.data.customerName is string
@@ -244,11 +259,12 @@ service cloud.firestore {
 
           // Public can update cart items (quantity changes)
           allow update: if restaurantAllowsPublicAccess(rid)
+            && tableIsActive()
             && request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['quantity', 'updatedAt']);
 
           // Public can delete cart items
-          allow delete: if restaurantAllowsPublicAccess(rid);
+          allow delete: if restaurantAllowsPublicAccess(rid) && tableIsActive();
         }
       }
 

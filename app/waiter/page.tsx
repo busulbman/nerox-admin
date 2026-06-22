@@ -45,12 +45,12 @@ const TABLE_STATUS_LABEL: Record<string, string> = {
   'hesap istendi': 'Hesap', temizlik: 'Temizlik', kapalı: 'Kapalı',
 }
 const TABLE_STATUS_COLOR: Record<string, { bg: string; text: string }> = {
-  boş:             { bg: '#f3f4f6', text: '#6b7280' },
-  aktif:           { bg: '#dcfce7', text: '#15803d' },
-  'çağrı var':     { bg: '#fef3c7', text: '#a16207' },
-  'hesap istendi': { bg: '#ffedd5', text: '#c2410c' },
-  temizlik:        { bg: '#dbeafe', text: '#1d4ed8' },
-  kapalı:          { bg: '#fee2e2', text: '#b91c1c' },
+  boş:             { bg: 'var(--surface-muted)', text: 'var(--muted)' },
+  aktif:           { bg: 'var(--success-soft)', text: 'var(--success)' },
+  'çağrı var':     { bg: 'var(--warning-soft)', text: 'var(--warning)' },
+  'hesap istendi': { bg: 'var(--info-soft)', text: 'var(--info)' },
+  temizlik:        { bg: 'var(--primary-soft)', text: 'var(--primary)' },
+  kapalı:          { bg: 'var(--error-soft)', text: 'var(--error)' },
 }
 
 function getTodayStartTs() {

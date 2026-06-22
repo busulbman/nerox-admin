@@ -29,7 +29,6 @@ import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
 import {
   DEFAULT_MENU_PRIMARY_COLOR,
   EMPTY_MENU_THEME_SETTINGS,
-  getMenuPrimaryTextColor,
   normalizeMenuThemeSettings,
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
@@ -40,7 +39,7 @@ import {
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
-import { buildThemeStyleVars, mixHexColors, withAlpha } from '@/lib/ui-theme'
+import { buildThemePalette, buildThemeStyleVars, withAlpha } from '@/lib/ui-theme'
 import {
   DEFAULT_LANGUAGE,
   getDefaultCustomerName,
@@ -1028,12 +1027,13 @@ export default function MenuPage() {
   const menuDisplayName = hasGeneralSettings ? resolveRestaurantBusinessName(generalSettings) : resolveMenuDisplayName(menuSettings)
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl ? generalSettings.logoUrl : menuSettings.logoUrl
   const menuPrimaryColor = generalSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR
-  const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
+  const palette = buildThemePalette(menuPrimaryColor)
   const menuThemeVars = buildThemeStyleVars(menuPrimaryColor)
-  const menuTextColor = mixHexColors('#0f172a', menuPrimaryColor, 0.08)
-  const menuMutedColor = mixHexColors(menuTextColor, '#ffffff', 0.42)
-  const menuSurfaceMuted = mixHexColors(menuPrimaryColor, '#ffffff', 0.93)
-  const menuBorderColor = withAlpha(menuPrimaryColor, 0.16)
+  const menuPrimaryTextColor = palette.primaryForeground
+  const menuTextColor = palette.text
+  const menuMutedColor = palette.muted
+  const menuSurfaceMuted = palette.surfaceMuted
+  const menuBorderColor = palette.borderSoft
 
   const cartCount = getSharedCartCount(sharedCart)
   const cartTotal = calculateSharedCartTotal(sharedCart)

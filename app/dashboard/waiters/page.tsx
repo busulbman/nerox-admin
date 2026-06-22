@@ -38,6 +38,7 @@ type WaiterPerformance = {
 }
 
 const EMPTY_FORM: WaiterForm = { name: '', email: '', password: '' }
+const MEDALS = ['🥇', '🥈', '🥉'] as const
 
 function tsToMs(ts: unknown): number {
   if (!ts) return 0

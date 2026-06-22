@@ -222,6 +222,53 @@ service cloud.firestore {
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
+
+        // ── Shared Cart Items ─────────────────────────────────────────────────────
+        match /cartItems/{cartItemId} {
+          // Helper to get table data
+          function tableData() {
+            return get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(tableId)).data;
+          }
+
+          // Staff can read all cart items
+          allow read: if isStaff(rid);
+
+          // Staff can manage all cart items
+          allow write: if isStaff(rid);
+
+          // Public can read cart items for active table sessions
+          allow read: if restaurantAllowsPublicAccess(rid)
+            && tableData().status in ['aktif', 'çağrı var', 'hesap istendi']
+            && resource.data.sessionId == tableData().sessionId;
+
+          // Public can create cart items for their own customerId in active session
+          allow create: if restaurantAllowsPublicAccess(rid)
+            && tableData().status in ['aktif', 'çağrı var', 'hesap istendi']
+            && request.resource.data.sessionId == tableData().sessionId
+            && request.resource.data.customerId is string
+            && request.resource.data.customerId.size() > 0
+            && request.resource.data.customerName is string
+            && request.resource.data.customerName.size() > 0
+            && request.resource.data.productId is string
+            && request.resource.data.productId.size() > 0
+            && request.resource.data.productName is string
+            && request.resource.data.quantity is int
+            && request.resource.data.quantity > 0
+            && isNonNegativeNumber(request.resource.data.price);
+
+          // Public can update only their own cart items (same customerId)
+          allow update: if restaurantAllowsPublicAccess(rid)
+            && tableData().status in ['aktif', 'çağrı var', 'hesap istendi']
+            && resource.data.sessionId == tableData().sessionId
+            && resource.data.customerId == request.resource.data.customerId
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['quantity', 'updatedAt']);
+
+          // Public can delete only their own cart items
+          allow delete: if restaurantAllowsPublicAccess(rid)
+            && tableData().status in ['aktif', 'çağrı var', 'hesap istendi']
+            && resource.data.sessionId == tableData().sessionId;
+        }
       }
 
       // ── Calls (Waiter calls) ──────────────────────────────────────────────────

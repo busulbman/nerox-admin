@@ -18,7 +18,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
-import { Clipboard, CircleCheckBig, Egg, LoaderCircle, Milk, SearchX, ShoppingBag, ShoppingCart, UtensilsCrossed, Wheat, X } from 'lucide-react'
+import { Check, CircleCheckBig, Copy, LoaderCircle, SearchX, ShoppingBag, ShoppingCart, UtensilsCrossed, Wifi, X } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -39,18 +39,39 @@ import {
   mergeRestaurantGeneralSettings,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
-import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
+import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
 import { buildThemeStyleVars, mixHexColors, withAlpha } from '@/lib/ui-theme'
-import type { CartItem, Category, MenuThemeSettings, Product, RestaurantGeneralSettings, Table, WaiterCall } from '@/lib/types'
+import {
+  DEFAULT_LANGUAGE,
+  getDefaultCustomerName,
+  getOrCreateCustomerId,
+  readStoredLanguage,
+  saveLanguage,
+  SUPPORTED_LANGUAGES,
+  t,
+  type MenuLanguage,
+} from '@/lib/menu-i18n'
+import {
+  addToSharedCart,
+  calculateSharedCartTotal,
+  clearSharedCartForSession,
+  getSharedCartCount,
+  groupSharedCartByCustomer,
+  removeSharedCartItem,
+  sharedCartToCartItems,
+  subscribeToSharedCart,
+  updateSharedCartItemQuantity,
+} from '@/lib/shared-cart'
+import type { Category, MenuThemeSettings, Product, RestaurantGeneralSettings, SharedCartItem, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
 type TableLookupResult = { tableDocId: string; table: Table }
 type RatingForm = { serviceRating: number; waiterRating: number; comment: string }
+type OnboardingStep = 'language' | 'name' | 'done'
 type ProductMeta = {
   imageUrl: string
-  fallbackLabel: string
-  ingredientTags: string[]
+  fallbackEmoji: string
   prepTime: number
   calories: number
   rating: string
@@ -66,16 +87,8 @@ type CachedMenuData = {
 
 const menuDataCache = new Map<string, CachedMenuData>()
 const TIP_OPTIONS: CallTip[] = ['sipariş', 'hesap', 'yardım']
-
-const ACTIVE_SESSION_MESSAGE = 'Bu masada aktif oturum var. Lütfen garsondan yardım isteyin.'
-const CLEANING_MESSAGE = 'Bu masa şu anda hazırlanıyor. Lütfen garsondan yardım isteyin.'
-const ACTIVE_HELP_REQUEST_MESSAGE = 'Zaten aktif yardım talebiniz var. Garsonunuz geliyor, lütfen bekleyin.'
-const ACTIVE_PAYMENT_REQUEST_MESSAGE = 'Hesap talebiniz zaten iletildi. Lütfen garsonunuzu bekleyin.'
-const SESSION_CLOSED_MESSAGE = 'Bu masa oturumu kapatıldı. Lütfen garsondan yardım isteyin.'
-const MENU_UNAVAILABLE_MESSAGE = 'Menü geçici olarak kullanılamıyor'
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
-const DEFAULT_CUSTOMER_NAME = 'Müşteri'
-const ANONYMOUS_CUSTOMER_NAME_PATTERN = /^Müşteri(?:\s+(\d+))?$/
+const ANONYMOUS_CUSTOMER_NAME_PATTERN_BASE = /^(Müşteri|Customer|Клиент|عميل)(?:\s+(\d+))?$/
 
 function createSessionId(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
@@ -117,10 +130,6 @@ function getCustomerNameKey(restaurantId: string, tableId: string) {
   return `nerox_customer_name_${restaurantId}_${tableId}`
 }
 
-function getCartKey(restaurantId: string, tableId: string, sessionId: string) {
-  return `nerox_cart_${restaurantId}_${tableId}_${sessionId}`
-}
-
 function normalizeStoredCustomerName(value: string | null): string | null {
   const trimmed = value?.trim() ?? ''
   return trimmed || null
@@ -129,7 +138,6 @@ function normalizeStoredCustomerName(value: string | null): string | null {
 function readCustomerName(restaurantId: string, tableId: string, sessionId: string): string | null {
   const tableScoped = normalizeStoredCustomerName(window.localStorage.getItem(getCustomerNameKey(restaurantId, tableId)))
   if (tableScoped) return tableScoped
-
   return normalizeStoredCustomerName(window.localStorage.getItem(`nerox_customer_name_${restaurantId}_${tableId}_${sessionId}`))
 }
 
@@ -137,59 +145,34 @@ function saveCustomerName(restaurantId: string, tableId: string, name: string) {
   window.localStorage.setItem(getCustomerNameKey(restaurantId, tableId), name)
 }
 
-function readCart(restaurantId: string, tableId: string, sessionId: string): CartItem[] {
-  try {
-    const stored = window.localStorage.getItem(getCartKey(restaurantId, tableId, sessionId))
-    return stored ? JSON.parse(stored) : []
-  } catch {
-    return []
-  }
-}
-
-function saveCart(restaurantId: string, tableId: string, sessionId: string, cart: CartItem[]) {
-  window.localStorage.setItem(getCartKey(restaurantId, tableId, sessionId), JSON.stringify(cart))
-}
-
 function collectCustomerNamesFromCalls(calls: WaiterCall[]): string[] {
   const names = new Set<string>()
-
   for (const call of calls) {
-    if (call.customerName?.trim()) {
-      names.add(call.customerName.trim())
-    }
-
+    if (call.customerName?.trim()) names.add(call.customerName.trim())
     if (call.groupedByCustomer) {
       for (const customerName of Object.keys(call.groupedByCustomer)) {
         const trimmed = customerName.trim()
         if (trimmed) names.add(trimmed)
       }
     }
-
     for (const item of call.items ?? []) {
-      if (item.customerName.trim()) {
-        names.add(item.customerName.trim())
-      }
+      if (item.customerName.trim()) names.add(item.customerName.trim())
     }
   }
-
   return [...names]
 }
 
-function getNextAnonymousCustomerName(existingNames: string[]): string {
+function getNextAnonymousCustomerName(existingNames: string[], lang: MenuLanguage): string {
+  const defaultName = getDefaultCustomerName(lang)
   let maxIndex = 0
-
   for (const name of existingNames) {
-    const match = name.trim().match(ANONYMOUS_CUSTOMER_NAME_PATTERN)
+    const match = name.trim().match(ANONYMOUS_CUSTOMER_NAME_PATTERN_BASE)
     if (!match) continue
-
-    const parsedIndex = match[1] ? Number.parseInt(match[1], 10) : 1
-    if (Number.isFinite(parsedIndex)) {
-      maxIndex = Math.max(maxIndex, parsedIndex)
-    }
+    const parsedIndex = match[2] ? Number.parseInt(match[2], 10) : 1
+    if (Number.isFinite(parsedIndex)) maxIndex = Math.max(maxIndex, parsedIndex)
   }
-
-  if (maxIndex === 0) return DEFAULT_CUSTOMER_NAME
-  return `${DEFAULT_CUSTOMER_NAME} ${maxIndex + 1}`
+  if (maxIndex === 0) return defaultName
+  return `${defaultName} ${maxIndex + 1}`
 }
 
 function hashString(value: string): number {
@@ -204,47 +187,27 @@ function formatPrice(price: number) {
   return `₺${price.toLocaleString('tr-TR')}`
 }
 
-function getTipLockMessage(tip: CallTip | null): string | null {
-  if (tip === 'yardım') return ACTIVE_HELP_REQUEST_MESSAGE
-  if (tip === 'hesap') return ACTIVE_PAYMENT_REQUEST_MESSAGE
-  return null
-}
-
 function getProductMeta(product: Product, categoryName: string): ProductMeta {
   const haystack = normalizeText(`${product.name} ${product.description} ${categoryName}`)
   const key = hashString(`${product.id}:${product.name}:${categoryName}`)
   const magnitude = Math.abs(key)
 
-  const fallbackLabel =
+  const fallbackEmoji =
     haystack.includes('kahve') || haystack.includes('latte') || haystack.includes('cappuccino') || haystack.includes('espresso')
-      ? 'Kahve'
+      ? '☕'
       : haystack.includes('dondurma') || haystack.includes('milkshake')
-        ? 'Soğuk Servis'
+        ? '🍦'
         : haystack.includes('pasta') || haystack.includes('cheesecake') || haystack.includes('cake')
-          ? 'Tatlı'
+          ? '🍰'
           : haystack.includes('krep') || haystack.includes('vafle') || haystack.includes('waffle')
-            ? 'Atıştırmalık'
+            ? '🧇'
             : haystack.includes('çikolata') || haystack.includes('fondant') || haystack.includes('brownie') || haystack.includes('trüf')
-              ? 'Tatlı'
-              : categoryName || 'Şef Seçimi'
-
-  const ingredientTags = ['Buğday']
-  if (!haystack.includes('vegan')) ingredientTags.push('Yumurta')
-  if (!haystack.includes('sorbe')) ingredientTags.push('Süt')
-  if (
-    haystack.includes('çikolata') ||
-    haystack.includes('fondant') ||
-    haystack.includes('brownie') ||
-    haystack.includes('trüf') ||
-    haystack.includes('cocoa')
-  ) {
-    ingredientTags.push('Kakao')
-  }
+              ? '🍫'
+              : '🍽️'
 
   return {
     imageUrl: typeof product.image === 'string' ? product.image.trim() : '',
-    fallbackLabel,
-    ingredientTags: ingredientTags.slice(0, 4),
+    fallbackEmoji,
     prepTime: 10 + (magnitude % 11),
     calories: 200 + (magnitude % 401),
     rating: (4.2 + (magnitude % 8) * 0.1).toFixed(1),
@@ -260,27 +223,18 @@ function getProductMeta(product: Product, categoryName: string): ProductMeta {
 async function findTableForMenu(restaurantId: string, tableId: string): Promise<TableLookupResult | null> {
   const directRef = doc(db, 'restaurants', restaurantId, 'tables', tableId)
   const directSnap = await getDoc(directRef)
-
   if (directSnap.exists()) {
     return {
       tableDocId: directSnap.id,
       table: normalizeTable(directSnap.id, directSnap.data() as Record<string, unknown>),
     }
   }
-
   const parsedNumber = Number.parseInt(tableId, 10)
   if (!Number.isFinite(parsedNumber)) return null
-
   const numberSnap = await getDocs(
-    query(
-      collection(db, 'restaurants', restaurantId, 'tables'),
-      where('number', '==', parsedNumber),
-      limit(1)
-    )
+    query(collection(db, 'restaurants', restaurantId, 'tables'), where('number', '==', parsedNumber), limit(1))
   )
-
   if (numberSnap.empty) return null
-
   const matchedDoc = numberSnap.docs[0]
   return {
     tableDocId: matchedDoc.id,
@@ -319,8 +273,20 @@ export default function MenuPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [detailQuantity, setDetailQuantity] = useState(1)
 
+  // Onboarding & Language - use lazy initialization
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>(() => {
+    if (typeof window === 'undefined') return 'language'
+    const storedLang = readStoredLanguage(tableId)
+    return storedLang ? 'done' : 'language'
+  })
+  const [language, setLanguage] = useState<MenuLanguage>(() => {
+    if (typeof window === 'undefined') return DEFAULT_LANGUAGE
+    return readStoredLanguage(tableId) ?? DEFAULT_LANGUAGE
+  })
+  const [customerId] = useState(() => getOrCreateCustomerId())
+
   // Cart & Customer name
-  const [cart, setCart] = useState<CartItem[]>([])
+  const [sharedCart, setSharedCart] = useState<SharedCartItem[]>([])
   const [customerName, setCustomerName] = useState<string | null>(null)
   const [customerNamePersisted, setCustomerNamePersisted] = useState(false)
   const [customerNameModal, setCustomerNameModal] = useState(false)
@@ -342,18 +308,17 @@ export default function MenuPage() {
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
   const [ratingMessage, setRatingMessage] = useState<string | null>(null)
 
+  const [wifiCopied, setWifiCopied] = useState(false)
+
   useEffect(() => {
     let cancelled = false
-
     async function resolveRestaurant() {
       setLoading(true)
       setRestaurantNotFound(false)
       setResolvedRestaurant(null)
       setRestaurantAccessReason(null)
-
       const resolved = await resolveRestaurantBySlugOrId(slugOrId)
       if (cancelled) return
-
       if (resolved) {
         setResolvedRestaurant(resolved)
         setRestaurantNotFound(false)
@@ -367,19 +332,13 @@ export default function MenuPage() {
         setLoading(false)
       }
     }
-
     void resolveRestaurant()
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [slugOrId])
 
   useEffect(() => {
     if (!restaurantId || restaurantAccessReason) return
-
     const currentRestaurantId = restaurantId
-
     async function loadMenu() {
       const cachedMenuData = menuDataCache.get(currentRestaurantId)
       if (cachedMenuData) {
@@ -391,7 +350,6 @@ export default function MenuPage() {
         setLoading(false)
         return
       }
-
       try {
         logFirestoreRead('menu/products + categories + settings', currentRestaurantId)
         const [catSnap, prodSnap, menuSettingsSnap, generalSettingsSnap] = await Promise.all([
@@ -400,7 +358,6 @@ export default function MenuPage() {
           getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'menu')),
           getDoc(doc(db, 'restaurants', currentRestaurantId, 'settings', 'general')),
         ])
-
         const nextCategories = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
         const nextProducts = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product))
         const nextMenuSettings = menuSettingsSnap.exists()
@@ -410,14 +367,12 @@ export default function MenuPage() {
           generalSettingsSnap.exists() ? generalSettingsSnap.data() : null,
           null,
         )
-
         menuDataCache.set(currentRestaurantId, {
           categories: nextCategories,
           products: nextProducts,
           menuSettings: nextMenuSettings,
           generalSettings: nextGeneralSettings,
         })
-
         setCategories(nextCategories)
         setProducts(nextProducts)
         setMenuSettings(nextMenuSettings)
@@ -425,22 +380,18 @@ export default function MenuPage() {
         setActiveCat(nextCategories[0]?.id ?? null)
       } catch (error) {
         console.error('Menu load error:', error)
-        setRestaurantAccessReason('Bu menü şu anda kullanılamıyor.')
+        setRestaurantAccessReason(t(language, 'menuUnavailable'))
       } finally {
         setLoading(false)
       }
     }
-
     void loadMenu()
-  }, [restaurantAccessReason, restaurantId])
+  }, [language, restaurantAccessReason, restaurantId])
 
   useEffect(() => {
-    if (!restaurantId || restaurantNotFound) return
-    if (restaurantAccessReason) return
-
+    if (!restaurantId || restaurantNotFound || restaurantAccessReason) return
     const currentRestaurantId = restaurantId
     let cancelled = false
-
     async function initSession() {
       setAccessState('checking')
       setAccessMessage(null)
@@ -455,7 +406,7 @@ export default function MenuPage() {
       setCustomerNamePersisted(false)
       setCustomerNameInput('')
       setCustomerNameModal(false)
-      setCart([])
+      setSharedCart([])
       setCartDrawer(false)
       setOrderSent(false)
       setRatingModal(false)
@@ -470,12 +421,10 @@ export default function MenuPage() {
         if (!resolved) {
           if (cancelled) return
           setAccessState('missing')
-          setAccessMessage('Bu masa bulunamadı. Lütfen garsondan yardım isteyin.')
+          setAccessMessage(t(language, 'tableNotFound'))
           return
         }
-
         if (cancelled) return
-
         setTableDocId(resolved.tableDocId)
         setTable(resolved.table)
 
@@ -489,7 +438,6 @@ export default function MenuPage() {
             storedSessionId: localSessionId,
           })
           const snap = await transaction.get(tableRef)
-
           if (!snap.exists()) {
             const nextSessionId = createSessionId()
             transaction.set(tableRef, {
@@ -501,30 +449,17 @@ export default function MenuPage() {
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             })
-
             return {
               state: 'ready' as const,
               message: null,
-              table: {
-                ...resolved.table,
-                status: 'aktif' as const,
-                sessionId: nextSessionId,
-              },
+              table: { ...resolved.table, status: 'aktif' as const, sessionId: nextSessionId },
               sessionId: nextSessionId,
             }
           }
-
           const currentTable = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
-
           if (currentTable.status === 'temizlik') {
-            return {
-              state: 'cleaning' as const,
-              message: CLEANING_MESSAGE,
-              table: currentTable,
-              sessionId: null,
-            }
+            return { state: 'cleaning' as const, message: t(language, 'tableBeingPrepared'), table: currentTable, sessionId: null }
           }
-
           if (currentTable.status === 'boş') {
             const nextSessionId = createSessionId()
             transaction.update(tableRef, {
@@ -533,7 +468,6 @@ export default function MenuPage() {
               openedAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             })
-
             return {
               state: 'ready' as const,
               message: null,
@@ -541,42 +475,20 @@ export default function MenuPage() {
               sessionId: nextSessionId,
             }
           }
-
           if (localSessionId && currentTable.sessionId === localSessionId) {
-            return {
-              state: 'ready' as const,
-              message: null,
-              table: currentTable,
-              sessionId: localSessionId,
-            }
+            return { state: 'ready' as const, message: null, table: currentTable, sessionId: localSessionId }
           }
-
           if (
             currentTable.sessionId &&
             (currentTable.status === 'aktif' || currentTable.status === 'çağrı var' || currentTable.status === 'hesap istendi')
           ) {
-            return {
-              state: 'ready' as const,
-              message: null,
-              table: currentTable,
-              sessionId: currentTable.sessionId,
-            }
+            return { state: 'ready' as const, message: null, table: currentTable, sessionId: currentTable.sessionId }
           }
-
-          return {
-            state: 'locked' as const,
-            message: ACTIVE_SESSION_MESSAGE,
-            table: currentTable,
-            sessionId: null,
-          }
+          return { state: 'locked' as const, message: t(language, 'activeSessionOnTable'), table: currentTable, sessionId: null }
         })
 
         if (cancelled) return
-
-        if (result.table) {
-          setTable(result.table)
-        }
-
+        if (result.table) setTable(result.table)
         if (result.state === 'ready' && result.sessionId) {
           persistSessionId(tableId, currentRestaurantId, resolved.tableDocId, result.sessionId)
           setSessionId(result.sessionId)
@@ -584,86 +496,71 @@ export default function MenuPage() {
           setAccessMessage(null)
           return
         }
-
         clearStoredSessionId(tableId, currentRestaurantId, resolved.tableDocId)
         setAccessState(result.state)
         setAccessMessage(result.message)
       } catch (error) {
         if (cancelled) return
         setAccessState('error')
-        setAccessMessage(error instanceof Error ? error.message : 'Masa oturumu başlatılamadı.')
+        setAccessMessage(error instanceof Error ? error.message : t(language, 'sessionNotFound'))
       }
     }
-
     initSession()
+    return () => { cancelled = true }
+  }, [language, restaurantAccessReason, restaurantId, restaurantNotFound, tableId])
 
-    return () => {
-      cancelled = true
-    }
-  }, [restaurantAccessReason, restaurantId, restaurantNotFound, tableId])
-
-  // Load customer name and cart from localStorage when session is ready
+  // Load customer name when session is ready
   useEffect(() => {
     if (!sessionId || !tableDocId) return
-
-    const currentSessionId = sessionId
     let cancelled = false
-
-    async function loadStoredCustomerState() {
-      await Promise.resolve()
-
-      const storedName = readCustomerName(restaurantId, tableId, currentSessionId)
-      const storedCart = readCart(restaurantId, tableId, currentSessionId)
-
+    const loadCustomerState = () => {
       if (cancelled) return
-
+      const storedName = readCustomerName(restaurantId, tableId, sessionId)
       if (storedName) {
         setCustomerName(storedName)
         setCustomerNamePersisted(true)
         setCustomerNameInput(storedName)
-        setCustomerNameModal(false)
       } else {
-        setCustomerName(DEFAULT_CUSTOMER_NAME)
+        const defaultName = getDefaultCustomerName(language)
+        setCustomerName(defaultName)
         setCustomerNamePersisted(false)
         setCustomerNameInput('')
-        setCustomerNameModal(true)
       }
-
-      setCart(storedCart)
     }
+    const timeout = requestAnimationFrame(loadCustomerState)
+    return () => { cancelled = true; cancelAnimationFrame(timeout) }
+  }, [language, restaurantId, sessionId, tableDocId, tableId])
 
-    void loadStoredCustomerState()
-
-    return () => {
-      cancelled = true
-    }
-  }, [restaurantId, tableId, tableDocId, sessionId])
-
-  // Save cart to localStorage whenever it changes
+  // Subscribe to shared cart
   useEffect(() => {
-    if (!sessionId || !tableDocId) return
-    saveCart(restaurantId, tableId, sessionId, cart)
-  }, [cart, restaurantId, tableId, tableDocId, sessionId])
+    if (!restaurantId || !tableDocId || !sessionId) return
+    const unsubscribe = subscribeToSharedCart(
+      restaurantId,
+      tableDocId,
+      sessionId,
+      (items) => setSharedCart(items),
+      (error) => console.error('Cart subscription error:', error)
+    )
+    return () => unsubscribe()
+  }, [restaurantId, sessionId, tableDocId])
 
+  // Subscribe to table updates
   useEffect(() => {
     if (!restaurantId || !tableDocId) return
-
     logFirestoreRead('menu/table listener', { restaurantId, tableId: tableDocId })
     const unsubscribe = onSnapshot(doc(db, 'restaurants', restaurantId, 'tables', tableDocId), (snapshot) => {
       if (!snapshot.exists()) {
         setTable(null)
         return
       }
-
       setTable(normalizeTable(snapshot.id, snapshot.data() as Record<string, unknown>))
     })
-
     return () => unsubscribe()
   }, [restaurantId, tableDocId])
 
+  // Subscribe to session calls
   useEffect(() => {
     if (!restaurantId || !sessionId || !tableDocId) return
-
     logFirestoreRead('menu/session calls listener', { restaurantId, tableId: tableDocId, sessionId })
     const sessionCallsQuery = query(
       collection(db, 'restaurants', restaurantId, 'calls'),
@@ -671,52 +568,34 @@ export default function MenuPage() {
       orderBy('createdAt', 'desc'),
       limit(50)
     )
-
     const unsubscribe = onSnapshot(sessionCallsQuery, (snapshot) => {
       const allSessionCalls = snapshot.docs
         .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
         .filter((call) => call.tableId === tableDocId)
         .sort((a, b) => b.createdAt - a.createdAt)
-
-      setSessionCalls(
-        allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
-      )
+      setSessionCalls(allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi'))
       setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
     })
-
     return () => unsubscribe()
   }, [restaurantId, sessionId, tableDocId])
 
-  const completedPaymentCall =
-    paymentCalls.find((call) => call.tip === 'hesap' && call.durum === 'tamamlandı' && call.sessionId === sessionId) ?? null
-
-  const activeRatingCall =
-    (ratingTargetCallId
-      ? paymentCalls.find((call) => call.id === ratingTargetCallId) ?? null
-      : null) ?? completedPaymentCall
-
-  const hasExistingRatingForActiveCall =
-    !!activeRatingCall && !!ratedCallIds[activeRatingCall.id]
+  const completedPaymentCall = paymentCalls.find((call) => call.tip === 'hesap' && call.durum === 'tamamlandı' && call.sessionId === sessionId) ?? null
+  const activeRatingCall = (ratingTargetCallId ? paymentCalls.find((call) => call.id === ratingTargetCallId) ?? null : null) ?? completedPaymentCall
+  const hasExistingRatingForActiveCall = !!activeRatingCall && !!ratedCallIds[activeRatingCall.id]
 
   useEffect(() => {
     if (!sessionId || !completedPaymentCall || ratingModal || hasExistingRatingForActiveCall) return
-
     let cancelled = false
     const targetCall = completedPaymentCall
-
     async function checkExistingRating() {
       const promptKey = getRatingPromptKey(restaurantId, targetCall.id)
       const ratingSnap = await getDoc(doc(db, 'restaurants', restaurantId, 'ratings', targetCall.id))
-
       if (cancelled) return
-
       if (ratingSnap.exists()) {
         setRatedCallIds((current) => ({ ...current, [targetCall.id]: true }))
         return
       }
-
       if (window.localStorage.getItem(promptKey)) return
-
       window.localStorage.setItem(promptKey, '1')
       setRatingTargetCallId(targetCall.id)
       setRatingMessage(null)
@@ -724,13 +603,41 @@ export default function MenuPage() {
       setRatingForm(EMPTY_RATING_FORM)
       setRatingModal(true)
     }
-
     void checkExistingRating()
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [completedPaymentCall, hasExistingRatingForActiveCall, ratingModal, restaurantId, sessionId])
+
+  function handleSelectLanguage(lang: MenuLanguage) {
+    setLanguage(lang)
+    saveLanguage(tableId, lang)
+    setOnboardingStep('name')
+  }
+
+  function handleSaveCustomerNameOnboarding() {
+    const trimmed = customerNameInput.trim()
+    if (trimmed) {
+      saveCustomerName(restaurantId, tableId, trimmed)
+      setCustomerName(trimmed)
+      setCustomerNamePersisted(true)
+    } else {
+      const defaultName = getDefaultCustomerName(language)
+      setCustomerName(defaultName)
+      setCustomerNamePersisted(false)
+    }
+    setOnboardingStep('done')
+  }
+
+  function handleContinueWithoutNameOnboarding() {
+    const names = [
+      ...sharedCart.map((item) => item.customerName),
+      ...collectCustomerNamesFromCalls(sessionCalls),
+      ...collectCustomerNamesFromCalls(paymentCalls),
+    ]
+    const nextName = getNextAnonymousCustomerName(names, language)
+    setCustomerName(nextName)
+    setCustomerNamePersisted(false)
+    setOnboardingStep('done')
+  }
 
   function openCallModal() {
     if (callButtonDisabled) return
@@ -761,61 +668,30 @@ export default function MenuPage() {
   function getKnownCustomerNames() {
     return [
       ...new Set([
-        ...cart.map((item) => item.customerName.trim()).filter(Boolean),
+        ...sharedCart.map((item) => item.customerName.trim()).filter(Boolean),
         ...collectCustomerNamesFromCalls(sessionCalls),
         ...collectCustomerNamesFromCalls(paymentCalls),
       ]),
     ]
   }
 
-  function buildCartWithCustomerName(nextCustomerName: string) {
-    if (!customerName || customerName === nextCustomerName) return cart
-
-    return mergeCartItems(
-      [],
-      cart.map((item) => (
-        item.customerName === customerName
-          ? { ...item, customerName: nextCustomerName }
-          : item
-      ))
-    )
-  }
-
   function persistCustomerIdentity(nextCustomerName: string) {
     if (!restaurantId) return null
-
     const trimmedCustomerName = nextCustomerName.trim()
     if (!trimmedCustomerName) return null
-
-    const nextCart = buildCartWithCustomerName(trimmedCustomerName)
     saveCustomerName(restaurantId, tableId, trimmedCustomerName)
     setCustomerName(trimmedCustomerName)
     setCustomerNamePersisted(true)
     setCustomerNameInput(trimmedCustomerName)
     setCustomerNameModal(false)
-
-    if (nextCart !== cart) {
-      setCart(nextCart)
-    }
-
-    return {
-      name: trimmedCustomerName,
-      cart: nextCart,
-    }
+    return { name: trimmedCustomerName }
   }
 
   function ensureCustomerIdentity(preferredName?: string | null) {
     const trimmedPreferredName = preferredName?.trim() ?? ''
-
-    if (trimmedPreferredName) {
-      return persistCustomerIdentity(trimmedPreferredName)
-    }
-
-    if (customerNamePersisted && customerName?.trim()) {
-      return persistCustomerIdentity(customerName.trim())
-    }
-
-    return persistCustomerIdentity(getNextAnonymousCustomerName(getKnownCustomerNames()))
+    if (trimmedPreferredName) return persistCustomerIdentity(trimmedPreferredName)
+    if (customerNamePersisted && customerName?.trim()) return persistCustomerIdentity(customerName.trim())
+    return persistCustomerIdentity(getNextAnonymousCustomerName(getKnownCustomerNames(), language))
   }
 
   function openProduct(product: Product) {
@@ -830,67 +706,38 @@ export default function MenuPage() {
     })
   }
 
-  function addToCart(product: Product, quantity: number) {
-    if (!customerName) {
-      setCustomerNameInput('')
-      setCustomerNameModal(true)
-      return
+  async function handleAddToCart(product: Product, quantity: number) {
+    if (!customerName || !sessionId || !tableDocId) return
+    const existingItem = sharedCart.find((item) => item.productId === product.id && item.customerId === customerId)
+    if (existingItem) {
+      await updateSharedCartItemQuantity(restaurantId, tableDocId, existingItem.id, existingItem.quantity + quantity)
+    } else {
+      await addToSharedCart(restaurantId, tableDocId, sessionId, customerId, customerName, product, quantity)
     }
-    setCart((current) => {
-      const existingIndex = current.findIndex(
-        (item) => item.productId === product.id && item.customerName === customerName
-      )
-      if (existingIndex >= 0) {
-        const updated = [...current]
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + quantity,
-        }
-        return updated
-      }
-      return [
-        ...current,
-        {
-          productId: product.id,
-          name: product.name,
-          price: product.price,
-          quantity,
-          customerName,
-        },
-      ]
-    })
   }
 
-  function updateCartItemQuantity(productId: string, customerName: string, delta: number) {
-    setCart((current) => {
-      const index = current.findIndex(
-        (item) => item.productId === productId && item.customerName === customerName
-      )
-      if (index < 0) return current
-      const updated = [...current]
-      const newQty = updated[index].quantity + delta
-      if (newQty <= 0) {
-        updated.splice(index, 1)
-      } else {
-        updated[index] = { ...updated[index], quantity: newQty }
-      }
-      return updated
-    })
+  async function handleUpdateCartItemQuantity(item: SharedCartItem, delta: number) {
+    if (!tableDocId) return
+    const newQuantity = item.quantity + delta
+    if (newQuantity <= 0) {
+      await removeSharedCartItem(restaurantId, tableDocId, item.id)
+    } else {
+      await updateSharedCartItemQuantity(restaurantId, tableDocId, item.id, newQuantity)
+    }
   }
 
-  function removeCartItem(productId: string, customerName: string) {
-    setCart((current) => current.filter(
-      (item) => !(item.productId === productId && item.customerName === customerName)
-    ))
+  async function handleRemoveCartItem(item: SharedCartItem) {
+    if (!tableDocId) return
+    await removeSharedCartItem(restaurantId, tableDocId, item.id)
   }
 
   function handleQuickAdd(product: Product) {
-    addToCart(product, 1)
+    void handleAddToCart(product, 1)
   }
 
   function handleAddFromSheet() {
     if (!selectedProduct) return
-    addToCart(selectedProduct, detailQuantity)
+    void handleAddToCart(selectedProduct, detailQuantity)
     setSelectedProduct(null)
     setDetailQuantity(1)
   }
@@ -904,37 +751,33 @@ export default function MenuPage() {
   }
 
   async function sendOrder() {
-    if (cart.length === 0 || !tableDocId || !sessionId) return
-
+    if (sharedCart.length === 0 || !tableDocId || !sessionId) return
     setOrderSending(true)
     setActionMessage(null)
 
     try {
       const customerState = ensureCustomerIdentity()
       if (!customerState) {
-        setActionMessage('Müşteri bilgisi hazırlanamadı. Lütfen tekrar deneyin.')
+        setActionMessage(t(language, 'customerInfoError'))
         return
       }
-
-      const { name: activeCustomerName, cart: activeCart } = customerState
+      const { name: activeCustomerName } = customerState
       const tableRef = doc(db, 'restaurants', restaurantId, 'tables', tableDocId)
       const liveTableSnap = await getDoc(tableRef)
-
       if (!liveTableSnap.exists()) {
-        setActionMessage('Bu masa bulunamadı.')
+        setActionMessage(t(language, 'tableNotFound'))
         return
       }
-
       const liveTable = normalizeTable(liveTableSnap.id, liveTableSnap.data() as Record<string, unknown>)
-
       if (liveTable.sessionId !== sessionId) {
-        setActionMessage('Masa oturumu değişmiş. Sayfayı yenileyin.')
+        setActionMessage(t(language, 'sessionChanged'))
         return
       }
 
       const effectiveTableNumber = liveTable.number > 0 ? liveTable.number : (table?.number ?? Number.parseInt(tableId, 10))
-      const grouped = groupCartItemsByCustomer(activeCart)
-      const totalPrice = calculateCartTotal(activeCart)
+      const cartItems = sharedCartToCartItems(sharedCart)
+      const grouped = groupCartItemsByCustomer(cartItems)
+      const totalPrice = calculateCartTotal(cartItems)
       const batch = writeBatch(db)
       const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
       const newCallRef = doc(callsCollection)
@@ -952,23 +795,20 @@ export default function MenuPage() {
         waiterId: null,
         waiterName: null,
         note: '',
-        items: activeCart,
+        items: cartItems,
         totalPrice,
         groupedByCustomer: grouped,
       })
 
       if (liveTable.status === 'aktif') {
-        batch.update(tableRef, {
-          status: 'çağrı var',
-          updatedAt: serverTimestamp(),
-        })
+        batch.update(tableRef, { status: 'çağrı var', updatedAt: serverTimestamp() })
       }
 
-      logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: activeCart.length })
+      logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: cartItems.length })
       await batch.commit()
+      await clearSharedCartForSession(restaurantId, tableDocId, sessionId, sharedCart)
 
       setOrderSent(true)
-      setCart([])
       if (liveTable.status === 'aktif') {
         setTable((current) => (current ? { ...current, status: 'çağrı var', updatedAt: Date.now() } : current))
       }
@@ -977,7 +817,7 @@ export default function MenuPage() {
         setCartDrawer(false)
       }, 3000)
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : 'Sipariş gönderilemedi.')
+      setActionMessage(error instanceof Error ? error.message : t(language, 'orderFailed'))
     } finally {
       setOrderSending(false)
     }
@@ -985,49 +825,41 @@ export default function MenuPage() {
 
   async function sendCall() {
     if (!selectedTip || !tableDocId) return
-
     setSending(true)
     setActionMessage(null)
 
     try {
       const customerState = ensureCustomerIdentity()
       if (!customerState) {
-        setActionMessage('Müşteri bilgisi hazırlanamadı. Lütfen tekrar deneyin.')
+        setActionMessage(t(language, 'customerInfoError'))
         return
       }
-
       const { name: activeCustomerName } = customerState
       const storedSessionId = readStoredSessionId(tableId, restaurantId, tableDocId)
       const activeSessionId = sessionId ?? storedSessionId
-
       if (!activeSessionId) {
-        setActionMessage('Masa oturumu bulunamadı. Sayfayı yenileyin.')
+        setActionMessage(t(language, 'sessionNotFound'))
         return
       }
 
       const tableRef = doc(db, 'restaurants', restaurantId, 'tables', tableDocId)
       logFirestoreRead('menu/send call table', { restaurantId, tableId: tableDocId })
       const liveTableSnap = await getDoc(tableRef)
-
       if (!liveTableSnap.exists()) {
-        setActionMessage('Bu masa bulunamadı. Lütfen garsondan yardım isteyin.')
+        setActionMessage(t(language, 'tableNotFound'))
         return
       }
-
       const liveTable = normalizeTable(liveTableSnap.id, liveTableSnap.data() as Record<string, unknown>)
-
       if (liveTable.status === 'temizlik') {
-        setActionMessage(CLEANING_MESSAGE)
+        setActionMessage(t(language, 'tableBeingPrepared'))
         return
       }
-
       if (liveTable.status !== 'aktif' && liveTable.status !== 'çağrı var' && liveTable.status !== 'hesap istendi') {
-        setActionMessage('Masa şu anda aktif değil.')
+        setActionMessage(t(language, 'tableNotActive'))
         return
       }
-
       if (liveTable.sessionId !== activeSessionId) {
-        setActionMessage(ACTIVE_SESSION_MESSAGE)
+        setActionMessage(t(language, 'activeSessionOnTable'))
         return
       }
 
@@ -1041,13 +873,12 @@ export default function MenuPage() {
         )
         const sessionSnap = await getDocs(sessionQuery)
         const liveSessionCalls = sessionSnap.docs
-          .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
+          .map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>))
           .filter((call) => call.tableId === tableDocId && call.tip === selectedTip)
           .sort((a, b) => b.createdAt - a.createdAt)
-
         const openRequest = liveSessionCalls.find((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi')
         if (openRequest) {
-          setActionMessage(getTipLockMessage(selectedTip))
+          setActionMessage(selectedTip === 'yardım' ? t(language, 'activeHelpRequest') : t(language, 'activePaymentRequest'))
           return
         }
       }
@@ -1074,30 +905,27 @@ export default function MenuPage() {
 
       const nextStatus = selectedTip === 'hesap' ? 'hesap istendi' : 'çağrı var'
       if (liveTable.status !== nextStatus) {
-        batch.update(tableRef, {
-          status: nextStatus,
-          updatedAt: serverTimestamp(),
-        })
+        batch.update(tableRef, { status: nextStatus, updatedAt: serverTimestamp() })
       }
 
       logFirestoreWrite('menu/create call', { restaurantId, tableId: tableDocId, tip: selectedTip })
       await batch.commit()
       setSessionId(activeSessionId)
       const newOpenCall: WaiterCall = {
-          id: newCallRef.id,
-          tableId: tableDocId,
-          tableNumber: effectiveTableNumber,
-          sessionId: activeSessionId,
-          restaurantId,
-          tip: selectedTip,
-          durum: 'bekliyor',
-          status: 'open',
-          waiterId: undefined,
-          waiterName: undefined,
-          customerName: activeCustomerName,
-          note: note.trim() || '',
-          createdAt: Date.now(),
-        }
+        id: newCallRef.id,
+        tableId: tableDocId,
+        tableNumber: effectiveTableNumber,
+        sessionId: activeSessionId,
+        restaurantId,
+        tip: selectedTip,
+        durum: 'bekliyor',
+        status: 'open',
+        waiterId: undefined,
+        waiterName: undefined,
+        customerName: activeCustomerName,
+        note: note.trim() || '',
+        createdAt: Date.now(),
+      }
       setSessionCalls((current) => [newOpenCall, ...current].slice(0, 50))
       setTable((current) => (current ? { ...current, status: nextStatus } : current))
 
@@ -1107,7 +935,7 @@ export default function MenuPage() {
         closeCallModal()
       }, 2500)
     } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : 'Çağrı gönderilemedi.')
+      setActionMessage(error instanceof Error ? error.message : t(language, 'callFailed'))
     } finally {
       setSending(false)
     }
@@ -1115,12 +943,10 @@ export default function MenuPage() {
 
   async function submitRating() {
     if (!activeRatingCall || !sessionId || !tableDocId) return
-
     if (!ratingForm.serviceRating || !ratingForm.waiterRating) {
-      setRatingMessage('Lütfen iki puanı da seçin.')
+      setRatingMessage(t(language, 'selectBothRatings'))
       return
     }
-
     setRatingSending(true)
     setRatingMessage(null)
 
@@ -1131,30 +957,25 @@ export default function MenuPage() {
       const [existingRatingSnap, callSnap] = await Promise.all([getDoc(ratingRef), getDoc(callRef)])
 
       if (existingRatingSnap.exists()) {
-        setRatingMessage('Bu ödeme için değerlendirme zaten gönderildi.')
+        setRatingMessage(t(language, 'alreadyRated'))
         return
       }
-
       if (!callSnap.exists()) {
-        setRatingMessage('Puanlanacak hesap kaydı bulunamadı.')
+        setRatingMessage(t(language, 'ratingRecordNotFound'))
         return
       }
-
       const liveCall = normalizeWaiterCall(callSnap.id, callSnap.data() as Record<string, unknown>)
-
       if (liveCall.tip !== 'hesap' || liveCall.durum !== 'tamamlandı') {
-        setRatingMessage('Puanlama yalnızca tamamlanmış hesap işlemi sonrası gönderilebilir.')
+        setRatingMessage(t(language, 'ratingOnlyAfterPayment'))
         return
       }
-
       if (liveCall.sessionId !== sessionId) {
-        setRatingMessage('Oturum doğrulanamadı. Lütfen garsondan yardım isteyin.')
+        setRatingMessage(t(language, 'sessionVerificationFailed'))
         return
       }
 
       const hasCompleter = !!(liveCall.waiterId || liveCall.completedById)
       const ratingStatus = hasCompleter ? 'approved' : 'suspicious'
-
       const effectiveWaiterId = liveCall.waiterId ?? liveCall.completedById ?? null
       const effectiveWaiterName = liveCall.waiterName ?? liveCall.completedByName ?? 'İşletme'
 
@@ -1174,15 +995,23 @@ export default function MenuPage() {
         createdAt: serverTimestamp(),
       })
       setRatedCallIds((current) => ({ ...current, [liveCall.id]: true }))
-
       setRatingSubmitted(true)
-      window.setTimeout(() => {
-        closeRatingModal()
-      }, 2500)
+      window.setTimeout(() => closeRatingModal(), 2500)
     } catch (error) {
-      setRatingMessage(error instanceof Error ? error.message : 'Puanlama gönderilemedi.')
+      setRatingMessage(error instanceof Error ? error.message : t(language, 'ratingFailed'))
     } finally {
       setRatingSending(false)
+    }
+  }
+
+  async function copyWifiPassword() {
+    if (!generalSettings.wifiPassword) return
+    try {
+      await navigator.clipboard.writeText(generalSettings.wifiPassword)
+      setWifiCopied(true)
+      setTimeout(() => setWifiCopied(false), 2000)
+    } catch {
+      // Clipboard API not available
     }
   }
 
@@ -1191,22 +1020,13 @@ export default function MenuPage() {
     .sort((a, b) => a.name.localeCompare(b.name, 'tr'))
 
   const categoryCounts = Object.fromEntries(
-    categories.map((category) => [
-      category.id,
-      products.filter((product) => product.categoryId === category.id && product.available).length,
-    ])
+    categories.map((category) => [category.id, products.filter((product) => product.categoryId === category.id && product.available).length])
   )
-
   const categoryNames = Object.fromEntries(categories.map((category) => [category.id, category.name]))
 
-  // Use general settings first, fall back to menu settings for backwards compatibility
   const hasGeneralSettings = Boolean(generalSettings.businessName || generalSettings.logoUrl)
-  const menuDisplayName = hasGeneralSettings
-    ? resolveRestaurantBusinessName(generalSettings)
-    : resolveMenuDisplayName(menuSettings)
-  const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
-    ? generalSettings.logoUrl
-    : menuSettings.logoUrl
+  const menuDisplayName = hasGeneralSettings ? resolveRestaurantBusinessName(generalSettings) : resolveMenuDisplayName(menuSettings)
+  const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl ? generalSettings.logoUrl : menuSettings.logoUrl
   const menuPrimaryColor = generalSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR
   const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
   const menuThemeVars = buildThemeStyleVars(menuPrimaryColor)
@@ -1215,73 +1035,46 @@ export default function MenuPage() {
   const menuSurfaceMuted = mixHexColors(menuPrimaryColor, '#ffffff', 0.93)
   const menuBorderColor = withAlpha(menuPrimaryColor, 0.16)
 
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
-  const cartTotal = calculateCartTotal(cart)
-  const cartGrouped = groupCartItemsByCustomer(cart)
+  const cartCount = getSharedCartCount(sharedCart)
+  const cartTotal = calculateSharedCartTotal(sharedCart)
+  const cartGrouped = groupSharedCartByCustomer(sharedCart)
+
   const hasActiveHelpRequest = sessionCalls.some((call) => call.tip === 'yardım')
   const hasActivePaymentRequest = sessionCalls.some((call) => call.tip === 'hesap')
   const selectedTipLockMessage =
     selectedTip === 'yardım' && hasActiveHelpRequest
-      ? ACTIVE_HELP_REQUEST_MESSAGE
+      ? t(language, 'activeHelpRequest')
       : selectedTip === 'hesap' && hasActivePaymentRequest
-        ? ACTIVE_PAYMENT_REQUEST_MESSAGE
+        ? t(language, 'activePaymentRequest')
         : null
   const sessionMatchesTable = !!table && !!sessionId && table.sessionId === sessionId
   const isPreparing = table?.status === 'temizlik'
   const isDifferentActiveSession =
-    !!table &&
-    (table.status === 'aktif' || table.status === 'çağrı var' || table.status === 'hesap istendi') &&
-    !sessionMatchesTable
+    !!table && (table.status === 'aktif' || table.status === 'çağrı var' || table.status === 'hesap istendi') && !sessionMatchesTable
   const isSessionClosed = !!table && table.status === 'boş' && !!sessionId && table.sessionId !== sessionId
-  const ratingSubmitDisabled =
-    ratingSending ||
-    ratingSubmitted ||
-    !activeRatingCall ||
-    !ratingForm.serviceRating ||
-    !ratingForm.waiterRating
+  const ratingSubmitDisabled = ratingSending || ratingSubmitted || !activeRatingCall || !ratingForm.serviceRating || !ratingForm.waiterRating
 
   const derivedAccessMessage =
     accessMessage ??
-    (isPreparing
-      ? CLEANING_MESSAGE
-      : isDifferentActiveSession
-        ? ACTIVE_SESSION_MESSAGE
-        : isSessionClosed
-          ? SESSION_CLOSED_MESSAGE
-          : null)
+    (isPreparing ? t(language, 'tableBeingPrepared') : isDifferentActiveSession ? t(language, 'activeSessionOnTable') : isSessionClosed ? t(language, 'sessionClosed') : null)
 
-  const infoMessage =
-    derivedAccessMessage ??
-    actionMessage
-
-  const callButtonDisabled =
-    accessState === 'checking' ||
-    accessState === 'missing' ||
-    accessState === 'error' ||
-    !!derivedAccessMessage ||
-    sending
-
+  const infoMessage = derivedAccessMessage ?? actionMessage
+  const callButtonDisabled = accessState === 'checking' || accessState === 'missing' || accessState === 'error' || !!derivedAccessMessage || sending
   const displayTableLabel = table?.number ? String(table.number) : tableId
   const canDismissCustomerModal = !!customerName
-  const modalSendDisabled =
-    !selectedTip ||
-    sending ||
-    !!derivedAccessMessage ||
-    !!selectedTipLockMessage
+  const modalSendDisabled = !selectedTip || sending || !!derivedAccessMessage || !!selectedTipLockMessage
   const primaryActionDisabled =
-    accessState === 'checking' ||
-    accessState === 'missing' ||
-    accessState === 'error' ||
-    !!derivedAccessMessage ||
-    (cartCount > 0 ? orderSending : sending)
+    accessState === 'checking' || accessState === 'missing' || accessState === 'error' || !!derivedAccessMessage || (cartCount > 0 ? orderSending : sending)
+
+  const isRtl = SUPPORTED_LANGUAGES.find((l) => l.code === language)?.dir === 'rtl'
 
   if (restaurantNotFound) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="px-6 text-center text-[var(--text)]">
           <SearchX className="mx-auto mb-3 h-10 w-10 text-[var(--primary)]" />
-          <p className="font-semibold text-lg mb-2">Menü bulunamadı</p>
-          <p className="text-sm text-gray-500">İşletme bağlantısı geçersiz olabilir.</p>
+          <p className="font-semibold text-lg mb-2">{t(language, 'menuNotFound')}</p>
+          <p className="text-sm text-gray-500">{t(language, 'invalidLink')}</p>
         </div>
       </div>
     )
@@ -1289,10 +1082,10 @@ export default function MenuPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="text-center text-[var(--text)]">
           <LoaderCircle className="mx-auto mb-3 h-10 w-10 animate-spin text-[var(--primary)]" />
-          <p className="text-[1.1rem] font-semibold">Yükleniyor...</p>
+          <p className="text-[1.1rem] font-semibold">{t(language, 'loading')}</p>
         </div>
       </div>
     )
@@ -1300,12 +1093,85 @@ export default function MenuPage() {
 
   if (restaurantAccessReason) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-6">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-6" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="w-full max-w-md rounded-[2rem] border bg-white px-6 py-10 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)]" style={{ borderColor: menuBorderColor }}>
-          <p className="text-[1.5rem] font-semibold text-[var(--text)]">{MENU_UNAVAILABLE_MESSAGE}</p>
-          <p className="mt-3 text-sm leading-6" style={{ color: menuMutedColor }}>
-            {restaurantAccessReason}
-          </p>
+          <p className="text-[1.5rem] font-semibold text-[var(--text)]">{t(language, 'menuUnavailable')}</p>
+          <p className="mt-3 text-sm leading-6" style={{ color: menuMutedColor }}>{restaurantAccessReason}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Language Selection Screen
+  if (onboardingStep === 'language') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ ...menuThemeVars, background: 'var(--page-bg)' }}>
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            {menuLogoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={menuLogoUrl} alt={menuDisplayName} className="h-16 w-16 mx-auto rounded-2xl object-cover border border-black/5 bg-white shadow-lg mb-4" />
+            )}
+            <h1 className="text-2xl font-bold" style={{ color: menuTextColor }}>{t(DEFAULT_LANGUAGE, 'selectLanguage')}</h1>
+            <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>{t(DEFAULT_LANGUAGE, 'selectLanguageDescription')}</p>
+          </div>
+          <div className="space-y-3">
+            {SUPPORTED_LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => handleSelectLanguage(lang.code)}
+                className="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.06)] border transition-all hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)]"
+                style={{ borderColor: menuBorderColor }}
+                dir={lang.dir}
+              >
+                <p className="text-lg font-semibold" style={{ color: menuTextColor }}>{lang.nativeName}</p>
+                <p className="text-sm mt-0.5" style={{ color: menuMutedColor }}>{lang.name}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Name Entry Screen
+  if (onboardingStep === 'name') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            {menuLogoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={menuLogoUrl} alt={menuDisplayName} className="h-16 w-16 mx-auto rounded-2xl object-cover border border-black/5 bg-white shadow-lg mb-4" />
+            )}
+            <h1 className="text-2xl font-bold" style={{ color: menuTextColor }}>{t(language, 'nameChangeTitle')}</h1>
+            <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>{t(language, 'nameChangeDescription')}</p>
+          </div>
+          <input
+            value={customerNameInput}
+            onChange={(e) => setCustomerNameInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCustomerNameOnboarding() }}
+            placeholder={t(language, 'namePlaceholder')}
+            autoFocus
+            className="w-full rounded-2xl border border-black/8 bg-white px-5 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)] mb-4"
+            style={{ color: menuTextColor }}
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={handleContinueWithoutNameOnboarding}
+              className="flex-1 rounded-2xl px-4 py-4 text-sm font-semibold border"
+              style={{ background: '#fff', color: menuTextColor, borderColor: menuBorderColor }}
+            >
+              {t(language, 'continueWithoutName')}
+            </button>
+            <button
+              onClick={handleSaveCustomerNameOnboarding}
+              className="flex-1 rounded-2xl px-4 py-4 text-sm font-bold"
+              style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+            >
+              {customerNameInput.trim() ? t(language, 'saveName') : t(language, 'continueBtn')}
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -1314,55 +1180,27 @@ export default function MenuPage() {
   return (
     <>
       <style>{`
-        @keyframes menu-shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-
-        @keyframes menu-sheet-in {
-          0% { transform: translateY(100%); }
-          100% { transform: translateY(0); }
-        }
+        @keyframes menu-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @keyframes menu-sheet-in { 0% { transform: translateY(100%); } 100% { transform: translateY(0); } }
       `}</style>
 
-      <div
-        className="min-h-screen pb-44 text-[#1a1a1a]"
-        style={{ ...menuThemeVars, background: 'var(--page-bg)' }}
-      >
+      <div className="min-h-screen pb-44 text-[#1a1a1a]" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
         <header className="sticky top-0 z-20 border-b border-black/5 backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
-          <div className="max-w-5xl mx-auto px-4 pt-5 pb-4">
+          <div className="max-w-2xl mx-auto px-4 pt-5 pb-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 {menuLogoUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={menuLogoUrl}
-                    alt={menuDisplayName}
-                    className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
-                  />
+                  <img src={menuLogoUrl} alt={menuDisplayName} className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" />
                 )}
-                <p
-                  className="text-[1.2rem] font-semibold leading-none"
-                  style={{ color: menuTextColor }}
-                >
-                  {menuDisplayName}
-                </p>
+                <p className="text-[1.2rem] font-semibold leading-none" style={{ color: menuTextColor }}>{menuDisplayName}</p>
               </div>
-
               <div className="relative">
-                <button
-                  onClick={openCartDrawer}
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
-                  style={{ color: menuTextColor }}
-                  aria-label="Sepet"
-                >
+                <button onClick={openCartDrawer} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'cart')}>
                   <ShoppingBag size={20} />
                 </button>
                 {cartCount > 0 && (
-                  <span
-                    className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
-                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                  >
+                  <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
                     {cartCount}
                   </span>
                 )}
@@ -1372,9 +1210,9 @@ export default function MenuPage() {
             <div className="mt-4 rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm" style={{ color: menuMutedColor }}>Masa {displayTableLabel} • Hoş geldiniz</p>
+                  <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'table')} {displayTableLabel} • {t(language, 'welcome')}</p>
                   <p className="mt-1 text-[14px] font-semibold" style={{ color: menuTextColor }}>
-                    {customerName ? customerName.toUpperCase() : 'Günün favorilerini keşfedin'}
+                    {customerName ? customerName.toUpperCase() : t(language, 'discoverFavorites')}
                   </p>
                 </div>
                 {customerName && (
@@ -1383,35 +1221,51 @@ export default function MenuPage() {
                     className="text-xs px-3 py-1.5 rounded-full"
                     style={{ background: menuSurfaceMuted, color: menuTextColor }}
                   >
-                    Değiştir
+                    {t(language, 'changeName')}
                   </button>
                 )}
               </div>
             </div>
 
+            {generalSettings.wifiEnabled && generalSettings.wifiName && (
+              <div className="mt-3 rounded-[18px] bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.05)] border" style={{ borderColor: menuBorderColor }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: menuSurfaceMuted }}>
+                    <Wifi size={18} style={{ color: menuPrimaryColor }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium" style={{ color: menuMutedColor }}>{t(language, 'wifiInfo')}</p>
+                    <p className="text-sm font-semibold truncate" style={{ color: menuTextColor }}>{generalSettings.wifiName}</p>
+                  </div>
+                  {generalSettings.wifiPassword && (
+                    <button
+                      onClick={copyWifiPassword}
+                      className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium"
+                      style={{ background: menuSurfaceMuted, color: menuTextColor }}
+                    >
+                      {wifiCopied ? <Check size={14} /> : <Copy size={14} />}
+                      {wifiCopied ? t(language, 'copied') : t(language, 'copyPassword')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {categories.length > 0 && (
-              <div className="mt-4 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none]">
-                <div className="flex gap-3 w-max pr-4">
+              <div className="mt-4 -mx-4 px-4 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none]">
+                <div className="flex gap-2 w-max pb-1">
                   {categories.map((category) => {
                     const active = activeCat === category.id
                     const count = categoryCounts[category.id] ?? 0
-
                     return (
                       <button
                         key={category.id}
                         onClick={() => setActiveCat(category.id)}
-                        className="shrink-0 rounded-full px-4 py-2.5 flex items-center gap-2 border transition-all"
-                        style={
-                          active
-                            ? { background: menuPrimaryColor, color: menuPrimaryTextColor, borderColor: menuPrimaryColor }
-                            : { background: '#fff', color: menuMutedColor, borderColor: menuBorderColor }
-                        }
+                        className="shrink-0 rounded-full px-4 py-2.5 flex items-center gap-2 border transition-all whitespace-nowrap"
+                        style={active ? { background: menuPrimaryColor, color: menuPrimaryTextColor, borderColor: menuPrimaryColor } : { background: '#fff', color: menuMutedColor, borderColor: menuBorderColor }}
                       >
                         <span className="text-sm font-semibold">{category.name}</span>
-                        <span
-                          className="min-w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center px-2"
-                          style={active ? { background: 'rgba(255,255,255,0.22)', color: '#fff' } : { background: menuSurfaceMuted, color: menuTextColor }}
-                        >
+                        <span className="min-w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center px-1.5" style={active ? { background: 'rgba(255,255,255,0.22)', color: '#fff' } : { background: menuSurfaceMuted, color: menuTextColor }}>
                           {count}
                         </span>
                       </button>
@@ -1423,80 +1277,62 @@ export default function MenuPage() {
           </div>
         </header>
 
-        <main className="max-w-5xl mx-auto px-4 pt-5">
+        <main className="max-w-2xl mx-auto px-4 pt-5">
           {visibleProducts.length === 0 ? (
             <div className="rounded-[28px] bg-white px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
               <UtensilsCrossed className="mx-auto mb-3 h-9 w-9 text-[var(--primary)]" />
               {products.some((product) => product.available) ? (
-                <p className="text-sm" style={{ color: menuMutedColor }}>Bu kategoride ürün bulunamadı.</p>
+                <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'noProductsInCategory')}</p>
               ) : (
                 <>
-                  <p className="text-sm" style={{ color: menuMutedColor }}>Henüz ürün eklenmedi.</p>
-                  <p className="mt-2 text-xs" style={{ color: menuMutedColor }}>İlk ürününüzü yönetim panelinden ekleyebilirsiniz.</p>
+                  <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'noProductsYet')}</p>
+                  <p className="mt-2 text-xs" style={{ color: menuMutedColor }}>{t(language, 'addFirstProduct')}</p>
                 </>
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
               {visibleProducts.map((product, index) => {
                 const categoryName = categoryNames[product.categoryId] ?? ''
                 const meta = getProductMeta(product, categoryName)
-
                 return (
                   <div
                     key={product.id}
                     role="button"
                     tabIndex={0}
                     onClick={() => openProduct(product)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault()
-                        openProduct(product)
-                      }
-                    }}
-                    className="text-left rounded-[24px] bg-white overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.08)] active:scale-[0.98] transition-transform cursor-pointer focus:outline-none"
-                    style={{ boxShadow: `0 0 0 0 ${menuPrimaryColor}`, border: `1px solid ${menuBorderColor}` }}
+                    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openProduct(product) } }}
+                    className="flex items-center gap-4 rounded-2xl bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.06)] active:scale-[0.995] transition-transform cursor-pointer focus:outline-none"
+                    style={{ border: `1px solid ${menuBorderColor}` }}
                   >
                     <MenuProductImage
                       key={`${product.id}:${meta.imageUrl || 'placeholder'}`}
                       alt={product.name}
                       imageUrl={meta.imageUrl}
                       fallbackEmoji={meta.fallbackEmoji}
-                      heightClass="h-[140px]"
+                      heightClass="h-20 w-20"
+                      roundedClass="rounded-xl"
                       priority={index === 0}
+                      lang={language}
                     />
 
-                    <div className="px-3.5 pb-3.5 pt-3">
-                      <p className="text-[14px] font-bold leading-tight" style={{ color: menuTextColor }}>{product.name}</p>
-                      <p
-                        className="mt-1 min-h-10 text-[12px] leading-5"
-                        style={{
-                          color: menuMutedColor,
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {product.description || 'Şef dokunuşuyla hazırlanan özel lezzet.'}
+                    <div className="flex-1 min-w-0 py-1">
+                      <p className="text-[15px] font-bold leading-snug truncate" style={{ color: menuTextColor }}>{product.name}</p>
+                      <p className="mt-1 text-[13px] leading-5" style={{ color: menuMutedColor, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {product.description || t(language, 'descriptionFallback')}
                       </p>
-
-                      <div className="mt-3 flex items-center justify-between gap-2">
-                        <span className="text-[15px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(product.price)}</span>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            handleQuickAdd(product)
-                          }}
-                          className="h-9 w-9 rounded-full font-black text-lg flex items-center justify-center shadow-[0_8px_16px_rgba(212,160,23,0.28)]"
-                          style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                          aria-label="Hızlı ekle"
-                        >
-                          +
-                        </button>
-                      </div>
+                      <p className="mt-2 text-[16px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(product.price)}</p>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={(event) => { event.stopPropagation(); handleQuickAdd(product) }}
+                      className="shrink-0 h-10 w-10 rounded-full font-bold text-xl flex items-center justify-center shadow-lg"
+                      style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 4px 14px ${withAlpha(menuPrimaryColor, 0.35)}` }}
+                      aria-label={t(language, 'quickAdd')}
+                    >
+                      +
+                    </button>
                   </div>
                 )
               })}
@@ -1504,51 +1340,55 @@ export default function MenuPage() {
           )}
         </main>
 
-        <div className="fixed bottom-0 inset-x-0 z-20 px-4 pb-5">
-          <div className="max-w-5xl mx-auto">
+        <div className="fixed bottom-0 inset-x-0 z-20 px-4 pb-5 pt-3" style={{ background: `linear-gradient(to top, ${menuSurfaceMuted} 70%, transparent)` }}>
+          <div className="max-w-2xl mx-auto">
             {infoMessage && (
               <div className="mb-3 rounded-[20px] bg-white px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.08)] border border-black/5">
                 <p className="text-[13px] leading-5" style={{ color: menuTextColor }}>{infoMessage}</p>
               </div>
             )}
-
-            <div className="flex gap-3">
-              <button
-                onClick={cartCount > 0 ? openCartDrawer : openCallModal}
-                disabled={primaryActionDisabled}
-                className={`rounded-[22px] px-5 py-4 font-bold text-sm transition-all ${
-                  cartCount > 0 ? 'flex-[1.2]' : 'flex-1'
-                } disabled:opacity-50`}
-                style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 18px 36px ${withAlpha(menuPrimaryColor, 0.28)}` }}
-              >
-                {accessState === 'checking'
-                  ? 'Masa kontrol ediliyor...'
-                  : cartCount > 0
-                    ? `Sipariş Ver • ${cartCount} ürün`
-                    : 'Garson Çağır'}
-              </button>
-
-              {cartCount > 0 ? (
+            {cartCount > 0 ? (
+              <div className="flex gap-3">
+                <button
+                  onClick={openCartDrawer}
+                  disabled={primaryActionDisabled}
+                  className="flex-1 rounded-2xl px-5 py-4 font-bold text-sm transition-all disabled:opacity-50 flex items-center justify-between"
+                  style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 12px 28px ${withAlpha(menuPrimaryColor, 0.32)}` }}
+                >
+                  <span className="flex items-center gap-2">
+                    <ShoppingBag size={18} />
+                    <span>{t(language, 'placeOrder')} ({cartCount})</span>
+                  </span>
+                  <span className="font-bold">{formatPrice(cartTotal)}</span>
+                </button>
                 <button
                   type="button"
                   onClick={openCallModal}
                   disabled={callButtonDisabled}
-                  className="rounded-[22px] border bg-white px-4 py-3 text-sm font-semibold disabled:opacity-50"
+                  className="shrink-0 rounded-2xl border bg-white px-4 py-4 text-sm font-semibold disabled:opacity-50 flex items-center justify-center"
                   style={{ borderColor: menuBorderColor, color: menuTextColor }}
+                  aria-label={t(language, 'callWaiter')}
                 >
-                  Garson Çağır
+                  <UtensilsCrossed size={20} />
                 </button>
-              ) : null}
-            </div>
+              </div>
+            ) : (
+              <button
+                onClick={openCallModal}
+                disabled={primaryActionDisabled}
+                className="w-full rounded-2xl px-5 py-4 font-bold text-sm transition-all disabled:opacity-50"
+                style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 12px 28px ${withAlpha(menuPrimaryColor, 0.32)}` }}
+              >
+                {accessState === 'checking' ? t(language, 'checkingTable') : t(language, 'callWaiter')}
+              </button>
+            )}
           </div>
         </div>
 
+        {/* Product Detail Sheet */}
         {selectedProduct && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
-            <div
-              className="relative w-full bg-[#fafafa] rounded-t-[32px] overflow-hidden max-h-[92vh]"
-              style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-            >
+            <div className="relative w-full bg-[#fafafa] rounded-t-[32px] overflow-hidden max-h-[92vh]" style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               <div className="h-1.5 w-14 rounded-full bg-black/10 mx-auto mt-3 mb-3" />
               <div className="relative">
                 <MenuProductImage
@@ -1556,20 +1396,15 @@ export default function MenuPage() {
                   alt={selectedProduct.name}
                   imageUrl={getProductMeta(selectedProduct, categoryNames[selectedProduct.categoryId] ?? '').imageUrl}
                   fallbackEmoji={getProductMeta(selectedProduct, categoryNames[selectedProduct.categoryId] ?? '').fallbackEmoji}
-                  heightClass="h-[250px]"
+                  heightClass="h-[250px] w-full"
                   roundedClass="rounded-none"
                   priority
+                  lang={language}
                 />
-                <button
-                  onClick={() => setSelectedProduct(null)}
-                  className="absolute top-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/90 shadow-[0_10px_24px_rgba(0,0,0,0.15)] backdrop-blur-sm"
-                  style={{ color: menuTextColor }}
-                  aria-label="Kapat"
-                >
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/90 shadow-[0_10px_24px_rgba(0,0,0,0.15)] backdrop-blur-sm" style={{ color: menuTextColor }} aria-label={t(language, 'close')}>
                   <X className="h-5 w-5" />
                 </button>
               </div>
-
               <div className="px-5 pt-5 pb-36 overflow-y-auto max-h-[calc(92vh-250px)]">
                 {(() => {
                   const meta = getProductMeta(selectedProduct, categoryNames[selectedProduct.categoryId] ?? '')
@@ -1577,86 +1412,39 @@ export default function MenuPage() {
                     <>
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <h2 className="text-[24px] font-bold leading-tight" style={{ color: menuTextColor }}>
-                            {selectedProduct.name}
-                          </h2>
-
+                          <h2 className="text-[24px] font-bold leading-tight" style={{ color: menuTextColor }}>{selectedProduct.name}</h2>
                           <div className="flex items-center gap-2 mt-3">
                             <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }}>
                               <span style={{ color: menuPrimaryColor }}>★</span>
                               {meta.rating}
                             </span>
-                            {meta.popular && (
-                              <span className="inline-flex items-center rounded-full bg-[#fff5cf] px-3 py-1 text-xs font-semibold text-[#9a6d00]">
-                                Popüler
-                              </span>
-                            )}
+                            {meta.popular && <span className="inline-flex items-center rounded-full bg-[#fff5cf] px-3 py-1 text-xs font-semibold text-[#9a6d00]">{t(language, 'popular')}</span>}
                           </div>
                         </div>
-
                         <p className="text-[28px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(selectedProduct.price)}</p>
                       </div>
-
                       <div className="h-px bg-black/6 my-6" />
-
                       <section>
-                        <h3 className="text-[18px] font-bold" style={{ color: menuTextColor }}>Açıklama</h3>
-                        <p className="mt-3 text-[14px] leading-7" style={{ color: menuMutedColor }}>
-                          {selectedProduct.description || 'Günün en sevilen dokularını taşıyan, sıcak ve zarif bir lezzet deneyimi.'}
-                        </p>
+                        <h3 className="text-[18px] font-bold" style={{ color: menuTextColor }}>{t(language, 'description')}</h3>
+                        <p className="mt-3 text-[14px] leading-7" style={{ color: menuMutedColor }}>{selectedProduct.description || t(language, 'descriptionFallback')}</p>
                       </section>
-
-                      <section className="mt-6">
-                        <h3 className="text-[18px] font-bold" style={{ color: menuTextColor }}>İçindekiler</h3>
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {meta.ingredientIcons.map((icon) => (
-                            <span
-                              key={`${selectedProduct.id}-${icon}`}
-                              className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-sm shadow-[0_8px_18px_rgba(0,0,0,0.05)]"
-                              style={{ color: menuTextColor }}
-                            >
-                              <span>{icon}</span>
-                              <span className="text-xs font-semibold" style={{ color: menuMutedColor }}>Malzeme</span>
-                            </span>
-                          ))}
-                        </div>
-                      </section>
-
                       <section className="mt-6 grid grid-cols-2 gap-3">
-                        <InfoTile label="Hazırlanma Süresi" value={`${meta.prepTime} dk`} />
-                        <InfoTile label="Kalori" value={`${meta.calories} kcal`} />
+                        <InfoTile label={t(language, 'prepTime')} value={`${meta.prepTime} ${t(language, 'min')}`} />
+                        <InfoTile label={t(language, 'calories')} value={`${meta.calories} ${t(language, 'kcal')}`} />
                       </section>
                     </>
                   )
                 })()}
               </div>
-
               <div className="absolute inset-x-0 bottom-0 border-t border-black/6 px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
-                <div className="max-w-5xl mx-auto flex items-center gap-3">
+                <div className="max-w-2xl mx-auto flex items-center gap-3">
                   <div className="flex items-center rounded-full bg-white px-2 py-2 shadow-[0_10px_24px_rgba(0,0,0,0.08)] border border-black/5">
-                    <button
-                      onClick={() => adjustDetailQuantity('dec')}
-                      className="flex h-9 w-9 items-center justify-center rounded-full text-xl"
-                      style={{ background: menuSurfaceMuted, color: menuTextColor }}
-                    >
-                      −
-                    </button>
+                    <button onClick={() => adjustDetailQuantity('dec')} className="flex h-9 w-9 items-center justify-center rounded-full text-xl" style={{ background: menuSurfaceMuted, color: menuTextColor }}>−</button>
                     <span className="w-12 text-center text-base font-bold text-[#1a1a1a]">{detailQuantity}</span>
-                    <button
-                      onClick={() => adjustDetailQuantity('inc')}
-                      className="h-9 w-9 rounded-full text-xl flex items-center justify-center"
-                      style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                    >
-                      +
-                    </button>
+                    <button onClick={() => adjustDetailQuantity('inc')} className="h-9 w-9 rounded-full text-xl flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>+</button>
                   </div>
-
-                  <button
-                    onClick={handleAddFromSheet}
-                    className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm"
-                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 16px 28px ${withAlpha(menuPrimaryColor, 0.28)}` }}
-                  >
-                    Sepete Ekle — {formatPrice(selectedProduct.price * detailQuantity)}
+                  <button onClick={handleAddFromSheet} className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 16px 28px ${withAlpha(menuPrimaryColor, 0.28)}` }}>
+                    {t(language, 'addToCart')} — {formatPrice(selectedProduct.price * detailQuantity)}
                   </button>
                 </div>
               </div>
@@ -1664,162 +1452,87 @@ export default function MenuPage() {
           </div>
         )}
 
+        {/* Customer Name Modal */}
         {customerNameModal && (
           <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-end sm:items-center sm:justify-center">
-            <div
-              className="w-full rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-[28px] sm:pb-6"
-              style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-            >
+            <div className="w-full rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-[28px] sm:pb-6" style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               <div className="flex items-start justify-between gap-4 mb-5">
                 <div>
-                  <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>İsminizi yazabilirsiniz</h2>
-                  <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>
-                    Siparişler kişi bazlı takip edilsin diye bu cihaz için adınızı kaydedebilir veya isimsiz devam edebilirsiniz.
-                  </p>
+                  <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'nameChangeTitle')}</h2>
+                  <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'nameChangeDescription')}</p>
                 </div>
                 {canDismissCustomerModal && (
-                  <button
-                    onClick={() => setCustomerNameModal(false)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
-                    style={{ color: menuTextColor }}
-                  >
+                  <button onClick={() => setCustomerNameModal(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                     <X className="h-5 w-5" />
                   </button>
                 )}
               </div>
-
-              <input
-                value={customerNameInput}
-                onChange={(event) => setCustomerNameInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    handleSaveCustomerName()
-                  }
-                }}
-                placeholder="Örnek: Ahmet"
-                autoFocus
-                className="w-full rounded-[22px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
-                style={{ color: menuTextColor }}
-              />
-
+              <input value={customerNameInput} onChange={(event) => setCustomerNameInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleSaveCustomerName() } }} placeholder={t(language, 'namePlaceholder')} autoFocus className="w-full rounded-[22px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }} />
               <div className="mt-5 flex gap-3">
-                {canDismissCustomerModal && (
-                  <button
-                    onClick={() => setCustomerNameModal(false)}
-                    className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold"
-                    style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
-                  >
-                    Vazgeç
-                  </button>
-                )}
-                <button
-                  onClick={handleContinueWithoutName}
-                  className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold"
-                  style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
-                >
-                  İsimsiz Devam Et
-                </button>
-                <button
-                  onClick={handleSaveCustomerName}
-                  disabled={!customerNameInput.trim()}
-                  className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-bold disabled:opacity-50"
-                  style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                >
-                  Adımı Kaydet
-                </button>
+                {canDismissCustomerModal && <button onClick={() => setCustomerNameModal(false)} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold" style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'cancel')}</button>}
+                <button onClick={handleContinueWithoutName} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold" style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'continueWithoutName')}</button>
+                <button onClick={handleSaveCustomerName} disabled={!customerNameInput.trim()} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-bold disabled:opacity-50" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>{t(language, 'saveName')}</button>
               </div>
             </div>
           </div>
         )}
 
+        {/* Call Modal */}
         {callModal && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
-            <div
-              className="w-full rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
-              style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-            >
+            <div className="w-full rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]" style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               {sent ? (
                 <div className="py-10 text-center">
                   <CircleCheckBig className="mx-auto mb-4 h-12 w-12 text-[var(--primary)]" />
-                  <p className="text-[24px] font-bold" style={{ color: menuTextColor }}>Çağrınız iletildi</p>
-                  <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>Garsonunuz en kısa sürede yanınızda olacak.</p>
+                  <p className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'callSent')}</p>
+                  <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>{t(language, 'waiterComing')}</p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-5">
                     <div>
-                      <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>Garson Çağır</h2>
-                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>Talebinizi seçin, ekibi hızlıca bilgilendirelim.</p>
+                      <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'callWaiterTitle')}</h2>
+                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'callWaiterDescription')}</p>
                     </div>
                     <button onClick={closeCallModal} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                       <X className="h-5 w-5" />
                     </button>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-3">
                     {TIP_OPTIONS.map((tip) => {
                       const tipUi = getCallTipUi(tip)
                       const TipIcon = tipUi.Icon
-                      const tipDisabled =
-                        (tip === 'yardım' && hasActiveHelpRequest) ||
-                        (tip === 'hesap' && hasActivePaymentRequest)
-
+                      const tipDisabled = (tip === 'yardım' && hasActiveHelpRequest) || (tip === 'hesap' && hasActivePaymentRequest)
+                      const tipLabel = tip === 'sipariş' ? t(language, 'order') : tip === 'hesap' ? t(language, 'bill') : t(language, 'help')
+                      const tipDesc = tip === 'sipariş' ? t(language, 'orderDescription') : tip === 'hesap' ? t(language, 'billDescription') : t(language, 'helpDescription')
                       return (
                         <button
                           key={tip}
-                          onClick={() => {
-                            if (tipDisabled) return
-                            setSelectedTip(tip)
-                            setActionMessage(null)
-                          }}
+                          onClick={() => { if (!tipDisabled) { setSelectedTip(tip); setActionMessage(null) } }}
                           disabled={tipDisabled}
-                          className="rounded-[22px] px-3 py-4 text-left border shadow-[0_8px_20px_rgba(0,0,0,0.05)] transition-all disabled:opacity-60"
-                          style={
-                            selectedTip === tip && !tipDisabled
-                              ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor }
-                              : { background: '#fff', borderColor: menuBorderColor, color: menuTextColor }
-                          }
+                          className="w-full rounded-[22px] px-4 py-4 flex items-center gap-4 border shadow-[0_8px_20px_rgba(0,0,0,0.05)] transition-all disabled:opacity-60"
+                          style={selectedTip === tip && !tipDisabled ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor } : { background: '#fff', borderColor: menuBorderColor, color: menuTextColor }}
                         >
-                          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl" style={{ background: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.14)' : tipUi.surface, color: selectedTip === tip && !tipDisabled ? menuPrimaryTextColor : tipUi.accent }}>
+                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl shrink-0" style={{ background: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.14)' : tipUi.surface, color: selectedTip === tip && !tipDisabled ? menuPrimaryTextColor : tipUi.accent }}>
                             <TipIcon className="h-5 w-5" />
                           </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-bold">{tipUi.label}</p>
-                            {tipDisabled && (
-                              <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-semibold text-[#a16207]">
-                                Aktif
-                              </span>
-                            )}
+                          <div className="flex-1 text-left">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-bold">{tipLabel}</p>
+                              {tipDisabled && <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-semibold text-[#a16207]">{t(language, 'active')}</span>}
+                            </div>
+                            <p className="mt-1 text-[12px] leading-4" style={{ color: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.72)' : menuMutedColor }}>
+                              {tipDisabled ? (tip === 'yardım' ? t(language, 'activeHelpRequest') : t(language, 'activePaymentRequest')) : tipDesc}
+                            </p>
                           </div>
-                          <p className="mt-1 text-[11px] leading-4" style={{ color: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.72)' : menuMutedColor }}>
-                            {tipDisabled ? getTipLockMessage(tip) : tipUi.description}
-                          </p>
                         </button>
                       )
                     })}
                   </div>
-
-                  <textarea
-                    value={note}
-                    onChange={(event) => setNote(event.target.value)}
-                    placeholder="İsterseniz küçük bir not ekleyin..."
-                    className="mt-4 w-full resize-none rounded-[22px] border border-black/6 bg-white px-4 py-4 text-sm outline-none shadow-[0_8px_20px_rgba(0,0,0,0.04)]"
-                    style={{ color: menuTextColor }}
-                    rows={3}
-                  />
-
-                  {(selectedTipLockMessage || actionMessage) && (
-                    <p className="text-sm mt-3 text-[#c2410c]">{selectedTipLockMessage ?? actionMessage}</p>
-                  )}
-
-                  <button
-                    onClick={sendCall}
-                    disabled={modalSendDisabled}
-                    className="w-full mt-4 rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50"
-                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                  >
-                    {sending ? 'Gönderiliyor...' : 'Talebi Gönder'}
+                  <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder={t(language, 'addOptionalNote')} className="mt-4 w-full resize-none rounded-[22px] border border-black/6 bg-white px-4 py-4 text-sm outline-none shadow-[0_8px_20px_rgba(0,0,0,0.04)]" style={{ color: menuTextColor }} rows={3} />
+                  {(selectedTipLockMessage || actionMessage) && <p className="text-sm mt-3 text-[#c2410c]">{selectedTipLockMessage ?? actionMessage}</p>}
+                  <button onClick={sendCall} disabled={modalSendDisabled} className="w-full mt-4 rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
+                    {sending ? t(language, 'sending') : t(language, 'sendRequest')}
                   </button>
                 </>
               )}
@@ -1827,115 +1540,87 @@ export default function MenuPage() {
           </div>
         )}
 
-        {/* ── Cart Drawer ── */}
+        {/* Cart Drawer */}
         {cartDrawer && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
-            <div
-              className="w-full max-h-[85vh] overflow-y-auto rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
-              style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-            >
+            <div className="w-full max-h-[85vh] overflow-y-auto rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]" style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               {orderSent ? (
                 <div className="py-10 text-center">
                   <CircleCheckBig className="mx-auto mb-4 h-12 w-12 text-[var(--primary)]" />
-                  <p className="text-[24px] font-bold" style={{ color: menuTextColor }}>Siparişiniz iletildi</p>
-                  <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>Garsonunuz siparişinizi hazırlıyor.</p>
+                  <p className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'orderSent')}</p>
+                  <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>{t(language, 'orderPreparing')}</p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-5">
                     <div>
-                      <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>Sepetim</h2>
-                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{cartCount} ürün • {formatPrice(cartTotal)}</p>
+                      <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'myCart')}</h2>
+                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'orderItems', { count: cartCount })} • {formatPrice(cartTotal)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {customerName && (
-                        <button
-                          onClick={() => {
-                            setCustomerNameInput(customerName)
-                            setCustomerNameModal(true)
-                          }}
-                          className="rounded-full bg-white px-3 py-2 text-xs font-medium shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
-                          style={{ color: menuTextColor }}
-                        >
-                          İsmi Değiştir
+                        <button onClick={() => { setCustomerNameInput(customerName); setCustomerNameModal(true) }} className="rounded-full bg-white px-3 py-2 text-xs font-medium shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                          {t(language, 'changeName')}
                         </button>
                       )}
-                      <button
-                        onClick={() => setCartDrawer(false)}
-                        className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
-                        style={{ color: menuTextColor }}
-                      >
+                      <button onClick={() => setCartDrawer(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                         <X className="h-5 w-5" />
                       </button>
                     </div>
                   </div>
 
-                  {cart.length === 0 ? (
+                  {sharedCart.length === 0 ? (
                     <div className="py-12 text-center">
                       <ShoppingCart size={48} className="mx-auto mb-3 text-[var(--primary)]" />
-                      <p className="text-sm" style={{ color: menuMutedColor }}>Sepetiniz boş</p>
+                      <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'cartEmpty')}</p>
                     </div>
                   ) : (
                     <>
                       <div className="space-y-3">
                         {Object.entries(cartGrouped).map(([groupName, group]) => (
-                          <div
-                            key={groupName}
-                            className="rounded-[20px] bg-white p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)] border border-black/5"
-                          >
-                            <div className="flex items-center justify-between gap-3 mb-3">
-                              <div>
-                                <p className="font-semibold text-base" style={{ color: menuTextColor }}>{groupName}</p>
-                                <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{group.items.length} kalem ürün</p>
-                              </div>
-                              <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(group.total)}</p>
-                            </div>
-
-                            <div className="space-y-3">
-                              {group.items.map((item) => (
-                                <div key={`${groupName}-${item.productId}`} className="rounded-2xl px-3 py-3" style={{ background: menuSurfaceMuted }}>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="flex-1 min-w-0">
-                                      <p className="font-semibold text-sm" style={{ color: menuTextColor }}>{item.name}</p>
-                                      <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>Birim: {formatPrice(item.price)}</p>
-                                    </div>
-                                    <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(item.price * item.quantity)}</p>
-                                  </div>
-                                  <div className="flex items-center justify-between mt-3">
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        onClick={() => updateCartItemQuantity(item.productId, item.customerName, -1)}
-                                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg"
-                                        style={{ color: menuTextColor }}
-                                      >
-                                        −
-                                      </button>
-                                      <span className="w-8 text-center text-sm font-bold text-[#1a1a1a]">{item.quantity}</span>
-                                      <button
-                                        onClick={() => updateCartItemQuantity(item.productId, item.customerName, 1)}
-                                        className="h-8 w-8 rounded-full text-lg flex items-center justify-center"
-                                        style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                                      >
-                                        +
-                                      </button>
-                                    </div>
-                                    <button
-                                      onClick={() => removeCartItem(item.productId, item.customerName)}
-                                      className="text-xs text-[#ef4444] font-medium"
-                                    >
-                                      Kaldır
-                                    </button>
-                                  </div>
+                            <div key={groupName} className="rounded-[20px] bg-white p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)] border border-black/5">
+                              <div className="flex items-center justify-between gap-3 mb-3">
+                                <div>
+                                  <p className="font-semibold text-base" style={{ color: menuTextColor }}>{groupName}</p>
+                                  <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{t(language, 'customerItems', { count: group.items.length })}</p>
                                 </div>
-                              ))}
+                                <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(group.total)}</p>
+                              </div>
+                              <div className="space-y-3">
+                                {group.items.map((item) => {
+                                  const canEdit = item.customerId === customerId
+                                  return (
+                                    <div key={item.id} className="rounded-2xl px-3 py-3" style={{ background: menuSurfaceMuted }}>
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-semibold text-sm" style={{ color: menuTextColor }}>{item.productName}</p>
+                                          <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{t(language, 'unitPrice')}: {formatPrice(item.price)}</p>
+                                        </div>
+                                        <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(item.price * item.quantity)}</p>
+                                      </div>
+                                      <div className="flex items-center justify-between mt-3">
+                                        {canEdit ? (
+                                          <>
+                                            <div className="flex items-center gap-2">
+                                              <button onClick={() => handleUpdateCartItemQuantity(item, -1)} className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg" style={{ color: menuTextColor }}>−</button>
+                                              <span className="w-8 text-center text-sm font-bold text-[#1a1a1a]">{item.quantity}</span>
+                                              <button onClick={() => handleUpdateCartItemQuantity(item, 1)} className="h-8 w-8 rounded-full text-lg flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>+</button>
+                                            </div>
+                                            <button onClick={() => handleRemoveCartItem(item)} className="text-xs text-[#ef4444] font-medium">{t(language, 'remove')}</button>
+                                          </>
+                                        ) : (
+                                          <span className="text-xs" style={{ color: menuMutedColor }}>x{item.quantity}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          ))}
                       </div>
 
-                      {actionMessage && (
-                        <p className="text-sm mt-4 text-[#c2410c]">{actionMessage}</p>
-                      )}
+                      {actionMessage && <p className="text-sm mt-4 text-[#c2410c]">{actionMessage}</p>}
 
                       <div className="mt-5 pt-4 border-t border-black/6">
                         <div className="space-y-2 mb-4">
@@ -1946,17 +1631,12 @@ export default function MenuPage() {
                             </div>
                           ))}
                           <div className="flex items-center justify-between pt-2 border-t border-black/6">
-                            <span className="text-sm font-semibold" style={{ color: menuTextColor }}>Masa Toplamı</span>
+                            <span className="text-sm font-semibold" style={{ color: menuTextColor }}>{t(language, 'tableTotal')}</span>
                             <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(cartTotal)}</span>
                           </div>
                         </div>
-                        <button
-                          onClick={sendOrder}
-                          disabled={orderSending || cart.length === 0}
-                          className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
-                          style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                        >
-                          {orderSending ? 'Gönderiliyor...' : 'Siparişi Gönder'}
+                        <button onClick={sendOrder} disabled={orderSending || sharedCart.length === 0} className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
+                          {orderSending ? t(language, 'sending') : t(language, 'sendOrder')}
                         </button>
                       </div>
                     </>
@@ -1967,93 +1647,37 @@ export default function MenuPage() {
           </div>
         )}
 
+        {/* Rating Modal */}
         {ratingModal && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45">
-            <div
-              className="w-full max-w-lg rounded-t-3xl p-6"
-              style={{
-                background: 'var(--page-bg)',
-                paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))',
-                animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)',
-              }}
-            >
+            <div className="w-full max-w-lg rounded-t-3xl p-6" style={{ background: 'var(--page-bg)', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               {ratingSubmitted ? (
                 <div className="py-8 text-center">
                   <CircleCheckBig className="mx-auto mb-4 h-12 w-12 text-[var(--primary)]" />
-                  <p className="text-xl font-bold" style={{ color: menuTextColor }}>
-                    Teşekkür ederiz
-                  </p>
-                  <p style={{ color: menuMutedColor, fontSize: '0.875rem', marginTop: '8px' }}>
-                    Değerlendirmeniz başarıyla alındı.
-                  </p>
+                  <p className="text-xl font-bold" style={{ color: menuTextColor }}>{t(language, 'thanksForRating')}</p>
+                  <p style={{ color: menuMutedColor, fontSize: '0.875rem', marginTop: '8px' }}>{t(language, 'ratingReceived')}</p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-start justify-between gap-4 mb-5">
                     <div>
-                      <h2 style={{ color: menuTextColor, fontSize: '1.3rem', fontWeight: 700 }}>
-                        Deneyiminizi değerlendirin
-                      </h2>
-                      <p style={{ color: menuMutedColor, fontSize: '0.875rem', marginTop: '8px', lineHeight: 1.5 }}>
-                        Hizmeti ve garson deneyimini birkaç saniyede puanlayabilirsiniz.
-                      </p>
+                      <h2 style={{ color: menuTextColor, fontSize: '1.3rem', fontWeight: 700 }}>{t(language, 'ratingTitle')}</h2>
+                      <p style={{ color: menuMutedColor, fontSize: '0.875rem', marginTop: '8px', lineHeight: 1.5 }}>{t(language, 'ratingDescription')}</p>
                     </div>
-                    <button onClick={closeRatingModal} style={{ color: menuMutedColor }}>
-                      <X className="h-5 w-5" />
-                    </button>
+                    <button onClick={closeRatingModal} style={{ color: menuMutedColor }}><X className="h-5 w-5" /></button>
                   </div>
-
                   <div className="space-y-4">
-                    <StarRatingField
-                      label="Genel hizmet puanı"
-                      value={ratingForm.serviceRating}
-                      activeColor={menuPrimaryColor}
-                      onChange={(value) => setRatingForm((current) => ({ ...current, serviceRating: value }))}
-                    />
-                    <StarRatingField
-                      label="Garson puanı"
-                      value={ratingForm.waiterRating}
-                      activeColor={menuPrimaryColor}
-                      onChange={(value) => setRatingForm((current) => ({ ...current, waiterRating: value }))}
-                    />
-
+                    <StarRatingField label={t(language, 'serviceRating')} value={ratingForm.serviceRating} activeColor={menuPrimaryColor} notSelectedText={t(language, 'notSelected')} onChange={(value) => setRatingForm((current) => ({ ...current, serviceRating: value }))} />
+                    <StarRatingField label={t(language, 'waiterRating')} value={ratingForm.waiterRating} activeColor={menuPrimaryColor} notSelectedText={t(language, 'notSelected')} onChange={(value) => setRatingForm((current) => ({ ...current, waiterRating: value }))} />
                     <div>
-                      <p className="mb-2 text-sm font-semibold" style={{ color: menuTextColor }}>
-                        Yorumunuz
-                      </p>
-                      <textarea
-                        value={ratingForm.comment}
-                        onChange={(event) => setRatingForm((current) => ({ ...current, comment: event.target.value }))}
-                        placeholder="Opsiyonel yorum yazın..."
-                        className="w-full rounded-2xl resize-none text-sm"
-                        rows={4}
-                        style={{ background: '#fff', border: `1px solid ${menuBorderColor}`, padding: '14px', color: menuTextColor, outline: 'none' }}
-                      />
+                      <p className="mb-2 text-sm font-semibold" style={{ color: menuTextColor }}>{t(language, 'yourComment')}</p>
+                      <textarea value={ratingForm.comment} onChange={(event) => setRatingForm((current) => ({ ...current, comment: event.target.value }))} placeholder={t(language, 'optionalComment')} className="w-full rounded-2xl resize-none text-sm" rows={4} style={{ background: '#fff', border: `1px solid ${menuBorderColor}`, padding: '14px', color: menuTextColor, outline: 'none' }} />
                     </div>
                   </div>
-
-                  {ratingMessage && (
-                    <p className="text-sm mt-4" style={{ color: '#c2410c' }}>
-                      {ratingMessage}
-                    </p>
-                  )}
-
+                  {ratingMessage && <p className="text-sm mt-4" style={{ color: '#c2410c' }}>{ratingMessage}</p>}
                   <div className="flex gap-3 mt-5">
-                    <button
-                      onClick={closeRatingModal}
-                      className="flex-1 py-3.5 rounded-2xl font-semibold text-sm"
-                      style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
-                    >
-                      Daha sonra
-                    </button>
-                    <button
-                      onClick={submitRating}
-                      disabled={ratingSubmitDisabled}
-                      className="flex-1 py-3.5 rounded-2xl font-bold text-sm disabled:opacity-50"
-                      style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
-                    >
-                      {ratingSending ? 'Gönderiliyor...' : 'Gönder'}
-                    </button>
+                    <button onClick={closeRatingModal} className="flex-1 py-3.5 rounded-2xl font-semibold text-sm" style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'later')}</button>
+                    <button onClick={submitRating} disabled={ratingSubmitDisabled} className="flex-1 py-3.5 rounded-2xl font-bold text-sm disabled:opacity-50" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>{ratingSending ? t(language, 'sending') : t(language, 'send')}</button>
                   </div>
                 </>
               )}
@@ -2065,27 +1689,13 @@ export default function MenuPage() {
   )
 }
 
-function MenuProductImage({
-  imageUrl,
-  alt,
-  fallbackEmoji,
-  heightClass,
-  roundedClass = 'rounded-[12px]',
-  priority,
-}: {
-  imageUrl: string
-  alt: string
-  fallbackEmoji: string
-  heightClass: string
-  roundedClass?: string
-  priority?: boolean
-}) {
+function MenuProductImage({ imageUrl, alt, fallbackEmoji, heightClass, roundedClass = 'rounded-[12px]', priority, lang = DEFAULT_LANGUAGE }: { imageUrl: string; alt: string; fallbackEmoji: string; heightClass: string; roundedClass?: string; priority?: boolean; lang?: MenuLanguage }) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
   const hasImage = imageUrl.length > 0
 
   return (
-    <div className={`relative overflow-hidden bg-[#f2ede2] ${heightClass} ${roundedClass}`}>
+    <div className={`relative overflow-hidden bg-[#f2ede2] ${heightClass} ${roundedClass} shrink-0`}>
       {hasImage && !failed && (
         <Image
           src={imageUrl}
@@ -2096,35 +1706,19 @@ function MenuProductImage({
           sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
           className={`object-cover transition duration-500 ${loaded ? 'opacity-100 scale-100' : 'opacity-0 scale-105'}`}
           onLoad={() => setLoaded(true)}
-          onError={() => {
-            setFailed(true)
-            setLoaded(true)
-          }}
+          onError={() => { setFailed(true); setLoaded(true) }}
         />
       )}
-
       {!loaded && !failed && (
         <div
           className="absolute inset-0"
-          style={{
-            backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,0) 20%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0) 80%), linear-gradient(0deg, #ece7dc, #f6f2ea)',
-            backgroundSize: '200% 100%',
-            animation: 'menu-shimmer 1.6s linear infinite',
-          }}
+          style={{ backgroundImage: 'linear-gradient(110deg, rgba(255,255,255,0) 20%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0) 80%), linear-gradient(0deg, #ece7dc, #f6f2ea)', backgroundSize: '200% 100%', animation: 'menu-shimmer 1.6s linear infinite' }}
         />
       )}
-
       {(!hasImage || failed) && (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center"
-          style={{
-            background: 'linear-gradient(160deg, #f7f2e8 0%, #ece3d3 100%)',
-          }}
-        >
-          <span className="text-5xl">{fallbackEmoji}</span>
-          <span className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8b7355]">
-            Gorsel Hazirlaniyor
-          </span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-4 text-center" style={{ background: 'linear-gradient(160deg, #f7f2e8 0%, #ece3d3 100%)' }}>
+          <span className="text-4xl">{fallbackEmoji}</span>
+          <span className="mt-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b7355]">{t(lang, 'imageLoading')}</span>
         </div>
       )}
     </div>
@@ -2140,38 +1734,16 @@ function InfoTile({ label, value }: { label: string; value: string }) {
   )
 }
 
-function StarRatingField({
-  label,
-  value,
-  activeColor = DEFAULT_MENU_PRIMARY_COLOR,
-  onChange,
-}: {
-  label: string
-  value: number
-  activeColor?: string
-  onChange: (value: number) => void
-}) {
+function StarRatingField({ label, value, activeColor = DEFAULT_MENU_PRIMARY_COLOR, notSelectedText = 'Not selected', onChange }: { label: string; value: number; activeColor?: string; notSelectedText?: string; onChange: (value: number) => void }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
-          {label}
-        </p>
-        <span className="text-xs font-semibold" style={{ color: '#9ca3af' }}>
-          {value > 0 ? `${value}/5` : 'Seçilmedi'}
-        </span>
+        <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{label}</p>
+        <span className="text-xs font-semibold" style={{ color: '#9ca3af' }}>{value > 0 ? `${value}/5` : notSelectedText}</span>
       </div>
       <div className="flex items-center gap-2">
         {[1, 2, 3, 4, 5].map((star) => (
-          <button
-            key={star}
-            type="button"
-            onClick={() => onChange(star)}
-            className="text-3xl transition-transform active:scale-90"
-            style={{ color: star <= value ? activeColor : '#d1d5db' }}
-          >
-            ★
-          </button>
+          <button key={star} type="button" onClick={() => onChange(star)} className="text-3xl transition-transform active:scale-90" style={{ color: star <= value ? activeColor : '#d1d5db' }}>★</button>
         ))}
       </div>
     </div>

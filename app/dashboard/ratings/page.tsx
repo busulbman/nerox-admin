@@ -9,8 +9,9 @@ import { getRestaurantRecentRatingsQuery } from '@/lib/firestore-queries'
 import { db } from '@/lib/firebase'
 import type { Rating } from '@/lib/types'
 
-const BROWN = '#3d2b1f'
-const GOLD = '#d4a017'
+const BROWN = 'var(--text)'
+const GOLD = 'var(--primary)'
+const PRIMARY_FOREGROUND = 'var(--primary-foreground)'
 
 type DateFilter = 'all' | 'today' | '7d' | '30d'
 
@@ -204,7 +205,7 @@ export default function RatingsPage() {
                 setSelectedIds(new Set())
               }}
               className="rounded-xl px-4 py-2 text-sm font-semibold"
-              style={selectionMode ? { background: GOLD, color: BROWN } : { background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb' }}
+              style={selectionMode ? { background: GOLD, color: PRIMARY_FOREGROUND } : { background: '#fff', color: '#6b7280', border: '1px solid var(--border-soft)' }}
             >
               {selectionMode ? 'Seçimi İptal' : 'Seç'}
             </button>
@@ -213,7 +214,7 @@ export default function RatingsPage() {
               <button
                 onClick={toggleSelectAllVisible}
                 className="rounded-xl px-4 py-2 text-sm font-semibold"
-                style={{ background: '#fff', color: BROWN, border: '1px solid #e5e7eb' }}
+                style={{ background: '#fff', color: BROWN, border: '1px solid var(--border-soft)' }}
               >
                 {allVisibleSelected ? 'Seçimi Kaldır' : 'Görünenleri Seç'}
               </button>
@@ -248,7 +249,7 @@ export default function RatingsPage() {
             <select
               value={waiterFilter}
               onChange={(event) => setWaiterFilter(event.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
+              className="theme-input rounded-lg text-sm"
             >
               <option value="all">Tüm garsonlar</option>
               {waiterOptions.map((waiterName) => (
@@ -266,7 +267,7 @@ export default function RatingsPage() {
             <select
               value={dateFilter}
               onChange={(event) => setDateFilter(event.target.value as DateFilter)}
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
+              className="theme-input rounded-lg text-sm"
             >
               <option value="all">Tüm zamanlar</option>
               <option value="today">Bugün</option>
@@ -304,7 +305,7 @@ export default function RatingsPage() {
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-lg" style={{ color: BROWN }}>Son Yorumlar</h2>
-              <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: '#faf5e6', color: BROWN }}>
+              <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{ background: 'var(--primary-soft)', color: BROWN }}>
                 {approvedRatings.length} kayıt
               </span>
             </div>
@@ -426,9 +427,9 @@ function RatingCard({
     <div
       className="bg-white rounded-xl border p-5"
       style={{
-        borderColor: suspicious ? '#fdba74' : selected ? GOLD : '#f0ede9',
+        borderColor: suspicious ? '#fdba74' : selected ? GOLD : 'var(--border-soft)',
         background: suspicious ? '#fffaf4' : '#fff',
-        boxShadow: selected ? '0 0 0 2px rgba(212,160,23,0.15)' : undefined,
+        boxShadow: selected ? '0 0 0 2px var(--primary-soft)' : undefined,
       }}
     >
       <div className="flex items-start justify-between gap-4 mb-4">
@@ -438,7 +439,8 @@ function RatingCard({
               type="checkbox"
               checked={selected}
               onChange={onToggleSelect}
-              className="mt-1 h-4 w-4 accent-[#d4a017]"
+              className="mt-1 h-4 w-4"
+              style={{ accentColor: GOLD }}
             />
           )}
           <div>
@@ -487,7 +489,7 @@ function RatingCard({
 
 function RatingValue({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl px-4 py-3" style={{ background: '#faf7f4' }}>
+    <div className="rounded-xl px-4 py-3" style={{ background: 'var(--surface-muted)' }}>
       <p className="text-xs text-gray-400 mb-1">{label}</p>
       <div className="flex items-center justify-between gap-3">
         <span className="text-lg font-bold" style={{ color: BROWN }}>

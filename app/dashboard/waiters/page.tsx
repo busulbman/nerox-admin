@@ -20,9 +20,9 @@ type PresenceData = {
   lastSeen: number
 }
 
-const BROWN = '#3d2b1f'
-const GOLD = '#d4a017'
-const MEDALS = ['🥇', '🥈', '🥉'] as const
+const BROWN = 'var(--text)'
+const GOLD = 'var(--primary)'
+const PRIMARY_FOREGROUND = 'var(--primary-foreground)'
 
 type WaiterForm = { name: string; email: string; password: string }
 type WaiterPerformance = {
@@ -87,7 +87,7 @@ function truncateComment(value: string, max = 88): string {
 }
 
 const inputCls =
-  'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
+  'theme-input rounded-lg text-sm'
 
 export default function WaitersPage() {
   const { user, profile } = useAuth()
@@ -371,7 +371,7 @@ export default function WaitersPage() {
               setForm(EMPTY_FORM)
             }}
             className="font-semibold px-5 py-2.5 rounded-xl text-sm shrink-0"
-            style={{ background: GOLD, color: BROWN }}
+            style={{ background: GOLD, color: PRIMARY_FOREGROUND }}
           >
             {showForm ? 'İptal' : '+ Garson Ekle'}
           </button>
@@ -412,7 +412,7 @@ export default function WaitersPage() {
               onClick={handleAdd}
               disabled={adding}
               className="mt-4 font-semibold px-5 py-2.5 rounded-xl text-sm disabled:opacity-50"
-              style={{ background: GOLD, color: BROWN }}
+              style={{ background: GOLD, color: PRIMARY_FOREGROUND }}
             >
               {adding ? 'Oluşturuluyor...' : 'Garson Oluştur'}
             </button>
@@ -437,16 +437,24 @@ export default function WaitersPage() {
                 {topThree.map((entry, index) => (
                   <div
                     key={entry.waiter.uid}
-                    className="rounded-[28px] border p-6 shadow-[0_18px_36px_rgba(61,43,31,0.08)]"
+                    className="rounded-[28px] border p-6 shadow-[0_18px_36px_rgba(0,0,0,0.08)]"
                     style={{
-                      background: index === 0 ? 'linear-gradient(180deg, #fff7dc 0%, #ffffff 100%)' : '#ffffff',
-                      borderColor: index === 0 ? '#f5d67b' : '#efe7dc',
+                      background: index === 0 ? 'linear-gradient(180deg, var(--primary-soft) 0%, #ffffff 72%)' : '#ffffff',
+                      borderColor: 'var(--border-soft)',
                     }}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <div className="flex items-center gap-3">
-                          <span className="text-3xl">{MEDALS[index]}</span>
+                          <span
+                            className="inline-flex h-12 w-12 items-center justify-center rounded-2xl text-sm font-black"
+                            style={{
+                              background: index === 0 ? GOLD : 'var(--surface-muted)',
+                              color: index === 0 ? PRIMARY_FOREGROUND : BROWN,
+                            }}
+                          >
+                            #{entry.rank}
+                          </span>
                           <div>
                             <p className="text-xs uppercase tracking-[0.24em] text-gray-400">Sıra #{entry.rank}</p>
                             <h3 className="text-xl font-bold mt-1" style={{ color: BROWN }}>{entry.waiter.name}</h3>
@@ -470,7 +478,7 @@ export default function WaitersPage() {
                       <MetricTile label="Ort. cevap" value={formatResponseTime(entry.avgResponseMs)} />
                     </div>
 
-                    <div className="mt-5 rounded-2xl px-4 py-4" style={{ background: '#faf7f4' }}>
+                    <div className="mt-5 rounded-2xl px-4 py-4" style={{ background: 'var(--surface-muted)' }}>
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Son yorum özeti</p>
                       <p className="text-sm leading-6 mt-2" style={{ color: entry.latestComment ? '#4b5563' : '#9ca3af' }}>
                         {entry.latestComment ? truncateComment(entry.latestComment, 120) : 'Henüz yorum yok.'}
@@ -515,16 +523,15 @@ export default function WaitersPage() {
                           <div className="flex items-center gap-3 min-w-0">
                             <div
                               className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold shrink-0"
-                              style={{ background: entry.waiter.active ? BROWN : '#9ca3af' }}
+                              style={{ background: entry.waiter.active ? GOLD : '#9ca3af', color: entry.waiter.active ? PRIMARY_FOREGROUND : '#fff' }}
                             >
                               {entry.waiter.name.charAt(0).toUpperCase()}
                             </div>
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: '#faf7f4', color: BROWN }}>
+                                <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: 'var(--surface-muted)', color: BROWN }}>
                                   #{entry.rank}
                                 </span>
-                                {entry.rank <= 3 && <span className="text-xl leading-none">{MEDALS[entry.rank - 1]}</span>}
                                 <p className="font-semibold truncate" style={{ color: BROWN }}>{entry.waiter.name}</p>
                               </div>
                               <p className="text-xs text-gray-400 mt-1">
@@ -542,7 +549,7 @@ export default function WaitersPage() {
                           <MetricTile label="Toplam yorum" value={String(entry.totalRatings)} />
                           <MetricTile label="Tamamlanan" value={`${entry.todayCompletedCalls} / ${entry.totalCompletedCalls}`} />
                           <MetricTile label="Ort. cevap" value={formatResponseTime(entry.avgResponseMs)} />
-                          <div className="rounded-2xl px-4 py-3" style={{ background: '#faf7f4' }}>
+                          <div className="rounded-2xl px-4 py-3" style={{ background: 'var(--surface-muted)' }}>
                             <p className="text-xs text-gray-400 mb-1">Durum</p>
                             <div className="flex flex-wrap gap-2">
                               <StatusBadge active={entry.waiter.active} />
@@ -551,7 +558,7 @@ export default function WaitersPage() {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl px-4 py-3" style={{ background: '#faf7f4' }}>
+                        <div className="rounded-2xl px-4 py-3" style={{ background: 'var(--surface-muted)' }}>
                           <p className="text-xs text-gray-400 mb-1">Son yorum</p>
                           <p className="text-sm leading-6" style={{ color: entry.latestComment ? '#4b5563' : '#9ca3af' }}>
                             {entry.latestComment ? truncateComment(entry.latestComment) : 'Henüz yorum yok.'}
@@ -586,7 +593,7 @@ export default function WaitersPage() {
 
                       <div className="hidden xl:grid xl:grid-cols-[72px_1.5fr_120px_120px_150px_140px_120px_1.7fr_140px] gap-3 items-center">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: '#faf7f4', color: BROWN }}>
+                          <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: 'var(--surface-muted)', color: BROWN }}>
                             #{entry.rank}
                           </span>
                           {entry.rank <= 3 && <span className="text-lg">{MEDALS[entry.rank - 1]}</span>}
@@ -595,7 +602,7 @@ export default function WaitersPage() {
                         <div className="flex items-center gap-3 min-w-0">
                           <div
                             className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-bold shrink-0"
-                            style={{ background: entry.waiter.active ? BROWN : '#9ca3af' }}
+                            style={{ background: entry.waiter.active ? GOLD : '#9ca3af', color: entry.waiter.active ? PRIMARY_FOREGROUND : '#fff' }}
                           >
                             {entry.waiter.name.charAt(0).toUpperCase()}
                           </div>
@@ -685,7 +692,7 @@ export default function WaitersPage() {
                 onClick={handleEditSave}
                 disabled={editSaving}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
-                style={{ background: GOLD, color: BROWN }}
+                style={{ background: GOLD, color: PRIMARY_FOREGROUND }}
               >
                 {editSaving ? 'Kaydediliyor...' : 'Kaydet'}
               </button>
@@ -709,7 +716,7 @@ function OverviewCard({ label, value, sub }: { label: string; value: string; sub
 
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl px-4 py-3" style={{ background: '#faf7f4' }}>
+    <div className="rounded-2xl px-4 py-3" style={{ background: 'var(--surface-muted)' }}>
       <p className="text-xs text-gray-400 mb-1">{label}</p>
       <p className="text-lg font-bold" style={{ color: BROWN }}>{value}</p>
     </div>

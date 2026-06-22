@@ -3,15 +3,18 @@ import type { Restaurant, RestaurantGeneralSettings, RestaurantStatus } from '@/
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 export const DEFAULT_BUSINESS_NAME = 'İşletme'
-export const DEFAULT_PRIMARY_COLOR = '#3d2b1f'
-export const DEFAULT_ACCENT_COLOR = '#d4a017'
-export const DEFAULT_BRAND_LOGO_PATH = '/icon.png'
+export const DEFAULT_PRIMARY_COLOR = '#7c3aed'
+export const DEFAULT_ACCENT_COLOR = '#ddd6fe'
+export const DEFAULT_BRAND_LOGO_PATH = '/NeroxLogo.png'
 
 export const EMPTY_RESTAURANT_GENERAL_SETTINGS: RestaurantGeneralSettings = {
   businessName: '',
   slug: '',
   logoUrl: '',
   primaryColor: '',
+  wifiEnabled: false,
+  wifiName: '',
+  wifiPassword: '',
   updatedAt: null,
 }
 
@@ -92,12 +95,18 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
     typeof data.primaryColor === 'string' && isValidRestaurantThemeColor(data.primaryColor)
       ? data.primaryColor.trim()
       : ''
+  const wifiEnabled = data.wifiEnabled === true
+  const wifiName = typeof data.wifiName === 'string' ? data.wifiName.trim() : ''
+  const wifiPassword = typeof data.wifiPassword === 'string' ? data.wifiPassword : ''
 
   return {
     businessName,
     slug,
     logoUrl,
     primaryColor,
+    wifiEnabled,
+    wifiName,
+    wifiPassword,
     updatedAt: toMillis(data.updatedAt),
   }
 }
@@ -150,6 +159,9 @@ export function mergeRestaurantGeneralSettings(
     slug: settings.slug || restaurant.slug,
     logoUrl: settings.logoUrl || restaurant.logoUrl || '',
     primaryColor: settings.primaryColor || restaurant.primaryColor || DEFAULT_PRIMARY_COLOR,
+    wifiEnabled: settings.wifiEnabled ?? false,
+    wifiName: settings.wifiName ?? '',
+    wifiPassword: settings.wifiPassword ?? '',
     updatedAt: settings.updatedAt,
   }
 }

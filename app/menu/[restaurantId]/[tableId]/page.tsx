@@ -18,8 +18,9 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
-import { ShoppingBag } from 'lucide-react'
+import { Clipboard, CircleCheckBig, Egg, LoaderCircle, Milk, SearchX, ShoppingBag, ShoppingCart, UtensilsCrossed, Wheat, X } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { resolveRestaurantBySlugOrId, type ResolvedRestaurant } from '@/lib/restaurant-resolver'
@@ -29,7 +30,6 @@ import {
   DEFAULT_MENU_PRIMARY_COLOR,
   EMPTY_MENU_THEME_SETTINGS,
   getMenuPrimaryTextColor,
-  isValidMenuPrimaryColor,
   normalizeMenuThemeSettings,
   resolveMenuDisplayName,
 } from '@/lib/menu-theme'
@@ -40,6 +40,7 @@ import {
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer, mergeCartItems } from '@/lib/order-utils'
+import { buildThemeStyleVars, mixHexColors, withAlpha } from '@/lib/ui-theme'
 import type { CartItem, Category, MenuThemeSettings, Product, RestaurantGeneralSettings, Table, WaiterCall } from '@/lib/types'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
@@ -48,8 +49,8 @@ type TableLookupResult = { tableDocId: string; table: Table }
 type RatingForm = { serviceRating: number; waiterRating: number; comment: string }
 type ProductMeta = {
   imageUrl: string
-  fallbackEmoji: string
-  ingredientIcons: string[]
+  fallbackLabel: string
+  ingredientTags: string[]
   prepTime: number
   calories: number
   rating: string
@@ -61,16 +62,10 @@ type CachedMenuData = {
   products: Product[]
   menuSettings: MenuThemeSettings
   generalSettings: RestaurantGeneralSettings
-  menuPrimaryColorOverride: string | null
 }
 
 const menuDataCache = new Map<string, CachedMenuData>()
-
-const TIP_OPTIONS: { tip: CallTip; icon: string; label: string; desc: string }[] = [
-  { tip: 'sipariş', icon: '📋', label: 'Sipariş', desc: 'Sipariş vermek istiyorum' },
-  { tip: 'hesap', icon: '💳', label: 'Hesap', desc: 'Hesabı getirin lütfen' },
-  { tip: 'yardım', icon: '🙋', label: 'Yardım', desc: 'Yardıma ihtiyacım var' },
-]
+const TIP_OPTIONS: CallTip[] = ['sipariş', 'hesap', 'yardım']
 
 const ACTIVE_SESSION_MESSAGE = 'Bu masada aktif oturum var. Lütfen garsondan yardım isteyin.'
 const CLEANING_MESSAGE = 'Bu masa şu anda hazırlanıyor. Lütfen garsondan yardım isteyin.'
@@ -220,24 +215,22 @@ function getProductMeta(product: Product, categoryName: string): ProductMeta {
   const key = hashString(`${product.id}:${product.name}:${categoryName}`)
   const magnitude = Math.abs(key)
 
-  const fallbackEmoji =
-    haystack.includes('vafle') || haystack.includes('waffle')
-      ? '🧇'
-      : haystack.includes('krep')
-        ? '🥞'
-        : haystack.includes('kahve') || haystack.includes('latte') || haystack.includes('cappuccino') || haystack.includes('espresso')
-          ? '☕'
-          : haystack.includes('dondurma') || haystack.includes('milkshake')
-            ? '🍨'
-            : haystack.includes('pasta') || haystack.includes('cheesecake') || haystack.includes('cake')
-              ? '🍰'
-              : haystack.includes('çikolata') || haystack.includes('fondant') || haystack.includes('brownie') || haystack.includes('trüf')
-                ? '🍫'
-                : '🍽️'
+  const fallbackLabel =
+    haystack.includes('kahve') || haystack.includes('latte') || haystack.includes('cappuccino') || haystack.includes('espresso')
+      ? 'Kahve'
+      : haystack.includes('dondurma') || haystack.includes('milkshake')
+        ? 'Soğuk Servis'
+        : haystack.includes('pasta') || haystack.includes('cheesecake') || haystack.includes('cake')
+          ? 'Tatlı'
+          : haystack.includes('krep') || haystack.includes('vafle') || haystack.includes('waffle')
+            ? 'Atıştırmalık'
+            : haystack.includes('çikolata') || haystack.includes('fondant') || haystack.includes('brownie') || haystack.includes('trüf')
+              ? 'Tatlı'
+              : categoryName || 'Şef Seçimi'
 
-  const ingredientIcons = ['🌾']
-  if (!haystack.includes('vegan')) ingredientIcons.push('🥚')
-  if (!haystack.includes('sorbe')) ingredientIcons.push('🧈')
+  const ingredientTags = ['Buğday']
+  if (!haystack.includes('vegan')) ingredientTags.push('Yumurta')
+  if (!haystack.includes('sorbe')) ingredientTags.push('Süt')
   if (
     haystack.includes('çikolata') ||
     haystack.includes('fondant') ||
@@ -245,13 +238,13 @@ function getProductMeta(product: Product, categoryName: string): ProductMeta {
     haystack.includes('trüf') ||
     haystack.includes('cocoa')
   ) {
-    ingredientIcons.push('🍫')
+    ingredientTags.push('Kakao')
   }
 
   return {
     imageUrl: typeof product.image === 'string' ? product.image.trim() : '',
-    fallbackEmoji,
-    ingredientIcons: ingredientIcons.slice(0, 4),
+    fallbackLabel,
+    ingredientTags: ingredientTags.slice(0, 4),
     prepTime: 10 + (magnitude % 11),
     calories: 200 + (magnitude % 401),
     rating: (4.2 + (magnitude % 8) * 0.1).toFixed(1),
@@ -308,7 +301,6 @@ export default function MenuPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [menuSettings, setMenuSettings] = useState<MenuThemeSettings>(EMPTY_MENU_THEME_SETTINGS)
   const [generalSettings, setGeneralSettings] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
-  const [menuPrimaryColorOverride, setMenuPrimaryColorOverride] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
@@ -395,7 +387,6 @@ export default function MenuPage() {
         setProducts(cachedMenuData.products)
         setMenuSettings(cachedMenuData.menuSettings)
         setGeneralSettings(cachedMenuData.generalSettings)
-        setMenuPrimaryColorOverride(cachedMenuData.menuPrimaryColorOverride)
         setActiveCat(cachedMenuData.categories[0]?.id ?? null)
         setLoading(false)
         return
@@ -419,26 +410,18 @@ export default function MenuPage() {
           generalSettingsSnap.exists() ? generalSettingsSnap.data() : null,
           null,
         )
-        const nextMenuPrimaryColorOverride =
-          menuSettingsSnap.exists()
-          && typeof menuSettingsSnap.data().menuPrimaryColor === 'string'
-          && isValidMenuPrimaryColor(menuSettingsSnap.data().menuPrimaryColor)
-            ? menuSettingsSnap.data().menuPrimaryColor
-            : null
 
         menuDataCache.set(currentRestaurantId, {
           categories: nextCategories,
           products: nextProducts,
           menuSettings: nextMenuSettings,
           generalSettings: nextGeneralSettings,
-          menuPrimaryColorOverride: nextMenuPrimaryColorOverride,
         })
 
         setCategories(nextCategories)
         setProducts(nextProducts)
         setMenuSettings(nextMenuSettings)
         setGeneralSettings(nextGeneralSettings)
-        setMenuPrimaryColorOverride(nextMenuPrimaryColorOverride)
         setActiveCat(nextCategories[0]?.id ?? null)
       } catch (error) {
         console.error('Menu load error:', error)
@@ -1224,12 +1207,13 @@ export default function MenuPage() {
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl
     ? generalSettings.logoUrl
     : menuSettings.logoUrl
-  const menuPrimaryColor = menuPrimaryColorOverride
-    ? menuPrimaryColorOverride
-    : hasGeneralSettings && generalSettings.primaryColor
-      ? generalSettings.primaryColor
-      : (menuSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR)
+  const menuPrimaryColor = generalSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR
   const menuPrimaryTextColor = getMenuPrimaryTextColor(menuPrimaryColor)
+  const menuThemeVars = buildThemeStyleVars(menuPrimaryColor)
+  const menuTextColor = mixHexColors('#0f172a', menuPrimaryColor, 0.08)
+  const menuMutedColor = mixHexColors(menuTextColor, '#ffffff', 0.42)
+  const menuSurfaceMuted = mixHexColors(menuPrimaryColor, '#ffffff', 0.93)
+  const menuBorderColor = withAlpha(menuPrimaryColor, 0.16)
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
   const cartTotal = calculateCartTotal(cart)
@@ -1284,12 +1268,18 @@ export default function MenuPage() {
     sending ||
     !!derivedAccessMessage ||
     !!selectedTipLockMessage
+  const primaryActionDisabled =
+    accessState === 'checking' ||
+    accessState === 'missing' ||
+    accessState === 'error' ||
+    !!derivedAccessMessage ||
+    (cartCount > 0 ? orderSending : sending)
 
   if (restaurantNotFound) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#fafafa]">
-        <div className="text-center text-[#3d2b1f] px-6">
-          <div className="text-4xl mb-3">🔍</div>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]">
+        <div className="px-6 text-center text-[var(--text)]">
+          <SearchX className="mx-auto mb-3 h-10 w-10 text-[var(--primary)]" />
           <p className="font-semibold text-lg mb-2">Menü bulunamadı</p>
           <p className="text-sm text-gray-500">İşletme bağlantısı geçersiz olabilir.</p>
         </div>
@@ -1299,10 +1289,10 @@ export default function MenuPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#fafafa]">
-        <div className="text-center text-[#3d2b1f]">
-          <div className="text-4xl mb-3 animate-pulse">☕</div>
-          <p style={{ fontFamily: 'var(--font-playfair), serif', fontSize: '1.1rem' }}>Yükleniyor...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]">
+        <div className="text-center text-[var(--text)]">
+          <LoaderCircle className="mx-auto mb-3 h-10 w-10 animate-spin text-[var(--primary)]" />
+          <p className="text-[1.1rem] font-semibold">Yükleniyor...</p>
         </div>
       </div>
     )
@@ -1310,15 +1300,10 @@ export default function MenuPage() {
 
   if (restaurantAccessReason) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#fafafa] px-6">
-        <div className="w-full max-w-md rounded-[2rem] border border-[#eadfd5] bg-white px-6 py-10 text-center shadow-[0_18px_50px_rgba(61,43,31,0.08)]">
-          <p
-            className="text-[1.5rem] font-semibold"
-            style={{ fontFamily: 'var(--font-playfair), serif', color: '#3d2b1f' }}
-          >
-            {MENU_UNAVAILABLE_MESSAGE}
-          </p>
-          <p className="mt-3 text-sm leading-6 text-[#7b5b46]">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-6">
+        <div className="w-full max-w-md rounded-[2rem] border bg-white px-6 py-10 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)]" style={{ borderColor: menuBorderColor }}>
+          <p className="text-[1.5rem] font-semibold text-[var(--text)]">{MENU_UNAVAILABLE_MESSAGE}</p>
+          <p className="mt-3 text-sm leading-6" style={{ color: menuMutedColor }}>
             {restaurantAccessReason}
           </p>
         </div>
@@ -1341,10 +1326,10 @@ export default function MenuPage() {
       `}</style>
 
       <div
-        className="min-h-screen bg-[#fafafa] text-[#1a1a1a] pb-44"
-        style={{ fontFamily: 'var(--font-dm-sans), var(--font-geist-sans), sans-serif' }}
+        className="min-h-screen pb-44 text-[#1a1a1a]"
+        style={{ ...menuThemeVars, background: 'var(--page-bg)' }}
       >
-        <header className="sticky top-0 z-20 bg-[#fafafa]/95 backdrop-blur-xl border-b border-black/5">
+        <header className="sticky top-0 z-20 border-b border-black/5 backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
           <div className="max-w-5xl mx-auto px-4 pt-5 pb-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -1358,7 +1343,7 @@ export default function MenuPage() {
                 )}
                 <p
                   className="text-[1.2rem] font-semibold leading-none"
-                  style={{ fontFamily: 'var(--font-playfair), serif', color: '#3d2b1f' }}
+                  style={{ color: menuTextColor }}
                 >
                   {menuDisplayName}
                 </p>
@@ -1367,7 +1352,8 @@ export default function MenuPage() {
               <div className="relative">
                 <button
                   onClick={openCartDrawer}
-                  className="h-10 w-10 rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] flex items-center justify-center text-[#3d2b1f]"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                  style={{ color: menuTextColor }}
                   aria-label="Sepet"
                 >
                   <ShoppingBag size={20} />
@@ -1386,8 +1372,8 @@ export default function MenuPage() {
             <div className="mt-4 rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-[#888888]">Masa {displayTableLabel} • Hoş geldiniz</p>
-                  <p className="text-[14px] mt-1 font-semibold" style={{ color: '#3d2b1f' }}>
+                  <p className="text-sm" style={{ color: menuMutedColor }}>Masa {displayTableLabel} • Hoş geldiniz</p>
+                  <p className="mt-1 text-[14px] font-semibold" style={{ color: menuTextColor }}>
                     {customerName ? customerName.toUpperCase() : 'Günün favorilerini keşfedin'}
                   </p>
                 </div>
@@ -1395,7 +1381,7 @@ export default function MenuPage() {
                   <button
                     onClick={() => { setCustomerNameInput(customerName); setCustomerNameModal(true) }}
                     className="text-xs px-3 py-1.5 rounded-full"
-                    style={{ background: '#f3f4f6', color: '#6b7280' }}
+                    style={{ background: menuSurfaceMuted, color: menuTextColor }}
                   >
                     Değiştir
                   </button>
@@ -1418,13 +1404,13 @@ export default function MenuPage() {
                         style={
                           active
                             ? { background: menuPrimaryColor, color: menuPrimaryTextColor, borderColor: menuPrimaryColor }
-                            : { background: '#fff', color: '#888888', borderColor: 'rgba(0,0,0,0.06)' }
+                            : { background: '#fff', color: menuMutedColor, borderColor: menuBorderColor }
                         }
                       >
                         <span className="text-sm font-semibold">{category.name}</span>
                         <span
                           className="min-w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center px-2"
-                          style={active ? { background: 'rgba(255,255,255,0.22)', color: '#fff' } : { background: '#f3f4f6', color: '#6b7280' }}
+                          style={active ? { background: 'rgba(255,255,255,0.22)', color: '#fff' } : { background: menuSurfaceMuted, color: menuTextColor }}
                         >
                           {count}
                         </span>
@@ -1440,10 +1426,15 @@ export default function MenuPage() {
         <main className="max-w-5xl mx-auto px-4 pt-5">
           {visibleProducts.length === 0 ? (
             <div className="rounded-[28px] bg-white px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
-              <p className="text-4xl mb-3">🍽️</p>
-              <p className="text-sm text-[#888888]">
-                {products.some((product) => product.available) ? 'Bu kategoride ürün bulunamadı.' : 'Henüz ürün eklenmedi.'}
-              </p>
+              <UtensilsCrossed className="mx-auto mb-3 h-9 w-9 text-[var(--primary)]" />
+              {products.some((product) => product.available) ? (
+                <p className="text-sm" style={{ color: menuMutedColor }}>Bu kategoride ürün bulunamadı.</p>
+              ) : (
+                <>
+                  <p className="text-sm" style={{ color: menuMutedColor }}>Henüz ürün eklenmedi.</p>
+                  <p className="mt-2 text-xs" style={{ color: menuMutedColor }}>İlk ürününüzü yönetim panelinden ekleyebilirsiniz.</p>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4">
@@ -1463,7 +1454,8 @@ export default function MenuPage() {
                         openProduct(product)
                       }
                     }}
-                    className="text-left rounded-[24px] bg-white overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.08)] active:scale-[0.98] transition-transform cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#d4a017]/40"
+                    className="text-left rounded-[24px] bg-white overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.08)] active:scale-[0.98] transition-transform cursor-pointer focus:outline-none"
+                    style={{ boxShadow: `0 0 0 0 ${menuPrimaryColor}`, border: `1px solid ${menuBorderColor}` }}
                   >
                     <MenuProductImage
                       key={`${product.id}:${meta.imageUrl || 'placeholder'}`}
@@ -1475,10 +1467,11 @@ export default function MenuPage() {
                     />
 
                     <div className="px-3.5 pb-3.5 pt-3">
-                      <p className="text-[14px] font-bold leading-tight text-[#1a1a1a]">{product.name}</p>
+                      <p className="text-[14px] font-bold leading-tight" style={{ color: menuTextColor }}>{product.name}</p>
                       <p
-                        className="mt-1 text-[12px] leading-5 text-[#888888] min-h-10"
+                        className="mt-1 min-h-10 text-[12px] leading-5"
                         style={{
+                          color: menuMutedColor,
                           display: '-webkit-box',
                           WebkitLineClamp: 2,
                           WebkitBoxOrient: 'vertical',
@@ -1515,40 +1508,37 @@ export default function MenuPage() {
           <div className="max-w-5xl mx-auto">
             {infoMessage && (
               <div className="mb-3 rounded-[20px] bg-white px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.08)] border border-black/5">
-                <p className="text-[13px] leading-5 text-[#3d2b1f]">{infoMessage}</p>
+                <p className="text-[13px] leading-5" style={{ color: menuTextColor }}>{infoMessage}</p>
               </div>
             )}
 
             <div className="flex gap-3">
               <button
-                onClick={openCallModal}
-                disabled={callButtonDisabled}
-                className={`rounded-[22px] px-5 py-4 font-bold text-sm shadow-[0_12px_24px_rgba(61,43,31,0.18)] transition-all ${
-                  cartCount > 0 ? 'flex-[1.1]' : 'flex-1'
+                onClick={cartCount > 0 ? openCartDrawer : openCallModal}
+                disabled={primaryActionDisabled}
+                className={`rounded-[22px] px-5 py-4 font-bold text-sm transition-all ${
+                  cartCount > 0 ? 'flex-[1.2]' : 'flex-1'
                 } disabled:opacity-50`}
-                style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 18px 36px ${withAlpha(menuPrimaryColor, 0.28)}` }}
               >
                 {accessState === 'checking'
                   ? 'Masa kontrol ediliyor...'
-                  : 'Garson Çağır'}
+                  : cartCount > 0
+                    ? `Sipariş Ver • ${cartCount} ürün`
+                    : 'Garson Çağır'}
               </button>
 
-              {cartCount > 0 && (
+              {cartCount > 0 ? (
                 <button
                   type="button"
-                  onClick={openCartDrawer}
-                  className="flex-1 rounded-[22px] bg-white px-4 py-3 shadow-[0_12px_24px_rgba(0,0,0,0.08)] border border-black/5 text-left"
+                  onClick={openCallModal}
+                  disabled={callButtonDisabled}
+                  className="rounded-[22px] border bg-white px-4 py-3 text-sm font-semibold disabled:opacity-50"
+                  style={{ borderColor: menuBorderColor, color: menuTextColor }}
                 >
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-[#888888]">Sepet</p>
-                  <div className="mt-1 flex items-end justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-bold text-[#1a1a1a]">{cartCount} ürün</p>
-                      <p className="text-xs text-[#888888]">Siparişe hazır</p>
-                    </div>
-                    <p className="text-[15px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(cartTotal)}</p>
-                  </div>
+                  Garson Çağır
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -1572,10 +1562,11 @@ export default function MenuPage() {
                 />
                 <button
                   onClick={() => setSelectedProduct(null)}
-                  className="absolute top-4 right-4 h-11 w-11 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center text-[#3d2b1f] shadow-[0_10px_24px_rgba(0,0,0,0.15)]"
+                  className="absolute top-4 right-4 flex h-11 w-11 items-center justify-center rounded-full bg-white/90 shadow-[0_10px_24px_rgba(0,0,0,0.15)] backdrop-blur-sm"
+                  style={{ color: menuTextColor }}
                   aria-label="Kapat"
                 >
-                  <span className="text-xl leading-none">×</span>
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
@@ -1586,15 +1577,12 @@ export default function MenuPage() {
                     <>
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <h2
-                            className="text-[24px] font-bold leading-tight text-[#3d2b1f]"
-                            style={{ fontFamily: 'var(--font-playfair), serif' }}
-                          >
+                          <h2 className="text-[24px] font-bold leading-tight" style={{ color: menuTextColor }}>
                             {selectedProduct.name}
                           </h2>
 
                           <div className="flex items-center gap-2 mt-3">
-                            <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#3d2b1f] shadow-[0_8px_20px_rgba(0,0,0,0.05)]">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }}>
                               <span style={{ color: menuPrimaryColor }}>★</span>
                               {meta.rating}
                             </span>
@@ -1612,32 +1600,23 @@ export default function MenuPage() {
                       <div className="h-px bg-black/6 my-6" />
 
                       <section>
-                        <h3
-                          className="text-[18px] font-bold text-[#3d2b1f]"
-                          style={{ fontFamily: 'var(--font-playfair), serif' }}
-                        >
-                          Açıklama
-                        </h3>
-                        <p className="mt-3 text-[14px] leading-7 text-[#666]">
+                        <h3 className="text-[18px] font-bold" style={{ color: menuTextColor }}>Açıklama</h3>
+                        <p className="mt-3 text-[14px] leading-7" style={{ color: menuMutedColor }}>
                           {selectedProduct.description || 'Günün en sevilen dokularını taşıyan, sıcak ve zarif bir lezzet deneyimi.'}
                         </p>
                       </section>
 
                       <section className="mt-6">
-                        <h3
-                          className="text-[18px] font-bold text-[#3d2b1f]"
-                          style={{ fontFamily: 'var(--font-playfair), serif' }}
-                        >
-                          İçindekiler
-                        </h3>
+                        <h3 className="text-[18px] font-bold" style={{ color: menuTextColor }}>İçindekiler</h3>
                         <div className="flex flex-wrap gap-2 mt-3">
                           {meta.ingredientIcons.map((icon) => (
                             <span
                               key={`${selectedProduct.id}-${icon}`}
-                              className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-sm text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.05)]"
+                              className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-sm shadow-[0_8px_18px_rgba(0,0,0,0.05)]"
+                              style={{ color: menuTextColor }}
                             >
                               <span>{icon}</span>
-                              <span className="text-xs font-semibold text-[#888888]">Malzeme</span>
+                              <span className="text-xs font-semibold" style={{ color: menuMutedColor }}>Malzeme</span>
                             </span>
                           ))}
                         </div>
@@ -1652,12 +1631,13 @@ export default function MenuPage() {
                 })()}
               </div>
 
-              <div className="absolute inset-x-0 bottom-0 bg-[#fafafa]/95 backdrop-blur-xl border-t border-black/6 px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+              <div className="absolute inset-x-0 bottom-0 border-t border-black/6 px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
                 <div className="max-w-5xl mx-auto flex items-center gap-3">
                   <div className="flex items-center rounded-full bg-white px-2 py-2 shadow-[0_10px_24px_rgba(0,0,0,0.08)] border border-black/5">
                     <button
                       onClick={() => adjustDetailQuantity('dec')}
-                      className="h-9 w-9 rounded-full bg-[#f4f4f4] text-[#3d2b1f] text-xl flex items-center justify-center"
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-xl"
+                      style={{ background: menuSurfaceMuted, color: menuTextColor }}
                     >
                       −
                     </button>
@@ -1673,8 +1653,8 @@ export default function MenuPage() {
 
                   <button
                     onClick={handleAddFromSheet}
-                    className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
-                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                    className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm"
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 16px 28px ${withAlpha(menuPrimaryColor, 0.28)}` }}
                   >
                     Sepete Ekle — {formatPrice(selectedProduct.price * detailQuantity)}
                   </button>
@@ -1687,27 +1667,23 @@ export default function MenuPage() {
         {customerNameModal && (
           <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-end sm:items-center sm:justify-center">
             <div
-              className="w-full bg-[#fafafa] rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-[28px] sm:pb-6"
-              style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+              className="w-full rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-[28px] sm:pb-6"
+              style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
             >
               <div className="flex items-start justify-between gap-4 mb-5">
                 <div>
-                  <h2
-                    className="text-[24px] font-bold text-[#3d2b1f]"
-                    style={{ fontFamily: 'var(--font-playfair), serif' }}
-                  >
-                    İsminizi yazabilirsiniz
-                  </h2>
-                  <p className="text-sm text-[#888888] mt-1">
+                  <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>İsminizi yazabilirsiniz</h2>
+                  <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>
                     Siparişler kişi bazlı takip edilsin diye bu cihaz için adınızı kaydedebilir veya isimsiz devam edebilirsiniz.
                   </p>
                 </div>
                 {canDismissCustomerModal && (
                   <button
                     onClick={() => setCustomerNameModal(false)}
-                    className="h-10 w-10 rounded-full bg-white text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)] text-xl shrink-0"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
+                    style={{ color: menuTextColor }}
                   >
-                    ×
+                    <X className="h-5 w-5" />
                   </button>
                 )}
               </div>
@@ -1723,7 +1699,8 @@ export default function MenuPage() {
                 }}
                 placeholder="Örnek: Ahmet"
                 autoFocus
-                className="w-full rounded-[22px] bg-white px-4 py-4 text-base text-[#1a1a1a] outline-none border border-black/8 shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                className="w-full rounded-[22px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                style={{ color: menuTextColor }}
               />
 
               <div className="mt-5 flex gap-3">
@@ -1731,7 +1708,7 @@ export default function MenuPage() {
                   <button
                     onClick={() => setCustomerNameModal(false)}
                     className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold"
-                    style={{ background: '#fff', color: '#3d2b1f', border: '1px solid rgba(61,43,31,0.12)' }}
+                    style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
                   >
                     Vazgeç
                   </button>
@@ -1739,7 +1716,7 @@ export default function MenuPage() {
                 <button
                   onClick={handleContinueWithoutName}
                   className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold"
-                  style={{ background: '#fff', color: '#3d2b1f', border: '1px solid rgba(61,43,31,0.12)' }}
+                  style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
                 >
                   İsimsiz Devam Et
                 </button>
@@ -1759,70 +1736,64 @@ export default function MenuPage() {
         {callModal && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
             <div
-              className="w-full bg-[#fafafa] rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
-              style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+              className="w-full rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+              style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
             >
               {sent ? (
                 <div className="py-10 text-center">
-                  <div className="text-5xl mb-4">✅</div>
-                  <p
-                    className="text-[24px] font-bold text-[#3d2b1f]"
-                    style={{ fontFamily: 'var(--font-playfair), serif' }}
-                  >
-                    Çağrınız iletildi
-                  </p>
-                  <p className="text-sm text-[#888888] mt-2">Garsonunuz en kısa sürede yanınızda olacak.</p>
+                  <CircleCheckBig className="mx-auto mb-4 h-12 w-12 text-[var(--primary)]" />
+                  <p className="text-[24px] font-bold" style={{ color: menuTextColor }}>Çağrınız iletildi</p>
+                  <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>Garsonunuz en kısa sürede yanınızda olacak.</p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-5">
                     <div>
-                      <h2
-                        className="text-[24px] font-bold text-[#3d2b1f]"
-                        style={{ fontFamily: 'var(--font-playfair), serif' }}
-                      >
-                        Garson Çağır
-                      </h2>
-                      <p className="text-sm text-[#888888] mt-1">Talebinizi seçin, ekibi hızlıca bilgilendirelim.</p>
+                      <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>Garson Çağır</h2>
+                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>Talebinizi seçin, ekibi hızlıca bilgilendirelim.</p>
                     </div>
-                    <button onClick={closeCallModal} className="h-10 w-10 rounded-full bg-white text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)]">
-                      ×
+                    <button onClick={closeCallModal} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                      <X className="h-5 w-5" />
                     </button>
                   </div>
 
                   <div className="grid grid-cols-3 gap-3">
-                    {TIP_OPTIONS.map((opt) => {
+                    {TIP_OPTIONS.map((tip) => {
+                      const tipUi = getCallTipUi(tip)
+                      const TipIcon = tipUi.Icon
                       const tipDisabled =
-                        (opt.tip === 'yardım' && hasActiveHelpRequest) ||
-                        (opt.tip === 'hesap' && hasActivePaymentRequest)
+                        (tip === 'yardım' && hasActiveHelpRequest) ||
+                        (tip === 'hesap' && hasActivePaymentRequest)
 
                       return (
                         <button
-                          key={opt.tip}
+                          key={tip}
                           onClick={() => {
                             if (tipDisabled) return
-                            setSelectedTip(opt.tip)
+                            setSelectedTip(tip)
                             setActionMessage(null)
                           }}
                           disabled={tipDisabled}
                           className="rounded-[22px] px-3 py-4 text-left border shadow-[0_8px_20px_rgba(0,0,0,0.05)] transition-all disabled:opacity-60"
                           style={
-                            selectedTip === opt.tip && !tipDisabled
+                            selectedTip === tip && !tipDisabled
                               ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor }
-                              : { background: '#fff', borderColor: 'rgba(0,0,0,0.06)', color: '#1a1a1a' }
+                              : { background: '#fff', borderColor: menuBorderColor, color: menuTextColor }
                           }
                         >
-                          <div className="text-2xl mb-3">{opt.icon}</div>
+                          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl" style={{ background: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.14)' : tipUi.surface, color: selectedTip === tip && !tipDisabled ? menuPrimaryTextColor : tipUi.accent }}>
+                            <TipIcon className="h-5 w-5" />
+                          </div>
                           <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-bold">{opt.label}</p>
+                            <p className="text-sm font-bold">{tipUi.label}</p>
                             {tipDisabled && (
                               <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-semibold text-[#a16207]">
                                 Aktif
                               </span>
                             )}
                           </div>
-                          <p className={`text-[11px] mt-1 leading-4 ${selectedTip === opt.tip && !tipDisabled ? 'text-white/65' : 'text-[#888888]'}`}>
-                            {tipDisabled ? getTipLockMessage(opt.tip) : opt.desc}
+                          <p className="mt-1 text-[11px] leading-4" style={{ color: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.72)' : menuMutedColor }}>
+                            {tipDisabled ? getTipLockMessage(tip) : tipUi.description}
                           </p>
                         </button>
                       )
@@ -1833,7 +1804,8 @@ export default function MenuPage() {
                     value={note}
                     onChange={(event) => setNote(event.target.value)}
                     placeholder="İsterseniz küçük bir not ekleyin..."
-                    className="mt-4 w-full rounded-[22px] resize-none bg-white text-sm text-[#1a1a1a] px-4 py-4 outline-none border border-black/6 shadow-[0_8px_20px_rgba(0,0,0,0.04)]"
+                    className="mt-4 w-full resize-none rounded-[22px] border border-black/6 bg-white px-4 py-4 text-sm outline-none shadow-[0_8px_20px_rgba(0,0,0,0.04)]"
+                    style={{ color: menuTextColor }}
                     rows={3}
                   />
 
@@ -1859,31 +1831,21 @@ export default function MenuPage() {
         {cartDrawer && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
             <div
-              className="w-full bg-[#fafafa] rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto"
-              style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+              className="w-full max-h-[85vh] overflow-y-auto rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+              style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}
             >
               {orderSent ? (
                 <div className="py-10 text-center">
-                  <div className="text-5xl mb-4">✅</div>
-                  <p
-                    className="text-[24px] font-bold text-[#3d2b1f]"
-                    style={{ fontFamily: 'var(--font-playfair), serif' }}
-                  >
-                    Siparişiniz iletildi
-                  </p>
-                  <p className="text-sm text-[#888888] mt-2">Garsonunuz siparişinizi hazırlıyor.</p>
+                  <CircleCheckBig className="mx-auto mb-4 h-12 w-12 text-[var(--primary)]" />
+                  <p className="text-[24px] font-bold" style={{ color: menuTextColor }}>Siparişiniz iletildi</p>
+                  <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>Garsonunuz siparişinizi hazırlıyor.</p>
                 </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-5">
                     <div>
-                      <h2
-                        className="text-[24px] font-bold text-[#3d2b1f]"
-                        style={{ fontFamily: 'var(--font-playfair), serif' }}
-                      >
-                        Sepetim
-                      </h2>
-                      <p className="text-sm text-[#888888] mt-1">{cartCount} ürün • {formatPrice(cartTotal)}</p>
+                      <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>Sepetim</h2>
+                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{cartCount} ürün • {formatPrice(cartTotal)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {customerName && (
@@ -1892,24 +1854,26 @@ export default function MenuPage() {
                             setCustomerNameInput(customerName)
                             setCustomerNameModal(true)
                           }}
-                          className="rounded-full bg-white px-3 py-2 text-xs font-medium text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
+                          className="rounded-full bg-white px-3 py-2 text-xs font-medium shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
+                          style={{ color: menuTextColor }}
                         >
                           İsmi Değiştir
                         </button>
                       )}
                       <button
                         onClick={() => setCartDrawer(false)}
-                        className="h-10 w-10 rounded-full bg-white text-[#3d2b1f] shadow-[0_8px_18px_rgba(0,0,0,0.08)] text-xl"
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
+                        style={{ color: menuTextColor }}
                       >
-                        ×
+                        <X className="h-5 w-5" />
                       </button>
                     </div>
                   </div>
 
                   {cart.length === 0 ? (
                     <div className="py-12 text-center">
-                      <ShoppingBag size={48} className="mx-auto mb-3 text-gray-300" />
-                      <p className="text-sm text-[#888888]">Sepetiniz boş</p>
+                      <ShoppingCart size={48} className="mx-auto mb-3 text-[var(--primary)]" />
+                      <p className="text-sm" style={{ color: menuMutedColor }}>Sepetiniz boş</p>
                     </div>
                   ) : (
                     <>
@@ -1921,19 +1885,19 @@ export default function MenuPage() {
                           >
                             <div className="flex items-center justify-between gap-3 mb-3">
                               <div>
-                                <p className="font-semibold text-base text-[#3d2b1f]">{groupName}</p>
-                                <p className="text-xs text-[#888888] mt-1">{group.items.length} kalem ürün</p>
+                                <p className="font-semibold text-base" style={{ color: menuTextColor }}>{groupName}</p>
+                                <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{group.items.length} kalem ürün</p>
                               </div>
                               <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(group.total)}</p>
                             </div>
 
                             <div className="space-y-3">
                               {group.items.map((item) => (
-                                <div key={`${groupName}-${item.productId}`} className="rounded-2xl bg-[#faf7f4] px-3 py-3">
+                                <div key={`${groupName}-${item.productId}`} className="rounded-2xl px-3 py-3" style={{ background: menuSurfaceMuted }}>
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="flex-1 min-w-0">
-                                      <p className="font-semibold text-sm text-[#3d2b1f]">{item.name}</p>
-                                      <p className="text-xs text-[#888888] mt-1">Birim: {formatPrice(item.price)}</p>
+                                      <p className="font-semibold text-sm" style={{ color: menuTextColor }}>{item.name}</p>
+                                      <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>Birim: {formatPrice(item.price)}</p>
                                     </div>
                                     <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(item.price * item.quantity)}</p>
                                   </div>
@@ -1941,7 +1905,8 @@ export default function MenuPage() {
                                     <div className="flex items-center gap-2">
                                       <button
                                         onClick={() => updateCartItemQuantity(item.productId, item.customerName, -1)}
-                                        className="h-8 w-8 rounded-full bg-white text-[#3d2b1f] text-lg flex items-center justify-center"
+                                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg"
+                                        style={{ color: menuTextColor }}
                                       >
                                         −
                                       </button>
@@ -1976,12 +1941,12 @@ export default function MenuPage() {
                         <div className="space-y-2 mb-4">
                           {Object.entries(cartGrouped).map(([groupName, group]) => (
                             <div key={`${groupName}-summary`} className="flex items-center justify-between text-sm">
-                              <span className="font-medium text-[#3d2b1f]">{groupName}</span>
-                              <span className="font-semibold text-[#3d2b1f]">{formatPrice(group.total)}</span>
+                              <span className="font-medium" style={{ color: menuTextColor }}>{groupName}</span>
+                              <span className="font-semibold" style={{ color: menuTextColor }}>{formatPrice(group.total)}</span>
                             </div>
                           ))}
                           <div className="flex items-center justify-between pt-2 border-t border-black/6">
-                            <span className="text-sm font-semibold text-[#3d2b1f]">Masa Toplamı</span>
+                            <span className="text-sm font-semibold" style={{ color: menuTextColor }}>Masa Toplamı</span>
                             <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(cartTotal)}</span>
                           </div>
                         </div>
@@ -2007,18 +1972,18 @@ export default function MenuPage() {
             <div
               className="w-full max-w-lg rounded-t-3xl p-6"
               style={{
-                background: '#fefaf3',
+                background: 'var(--page-bg)',
                 paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))',
                 animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
             >
               {ratingSubmitted ? (
                 <div className="py-8 text-center">
-                  <div className="text-5xl mb-4">⭐</div>
-                  <p className="font-bold text-xl" style={{ color: '#3d2b1f', fontFamily: 'var(--font-playfair), serif' }}>
+                  <CircleCheckBig className="mx-auto mb-4 h-12 w-12 text-[var(--primary)]" />
+                  <p className="text-xl font-bold" style={{ color: menuTextColor }}>
                     Teşekkür ederiz
                   </p>
-                  <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '8px' }}>
+                  <p style={{ color: menuMutedColor, fontSize: '0.875rem', marginTop: '8px' }}>
                     Değerlendirmeniz başarıyla alındı.
                   </p>
                 </div>
@@ -2026,15 +1991,15 @@ export default function MenuPage() {
                 <>
                   <div className="flex items-start justify-between gap-4 mb-5">
                     <div>
-                      <h2 style={{ fontFamily: 'var(--font-playfair), serif', color: '#3d2b1f', fontSize: '1.3rem', fontWeight: 700 }}>
+                      <h2 style={{ color: menuTextColor, fontSize: '1.3rem', fontWeight: 700 }}>
                         Deneyiminizi değerlendirin
                       </h2>
-                      <p style={{ color: '#6b7280', fontSize: '0.875rem', marginTop: '8px', lineHeight: 1.5 }}>
+                      <p style={{ color: menuMutedColor, fontSize: '0.875rem', marginTop: '8px', lineHeight: 1.5 }}>
                         Hizmeti ve garson deneyimini birkaç saniyede puanlayabilirsiniz.
                       </p>
                     </div>
-                    <button onClick={closeRatingModal} style={{ color: '#9ca3af', fontSize: '1.5rem', lineHeight: 1 }}>
-                      ×
+                    <button onClick={closeRatingModal} style={{ color: menuMutedColor }}>
+                      <X className="h-5 w-5" />
                     </button>
                   </div>
 
@@ -2053,7 +2018,7 @@ export default function MenuPage() {
                     />
 
                     <div>
-                      <p className="text-sm font-semibold mb-2" style={{ color: '#3d2b1f' }}>
+                      <p className="mb-2 text-sm font-semibold" style={{ color: menuTextColor }}>
                         Yorumunuz
                       </p>
                       <textarea
@@ -2062,7 +2027,7 @@ export default function MenuPage() {
                         placeholder="Opsiyonel yorum yazın..."
                         className="w-full rounded-2xl resize-none text-sm"
                         rows={4}
-                        style={{ background: '#fff', border: '1px solid rgba(61,43,31,0.12)', padding: '14px', color: '#3d2b1f', outline: 'none' }}
+                        style={{ background: '#fff', border: `1px solid ${menuBorderColor}`, padding: '14px', color: menuTextColor, outline: 'none' }}
                       />
                     </div>
                   </div>
@@ -2077,7 +2042,7 @@ export default function MenuPage() {
                     <button
                       onClick={closeRatingModal}
                       className="flex-1 py-3.5 rounded-2xl font-semibold text-sm"
-                      style={{ background: '#fff', color: '#3d2b1f', border: '1px solid rgba(61,43,31,0.12)' }}
+                      style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
                     >
                       Daha sonra
                     </button>
@@ -2085,7 +2050,7 @@ export default function MenuPage() {
                       onClick={submitRating}
                       disabled={ratingSubmitDisabled}
                       className="flex-1 py-3.5 rounded-2xl font-bold text-sm disabled:opacity-50"
-                      style={{ background: '#3d2b1f', color: '#fefaf3' }}
+                      style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
                     >
                       {ratingSending ? 'Gönderiliyor...' : 'Gönder'}
                     </button>
@@ -2170,7 +2135,7 @@ function InfoTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[22px] bg-white px-4 py-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)]">
       <p className="text-xs uppercase tracking-[0.18em] text-[#888888]">{label}</p>
-      <p className="text-lg font-bold text-[#3d2b1f] mt-2">{value}</p>
+      <p className="mt-2 text-lg font-bold text-[var(--text)]">{value}</p>
     </div>
   )
 }
@@ -2189,7 +2154,7 @@ function StarRatingField({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-sm font-semibold" style={{ color: '#3d2b1f' }}>
+        <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
           {label}
         </p>
         <span className="text-xs font-semibold" style={{ color: '#9ca3af' }}>

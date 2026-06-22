@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
+import { Download, TriangleAlert } from 'lucide-react'
 import {
   getDocs, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
@@ -14,11 +15,8 @@ import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
 import { db, rd } from '@/lib/firebase'
-import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { DEFAULT_PRIMARY_COLOR, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
-
-const BROWN = '#3d2b1f'
-const GOLD  = '#d4a017'
 
 const STATUS_META: Record<TableStatus, {
   label: string; badgeBg: string; badgeText: string; border: string; cardBg: string; pulse?: boolean
@@ -70,6 +68,9 @@ export default function TablesPage() {
   const restaurantId = profile?.restaurantId || ''
   const menuSlug = settings?.slug?.trim() || restaurantId
   const businessName = resolveRestaurantBusinessName(settings)
+  const primaryColor = settings?.primaryColor || DEFAULT_PRIMARY_COLOR
+  const primaryText = 'var(--text)'
+  const primaryForeground = 'var(--primary-foreground)'
   const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
 
   // Delete mode state
@@ -122,14 +123,14 @@ export default function TablesPage() {
     Promise.all(
       tables.map(async (t) => {
         const url = `${origin}/menu/${menuSlug}/${t.number}`
-        const dataUrl = await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: BROWN, light: '#ffffff' } })
+        const dataUrl = await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: primaryColor, light: '#ffffff' } })
         return [t.id, dataUrl] as const
       })
     ).then((entries) => {
       if (!cancelled) setQrMap(Object.fromEntries(entries))
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [origin, tables, menuSlug])
+  }, [menuSlug, origin, primaryColor, tables])
 
   function getTableLink(tableNumber: number) {
     return `${origin || ''}/menu/${menuSlug}/${tableNumber}`
@@ -270,7 +271,7 @@ export default function TablesPage() {
         const table = tables[i]
         const link = getTableLink(table.number)
         const qrDataUrl = await QRCode.toDataURL(link, {
-          width: 600, margin: 2, color: { dark: BROWN, light: '#ffffff' },
+          width: 600, margin: 2, color: { dark: primaryColor, light: '#ffffff' },
         })
         const qrSize  = 120
         const xOffset = (210 - qrSize) / 2
@@ -370,7 +371,7 @@ export default function TablesPage() {
   }
 
   const inputCls =
-    'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
+    'theme-input rounded-lg text-sm'
 
   function formatCompletedPayment(ts: number) {
     return new Intl.DateTimeFormat('tr-TR', {
@@ -386,7 +387,7 @@ export default function TablesPage() {
       <div className="p-6 md:p-8">
         <div className="flex flex-col gap-4 mb-6 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="font-bold text-2xl" style={{ color: BROWN }}>Masa Yönetimi / QR</h1>
+            <h1 className="font-bold text-2xl" style={{ color: primaryText }}>Masa Yönetimi / QR</h1>
             <p className="text-gray-400 text-sm mt-0.5">{tables.length} masa kayıtlı{selectMode && selectedIds.size > 0 ? ` • ${selectedIds.size} seçili` : ''}</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -395,7 +396,7 @@ export default function TablesPage() {
                 <button
                   onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()) }}
                   className="font-semibold px-4 py-2.5 rounded-lg text-sm"
-                  style={{ background: selectMode ? GOLD : '#f3f4f6', color: selectMode ? BROWN : '#374151' }}
+                  style={{ background: selectMode ? primaryColor : '#f3f4f6', color: selectMode ? primaryForeground : '#374151' }}
                 >
                   {selectMode ? 'Seçimi İptal' : 'Seç'}
                 </button>
@@ -420,10 +421,11 @@ export default function TablesPage() {
             <button
               onClick={handleDownloadPDF}
               disabled={tables.length === 0 || pdfLoading}
-              className="font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50"
-              style={{ background: BROWN, color: '#fff' }}
+              className="inline-flex items-center gap-2 font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50"
+              style={{ background: primaryColor, color: primaryForeground }}
             >
-              {pdfLoading ? 'Hazırlanıyor...' : '⬇ PDF İndir'}
+              <Download size={16} />
+              {pdfLoading ? 'Hazırlanıyor...' : 'PDF İndir'}
             </button>
           </div>
         </div>
@@ -432,7 +434,7 @@ export default function TablesPage() {
         <div className="bg-white rounded-xl border border-gray-100 p-6 mb-8">
           <div className="flex flex-col lg:flex-row lg:items-end gap-4">
             <div className="w-full max-w-xs">
-              <label className="block text-sm font-medium mb-1" style={{ color: BROWN }}>Masa sayısı</label>
+              <label className="block text-sm font-medium mb-1" style={{ color: primaryText }}>Masa sayısı</label>
               <input
                 type="number" min={1} max={100} value={count}
                 onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
@@ -443,7 +445,7 @@ export default function TablesPage() {
               onClick={handleCreateTables}
               disabled={creating}
               className="font-semibold px-5 py-2.5 rounded-lg text-sm disabled:opacity-50"
-              style={{ background: GOLD, color: BROWN }}
+              style={{ background: primaryColor, color: primaryForeground }}
             >
               {creating ? 'Oluşturuluyor...' : 'Masaları Oluştur'}
             </button>
@@ -471,8 +473,12 @@ export default function TablesPage() {
               return (
                 <div
                   key={table.id}
-                  className={`rounded-2xl border-2 p-5 transition-all ${selectMode && selectedIds.has(table.id) ? 'ring-2 ring-offset-2 ring-[#d4a017]' : ''}`}
-                  style={{ borderColor: meta.border, background: meta.cardBg }}
+                  className="rounded-2xl border-2 p-5 transition-all ring-offset-2"
+                  style={{
+                    ...(selectMode && selectedIds.has(table.id) ? { boxShadow: '0 0 0 2px var(--primary)' } : {}),
+                    borderColor: meta.border,
+                    background: meta.cardBg,
+                  }}
                   onClick={selectMode ? () => toggleSelect(table.id) : undefined}
                 >
                   {/* Card header */}
@@ -483,12 +489,13 @@ export default function TablesPage() {
                           type="checkbox"
                           checked={selectedIds.has(table.id)}
                           onChange={() => toggleSelect(table.id)}
-                          className="w-5 h-5 rounded accent-[#d4a017]"
+                          className="w-5 h-5 rounded"
+                          style={{ accentColor: primaryColor }}
                           onClick={(e) => e.stopPropagation()}
                         />
                       )}
                       <div>
-                        <h2 className="font-bold text-xl" style={{ color: BROWN }}>Masa {table.number}</h2>
+                        <h2 className="font-bold text-xl" style={{ color: primaryText }}>Masa {table.number}</h2>
                         {openDuration && <p className="text-sm mt-0.5" style={{ color: '#4b5563' }}>{openDuration}</p>}
                       </div>
                     </div>
@@ -585,7 +592,7 @@ export default function TablesPage() {
           onClick={(e) => { if (e.target === e.currentTarget) setQrModalTable(null) }}
         >
           <div className="bg-white rounded-3xl p-8 w-full max-w-xs text-center shadow-2xl">
-            <h2 className="font-bold text-xl mb-1" style={{ color: BROWN }}>Masa {qrModalTable.number}</h2>
+            <h2 className="font-bold text-xl mb-1" style={{ color: primaryText }}>Masa {qrModalTable.number}</h2>
             <p className="text-xs text-gray-400 mb-5">{businessName}</p>
 
             <div className="flex items-center justify-center mb-5">
@@ -618,10 +625,11 @@ export default function TablesPage() {
               <button
                 onClick={() => handleDownloadSingleQR(qrModalTable)}
                 disabled={!qrMap[qrModalTable.id]}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50"
-                style={{ background: BROWN, color: '#fff' }}
+                className="inline-flex flex-1 items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50"
+                style={{ background: primaryColor, color: primaryForeground }}
               >
-                ⬇ İndir
+                <Download size={16} />
+                İndir
               </button>
             </div>
           </div>
@@ -636,8 +644,12 @@ export default function TablesPage() {
           onClick={(e) => { if (e.target === e.currentTarget && !deleting) setDeleteModal(null) }}
         >
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <div className="text-4xl mb-4 text-center">⚠️</div>
-            <h2 className="font-bold text-lg text-center mb-2" style={{ color: BROWN }}>
+            <div className="mb-4 flex justify-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-500">
+                <TriangleAlert className="h-7 w-7" />
+              </div>
+            </div>
+            <h2 className="font-bold text-lg text-center mb-2" style={{ color: primaryText }}>
               {deleteModal.type === 'single' ? 'Masayı Sil' : deleteModal.type === 'selected' ? 'Seçili Masaları Sil' : 'Tüm Masaları Sil'}
             </h2>
             <p className="text-sm text-gray-500 text-center mb-4">
@@ -649,7 +661,7 @@ export default function TablesPage() {
             </p>
             {deleteModal.hasActive && (
               <div className="rounded-xl px-4 py-3 mb-4 text-sm" style={{ background: '#fef3c7', color: '#a16207' }}>
-                ⚠️ Aktif veya çağrı bekleyen masa(lar) var. Yine de silmek istiyor musunuz?
+                Aktif veya çağrı bekleyen masa(lar) var. Yine de silmek istiyor musunuz?
               </div>
             )}
             <div className="flex gap-3">

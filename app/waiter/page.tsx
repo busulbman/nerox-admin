@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
-import { Bell, UtensilsCrossed, Armchair, ClipboardList } from 'lucide-react'
+import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, LogOut, Trophy, UtensilsCrossed } from 'lucide-react'
 import { auth, db, rd, rtdb } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
@@ -30,15 +30,15 @@ import { requestPermission, showNotification } from '@/lib/notifications'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import {
   DEFAULT_PRIMARY_COLOR,
-  DEFAULT_ACCENT_COLOR,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
+import { buildThemePalette, buildThemeStyleVars } from '@/lib/ui-theme'
 
 type Section = 'pending' | 'active' | 'done'
 type Tab = 'calls' | 'menu' | 'tables'
 
 const DEFAULT_BROWN = DEFAULT_PRIMARY_COLOR
-const DEFAULT_GOLD = DEFAULT_ACCENT_COLOR
+const DEFAULT_GOLD = 'var(--primary-soft)'
 
 const TABLE_STATUS_LABEL: Record<string, string> = {
   boş: 'Boş', aktif: 'Aktif', 'çağrı var': 'Çağrı Var',
@@ -78,8 +78,14 @@ export default function WaiterPage() {
   const restaurantId = profile?.restaurantId || ''
   const { settings: restaurantSettings } = useRestaurantSettings(restaurantId)
 
-  const BROWN = restaurantSettings?.primaryColor || DEFAULT_PRIMARY_COLOR
-  const GOLD = DEFAULT_ACCENT_COLOR
+  const themePalette = buildThemePalette(restaurantSettings?.primaryColor)
+  const themeVars = buildThemeStyleVars(themePalette.primary)
+  const BROWN = themePalette.primary
+  const PRIMARY_FOREGROUND = themePalette.primaryForeground
+  const GOLD = themePalette.primarySoft
+  const TEXT = themePalette.text
+  const SURFACE_MUTED = themePalette.surfaceMuted
+  const BORDER_SOFT = themePalette.borderSoft
   const businessName = resolveRestaurantBusinessName(restaurantSettings)
   const panelTitle = `${businessName} Garson Paneli`
   const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
@@ -100,7 +106,7 @@ export default function WaiterPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [products,   setProducts]   = useState<Product[]>([])
   const [activeCat,  setActiveCat]  = useState<string | null>(null)
-  const [menuLoaded, setMenuLoaded] = useState(false)
+  const [loadedMenuRestaurantId, setLoadedMenuRestaurantId] = useState<string | null>(null)
 
   // Tables
   const [tables,       setTables]       = useState<Table[]>([])
@@ -181,7 +187,7 @@ export default function WaiterPage() {
         const tips: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
         for (const call of pendingList) {
           if (!prevPendingIds.current.has(call.id)) {
-            showNotification('🔔 Yeni Çağrı!', `Masa ${getCallTableLabel(call)} — ${tips[call.tip] ?? call.tip}`, '/waiter')
+            showNotification('Yeni çağrı', `Masa ${getCallTableLabel(call)} — ${tips[call.tip] ?? call.tip}`, '/waiter')
           }
         }
       }
@@ -287,20 +293,23 @@ export default function WaiterPage() {
 
   // ─── Menu loader (once) ───────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || menuLoaded || !restaurantId) return
+    if (!profile || !restaurantId || loadedMenuRestaurantId === restaurantId) return
+
+    const currentRestaurantId = restaurantId
+
     async function loadMenu() {
       const [catSnap, prodSnap] = await Promise.all([
-        getDocs(getMenuCategoriesQuery(restaurantId)),
-        getDocs(getMenuProductsQuery(restaurantId)),
+        getDocs(getMenuCategoriesQuery(currentRestaurantId)),
+        getDocs(getMenuProductsQuery(currentRestaurantId)),
       ])
       const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
       setCategories(cats)
       setProducts(prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product)))
       setActiveCat(cats[0]?.id ?? null)
-      setMenuLoaded(true)
+      setLoadedMenuRestaurantId(currentRestaurantId)
     }
     loadMenu().catch(() => {})
-  }, [menuLoaded, profile, restaurantId])
+  }, [loadedMenuRestaurantId, profile, restaurantId])
 
   // ─── Tick for elapsed times ───────────────────────────────────────────────
   useEffect(() => {
@@ -413,17 +422,17 @@ export default function WaiterPage() {
   // ─── Guard state ──────────────────────────────────────────────────────────
   if (loading || !profile || profile.role !== 'waiter') {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
-        <p className="text-sm animate-pulse" style={{ color: 'rgba(61,43,31,0.4)' }}>Yükleniyor...</p>
+      <div className="theme-page flex min-h-screen items-center justify-center" style={themeVars}>
+        <p className="animate-pulse text-sm text-[var(--muted)]">Yükleniyor...</p>
       </div>
     )
   }
 
   if (!restaurantId) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: '#faf7f4' }}>
-        <div className="max-w-sm rounded-2xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-sm">
-          <p className="font-semibold text-lg" style={{ color: '#3d2b1f' }}>İşletme hesabı bulunamadı.</p>
+      <div className="theme-page flex min-h-screen items-center justify-center px-6" style={themeVars}>
+        <div className="theme-card max-w-sm rounded-[1.75rem] px-6 py-8 text-center">
+          <p className="text-lg font-semibold text-[var(--text)]">İşletme hesabı bulunamadı.</p>
           <p className="mt-2 text-sm text-gray-500">Garson hesabı için geçerli bir `restaurantId` tanımlanmalı.</p>
         </div>
       </div>
@@ -434,34 +443,42 @@ export default function WaiterPage() {
   const todayTs = getTodayStartTs()
   const todayRatingsCount  = myRatings.filter((r) => r.createdAt >= todayTs).length
   const avgWaiterRating    = average(myRatings.map((r) => r.waiterRating))
-  const visibleProducts    = products.filter((p) => p.categoryId === activeCat && p.available).sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+  const isCurrentMenuLoaded = loadedMenuRestaurantId === restaurantId
+  const menuCategories = isCurrentMenuLoaded ? categories : []
+  const menuProducts = isCurrentMenuLoaded ? products : []
+  const visibleProducts = menuProducts.filter((p) => p.categoryId === activeCat && p.available).sort((a, b) => a.name.localeCompare(b.name, 'tr'))
 
   return (
-    <div className="min-h-screen pb-20" style={{ background: '#faf7f4' }}>
+    <div className="theme-page min-h-screen pb-20" style={themeVars}>
 
       {/* ── Header ── */}
-      <header className="sticky top-0 z-20" style={{ background: BROWN }}>
+      <header
+        className="sticky top-0 z-20"
+        style={{ background: `linear-gradient(135deg, ${BROWN} 0%, ${BROWN}dd 100%)` }}
+      >
         <div className="px-5 pt-4 pb-3">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{panelTitle}</p>
-              <p className="font-bold text-lg leading-tight mt-0.5" style={{ color: GOLD }}>
-                Merhaba, {profile.name.split(' ')[0]} 👋
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.62)' }}>{panelTitle}</p>
+              <p className="font-bold text-lg leading-tight mt-0.5" style={{ color: PRIMARY_FOREGROUND }}>
+                Merhaba, {profile.name.split(' ')[0]}
               </p>
             </div>
             <div className="flex items-center gap-2 mt-1">
               <button
                 onClick={() => router.push('/waiter/leaderboard')}
-                className="text-xs px-3 py-1.5 rounded-lg"
-                style={{ background: 'rgba(212,160,23,0.2)', color: GOLD }}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2"
+                style={{ background: 'rgba(255,255,255,0.14)', color: PRIMARY_FOREGROUND }}
+                aria-label="Garson sıralaması"
               >
-                🏆
+                <Trophy className="h-4 w-4" />
               </button>
               <button
                 onClick={handleLogout}
-                className="text-xs px-3 py-1.5 rounded-lg"
-                style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium"
+                style={{ background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.86)' }}
               >
+                <LogOut className="h-3.5 w-3.5" />
                 Çıkış
               </button>
             </div>
@@ -469,9 +486,9 @@ export default function WaiterPage() {
 
           {activeTab === 'calls' && (
             <div className="flex gap-2 mt-3 pb-1">
-              <StatPill value={pending.length} label="Bekliyor" active={openSection === 'pending'} urgent={pending.length > 0} onClick={() => setOpenSection('pending')} primaryColor={BROWN} secondaryColor={GOLD} />
-              <StatPill value={active.length}  label="Aktifim"  active={openSection === 'active'}  onClick={() => setOpenSection('active')} primaryColor={BROWN} secondaryColor={GOLD} />
-              <StatPill value={done.length}    label="Bugün ✓"  active={openSection === 'done'}    onClick={() => setOpenSection('done')} primaryColor={BROWN} secondaryColor={GOLD} />
+              <StatPill value={pending.length} label="Bekliyor" active={openSection === 'pending'} urgent={pending.length > 0} onClick={() => setOpenSection('pending')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
+              <StatPill value={active.length}  label="Aktifim"  active={openSection === 'active'}  onClick={() => setOpenSection('active')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
+              <StatPill value={done.length}    label="Bugün"  active={openSection === 'done'}    onClick={() => setOpenSection('done')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
             </div>
           )}
         </div>
@@ -481,7 +498,7 @@ export default function WaiterPage() {
       {connectionLost && (
         <div
           className="px-4 py-2 text-center text-sm"
-          style={{ background: '#fef3c7', color: '#a16207' }}
+          style={{ background: SURFACE_MUTED, color: TEXT }}
         >
           Bağlantı koptu, yeniden bağlanılıyor...
         </div>
@@ -505,28 +522,28 @@ export default function WaiterPage() {
             {/* Puanlarım */}
             <section>
               <SectionHeader label="Puanlarım" count={myRatings.length} badge={myRatings.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
-              <div className="bg-white rounded-2xl border border-[#f0ede9] p-5">
+              <div className="theme-card rounded-2xl p-5">
                 <div className="grid grid-cols-3 gap-3 mb-4">
-                  <MiniStatCard label="Ortalama" value={avgWaiterRating === '—' ? '—' : `${avgWaiterRating} ★`} primaryColor={BROWN} />
-                  <MiniStatCard label="Toplam"   value={String(myRatings.length)} primaryColor={BROWN} />
-                  <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} primaryColor={BROWN} />
+                  <MiniStatCard label="Ortalama" value={avgWaiterRating === '—' ? '—' : `${avgWaiterRating} ★`} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+                  <MiniStatCard label="Toplam"   value={String(myRatings.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+                  <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
                 </div>
                 {myRatings.slice(0, 5).length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">Henüz yorum yok.</p>
                 ) : (
                   <div className="space-y-3">
                     {myRatings.slice(0, 5).map((r) => (
-                      <div key={r.id} className="rounded-xl px-4 py-3" style={{ background: '#faf7f4' }}>
+                      <div key={r.id} className="rounded-xl px-4 py-3" style={{ background: SURFACE_MUTED }}>
                         <div className="flex items-start justify-between gap-3 mb-2">
                           <div>
-                            <p className="text-sm font-semibold" style={{ color: BROWN }}>
+                            <p className="text-sm font-semibold" style={{ color: TEXT }}>
                               Masa {r.tableNumber > 0 ? r.tableNumber : r.tableId}
                             </p>
                             <p className="text-xs text-gray-400 mt-0.5">{formatDate(r.createdAt)}</p>
                           </div>
                           <div className="text-right">
                             <p className="text-xs text-gray-400">Garson</p>
-                            <p className="text-sm font-semibold" style={{ color: BROWN }}>{r.waiterRating}/5</p>
+                            <p className="text-sm font-semibold" style={{ color: TEXT }}>{r.waiterRating}/5</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-3 mb-2">
@@ -557,7 +574,7 @@ export default function WaiterPage() {
               <section>
                 <SectionHeader label="Bekleyen Çağrılar" count={pending.length} badge={pending.length > 0 ? 'red' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {pending.length === 0 ? (
-                  <EmptyState icon="✅" text="Bekleyen çağrı yok" />
+                  <EmptyState icon={<CircleCheckBig size={32} />} text="Bekleyen çağrı yok" />
                 ) : (
                   <div className="space-y-3">
                     {pending.map((call) => (
@@ -579,7 +596,7 @@ export default function WaiterPage() {
               <section>
                 <SectionHeader label="Aktif Çağrılarım" count={active.length} badge={active.length > 0 ? 'gold' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {active.length === 0 ? (
-                  <EmptyState icon="⏳" text="Aktif çağrın yok" />
+                  <EmptyState icon={<Clock3 size={32} />} text="Aktif çağrın yok" />
                 ) : (
                   <div className="space-y-3">
                     {active.map((call) => (
@@ -603,7 +620,7 @@ export default function WaiterPage() {
                 {done.length === 0 ? (
                   <EmptyState icon={<ClipboardList size={32} />} text="Henüz tamamlanan çağrı yok" />
                 ) : (
-                  <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #f0ede9' }}>
+                  <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', border: `1px solid ${BORDER_SOFT}` }}>
                     {done.map((call, i) => (
                       <div
                         key={call.id}
@@ -611,7 +628,7 @@ export default function WaiterPage() {
                         style={{ borderTop: i > 0 ? '1px solid #f9f7f5' : undefined }}
                       >
                         <div className="flex items-center gap-3">
-                          <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: '#faf7f4', color: BROWN }}>
+                          <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: SURFACE_MUTED, color: TEXT }}>
                             Masa {getCallTableLabel(call)}
                           </span>
                           <span className="text-sm text-gray-500">{tipLabel[call.tip] ?? call.tip}</span>
@@ -631,23 +648,23 @@ export default function WaiterPage() {
         {/* MENÜ TAB */}
         {activeTab === 'menu' && (
           <div>
-            {!menuLoaded ? (
+            {!isCurrentMenuLoaded ? (
               <div className="space-y-3">
                 {[1,2,3,4,5].map((i) => <div key={i} className="bg-white rounded-2xl h-16 animate-pulse border border-gray-100" />)}
               </div>
             ) : (
               <>
-                {categories.length > 0 && (
+                {menuCategories.length > 0 && (
                   <div className="flex gap-2 overflow-x-auto pb-3 mb-4 -mx-4 px-4">
-                    {categories.map((cat) => (
+                    {menuCategories.map((cat) => (
                       <button
                         key={cat.id}
                         onClick={() => setActiveCat(cat.id)}
                         className="shrink-0 px-4 py-2 rounded-full text-sm font-medium"
                         style={
                           activeCat === cat.id
-                            ? { background: BROWN, color: GOLD }
-                            : { background: '#fff', color: BROWN, border: '1px solid #f0ede9' }
+                            ? { background: BROWN, color: PRIMARY_FOREGROUND }
+                            : { background: '#fff', color: TEXT, border: `1px solid ${BORDER_SOFT}` }
                         }
                       >
                         {cat.name}
@@ -656,16 +673,19 @@ export default function WaiterPage() {
                   </div>
                 )}
                 {visibleProducts.length === 0 ? (
-                  <EmptyState icon={<UtensilsCrossed size={32} />} text="Bu kategoride ürün yok" />
+                  <EmptyState
+                    icon={<UtensilsCrossed size={32} />}
+                    text={menuProducts.some((product) => product.available) ? 'Bu kategoride ürün yok' : 'Henüz ürün eklenmedi'}
+                  />
                 ) : (
                   <div className="space-y-3">
                     {visibleProducts.map((p) => (
-                      <div key={p.id} className="bg-white rounded-2xl p-4 flex items-start justify-between gap-4" style={{ border: '1px solid #f0ede9' }}>
+                      <div key={p.id} className="rounded-2xl bg-white p-4" style={{ border: `1px solid ${BORDER_SOFT}` }}>
                         <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-sm" style={{ color: BROWN }}>{p.name}</p>
+                          <p className="font-semibold text-sm" style={{ color: TEXT }}>{p.name}</p>
                           {p.description && <p className="text-xs text-gray-400 mt-1 leading-5">{p.description}</p>}
                         </div>
-                        <p className="font-bold shrink-0" style={{ color: GOLD }}>₺{p.price}</p>
+                        <p className="font-bold shrink-0" style={{ color: BROWN }}>₺{p.price}</p>
                       </div>
                     ))}
                   </div>
@@ -714,11 +734,11 @@ export default function WaiterPage() {
                       className="rounded-2xl p-3 text-center transition-all disabled:opacity-60"
                       style={{
                         background: isBoş ? '#fff' : sc.bg,
-                        border: `2px solid ${isBoş ? '#e5e7eb' : sc.bg}`,
+                        border: `2px solid ${isBoş ? BORDER_SOFT : sc.bg}`,
                         boxShadow: isBoş ? '0 1px 4px rgba(0,0,0,0.06)' : undefined,
                       }}
                     >
-                      <p className="font-bold text-lg leading-none" style={{ color: isBoş ? BROWN : sc.text }}>
+                      <p className="font-bold text-lg leading-none" style={{ color: isBoş ? TEXT : sc.text }}>
                         {table.number}
                       </p>
                       <p className="text-xs mt-1.5" style={{ color: isBoş ? '#9ca3af' : sc.text }}>
@@ -736,7 +756,7 @@ export default function WaiterPage() {
       {/* ── Bottom nav ── */}
       <nav
         className="fixed bottom-0 left-0 right-0 flex border-t"
-        style={{ background: '#fff', borderColor: '#f0ede9', paddingBottom: 'env(safe-area-inset-bottom)' }}
+        style={{ background: '#fff', borderColor: BORDER_SOFT, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {([
           { id: 'calls' as Tab, Icon: Bell, label: 'Çağrılar', badge: pending.length > 0 ? pending.length : 0 },
@@ -805,16 +825,16 @@ function StatPill({ value, label, active, urgent, onClick, primaryColor = DEFAUL
 
 function EmptyState({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
-    <div className="rounded-2xl px-5 py-8 text-center" style={{ background: '#fff', border: '1px solid #f0ede9' }}>
+    <div className="rounded-2xl px-5 py-8 text-center" style={{ background: '#fff', border: '1px solid var(--border-soft)' }}>
       <div className="flex justify-center mb-2 text-gray-300">{icon}</div>
       <p className="text-sm text-gray-400">{text}</p>
     </div>
   )
 }
 
-function MiniStatCard({ label, value, primaryColor = DEFAULT_BROWN }: { label: string; value: string; primaryColor?: string }) {
+function MiniStatCard({ label, value, primaryColor = DEFAULT_BROWN, surfaceMuted = 'var(--surface-muted)' }: { label: string; value: string; primaryColor?: string; surfaceMuted?: string }) {
   return (
-    <div className="rounded-xl px-3 py-3 text-center" style={{ background: '#faf7f4' }}>
+    <div className="rounded-xl px-3 py-3 text-center" style={{ background: surfaceMuted }}>
       <p className="text-xs text-gray-400 mb-1">{label}</p>
       <p className="text-lg font-bold" style={{ color: primaryColor }}>{value}</p>
     </div>

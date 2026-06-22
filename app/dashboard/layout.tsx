@@ -10,6 +10,7 @@ import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/comp
 import { auth } from '@/lib/firebase'
 import { requestPermission, showLocalNotification } from '@/lib/notifications'
 import { getRestaurantAccessBlockMessage, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { buildThemeStyleVars } from '@/lib/ui-theme'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
@@ -32,17 +33,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !user || profile?.role === 'super_admin') {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
-        <p className="text-sm" style={{ color: 'rgba(61,43,31,0.4)' }}>Yükleniyor...</p>
+      <div className="theme-page flex min-h-screen items-center justify-center">
+        <p className="text-sm text-[var(--muted)]">Yükleniyor...</p>
       </div>
     )
   }
 
   if (!profile?.restaurantId) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: '#faf7f4' }}>
-        <div className="max-w-sm rounded-2xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-sm">
-          <p className="font-semibold text-lg" style={{ color: '#3d2b1f' }}>İşletme hesabı bulunamadı.</p>
+      <div className="theme-page flex min-h-screen items-center justify-center px-6">
+        <div className="theme-card max-w-sm rounded-[1.75rem] px-6 py-8 text-center">
+          <p className="text-lg font-semibold text-[var(--text)]">İşletme hesabı bulunamadı.</p>
           <p className="mt-2 text-sm text-gray-500">Kullanıcı profilinizde `restaurantId` tanımlı değil.</p>
         </div>
       </div>
@@ -106,10 +107,12 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
     router.replace('/login')
   }
 
+  const themeVars = buildThemeStyleVars(primaryColor)
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
-        <p className="text-sm" style={{ color: 'rgba(61,43,31,0.4)' }}>Yükleniyor...</p>
+      <div className="theme-page flex min-h-screen items-center justify-center">
+        <p className="text-sm text-[var(--muted)]">Yükleniyor...</p>
       </div>
     )
   }
@@ -118,10 +121,10 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   if (!user) return null
 
   return (
-    <div className="flex min-h-screen" style={{ background: '#faf7f4' }}>
+    <div className="theme-page flex min-h-screen" style={themeVars}>
       <header
         className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14"
-        style={{ background: primaryColor }}
+        style={{ background: 'var(--primary)' }}
       >
         <button
           onClick={() => setSidebarOpen(true)}
@@ -171,7 +174,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         {connectionLost && (
           <div
             className="px-4 py-2 text-center text-sm"
-            style={{ background: '#fef3c7', color: '#a16207' }}
+            style={{ background: 'var(--surface-muted)', color: 'var(--text)', borderBottom: '1px solid var(--border-soft)' }}
           >
             Bağlantı koptu, yeniden bağlanılıyor...
           </div>
@@ -179,7 +182,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         {accessBlockMessage && (
           <div
             className="px-4 py-3 text-center text-sm"
-            style={{ background: '#fff4e5', color: '#b54708' }}
+            style={{ background: 'var(--primary-soft)', color: 'var(--text)', borderBottom: '1px solid var(--border-soft)' }}
           >
             {accessBlockMessage} QR menü geçici olarak kullanılamıyor.
           </div>

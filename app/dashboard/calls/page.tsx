@@ -2,21 +2,21 @@
 
 import { useEffect, useState } from 'react'
 import { deleteDoc, doc, getDocs, writeBatch } from 'firebase/firestore'
+import { CircleCheckBig, ClipboardList } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import { completeRestaurantCall } from '@/lib/call-sync'
+import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { getCallCompletedAt, getCallTableLabel, isOpenWaiterCallStatus, normalizeWaiterCall } from '@/lib/firestore-models'
 import { getRestaurantRecentCompletedCallsQuery } from '@/lib/firestore-queries'
 import { db } from '@/lib/firebase'
 import type { WaiterCall } from '@/lib/types'
 
-const TIP_CONFIG: Record<string, { label: string; icon: string; border: string; bg: string }> = {
-  sipariş: { label: 'Sipariş', icon: '📋', border: '#fed7aa', bg: '#fff7ed' },
-  hesap: { label: 'Hesap', icon: '💳', border: '#bbf7d0', bg: '#f0fdf4' },
-  yardım: { label: 'Yardım', icon: '🙋', border: '#bfdbfe', bg: '#eff6ff' },
-}
+const PRIMARY = 'var(--primary)'
+const TEXT = 'var(--text)'
+const PRIMARY_FOREGROUND = 'var(--primary-foreground)'
 
 type CallsTab = 'open' | 'completed'
 
@@ -196,7 +196,7 @@ export default function CallsPage() {
     <div className="p-8">
       <div className="flex flex-col gap-4 mb-6 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>Garson Çağrıları</h1>
+          <h1 className="font-bold text-2xl" style={{ color: TEXT }}>Garson Çağrıları</h1>
           <p className="text-gray-400 text-sm mt-0.5">
             Açık çağrılar canlı dinlenir, tamamlananlar otomatik arşive düşer.
           </p>
@@ -206,7 +206,7 @@ export default function CallsPage() {
           <button
             onClick={() => handleTabChange('open')}
             className="rounded-xl px-4 py-2 text-sm font-semibold"
-            style={tab === 'open' ? { background: '#3d2b1f', color: '#fff' } : { color: '#6b7280' }}
+            style={tab === 'open' ? { background: PRIMARY, color: PRIMARY_FOREGROUND } : { color: '#6b7280' }}
           >
             Açık Çağrılar
             {openCalls.length > 0 ? ` (${openCalls.length})` : ''}
@@ -214,7 +214,7 @@ export default function CallsPage() {
           <button
             onClick={() => handleTabChange('completed')}
             className="rounded-xl px-4 py-2 text-sm font-semibold"
-            style={tab === 'completed' ? { background: '#d4a017', color: '#3d2b1f' } : { color: '#6b7280' }}
+            style={tab === 'completed' ? { background: PRIMARY, color: PRIMARY_FOREGROUND } : { color: '#6b7280' }}
           >
             Tamamlananlar
             {completedCalls.length > 0 ? ` (${completedCalls.length})` : ''}
@@ -230,7 +230,7 @@ export default function CallsPage() {
               setSelectedCompletedIds(new Set())
             }}
             className="rounded-xl px-4 py-2 text-sm font-semibold"
-            style={selectionMode ? { background: '#d4a017', color: '#3d2b1f' } : { background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb' }}
+            style={selectionMode ? { background: PRIMARY, color: PRIMARY_FOREGROUND } : { background: '#fff', color: '#6b7280', border: '1px solid var(--border-soft)' }}
           >
             {selectionMode ? 'Seçimi İptal' : 'Seç'}
           </button>
@@ -239,7 +239,7 @@ export default function CallsPage() {
             <button
               onClick={toggleSelectAllCompleted}
               className="rounded-xl px-4 py-2 text-sm font-semibold"
-              style={{ background: '#fff', color: '#3d2b1f', border: '1px solid #e5e7eb' }}
+              style={{ background: '#fff', color: TEXT, border: '1px solid var(--border-soft)' }}
             >
               {selectedCompletedIds.size === completedCalls.length ? 'Seçimi Kaldır' : 'Tümünü Seç'}
             </button>
@@ -269,12 +269,16 @@ export default function CallsPage() {
 
       {tab === 'completed' && completedLoading ? (
         <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-          <div className="text-4xl mb-3 animate-pulse">🧾</div>
+          <ClipboardList className="mx-auto mb-3 h-10 w-10 animate-pulse text-[var(--primary)]" />
           <p className="text-gray-400 text-sm">Tamamlanan çağrılar yükleniyor</p>
         </div>
       ) : visibleCalls.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-          <div className="text-4xl mb-3">{tab === 'open' ? '✅' : '🧾'}</div>
+          {tab === 'open' ? (
+            <CircleCheckBig className="mx-auto mb-3 h-10 w-10 text-[var(--primary)]" />
+          ) : (
+            <ClipboardList className="mx-auto mb-3 h-10 w-10 text-[var(--primary)]" />
+          )}
           <p className="text-gray-400 text-sm">
             {tab === 'open' ? 'Açık çağrı yok' : 'Henüz tamamlanan çağrı yok'}
           </p>
@@ -282,17 +286,23 @@ export default function CallsPage() {
       ) : tab === 'open' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {sortedOpenCalls.map((call) => {
-            const cfg = TIP_CONFIG[call.tip] ?? TIP_CONFIG.yardım
+            const tipUi = getCallTipUi(call.tip)
+            const TipIcon = tipUi.Icon
             return (
               <div
                 key={call.id}
                 className="bg-white rounded-xl p-5 flex flex-col gap-3 border-2"
-                style={{ borderColor: cfg.border, background: cfg.bg }}
+                style={{ borderColor: `${tipUi.accent}24`, background: tipUi.surface }}
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="text-3xl">{cfg.icon}</span>
-                    <p className="font-semibold mt-1" style={{ color: '#3d2b1f' }}>{cfg.label}</p>
+                    <div
+                      className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white"
+                      style={{ color: tipUi.accent }}
+                    >
+                      <TipIcon className="h-6 w-6" />
+                    </div>
+                    <p className="font-semibold mt-1" style={{ color: TEXT }}>{tipUi.label}</p>
                     <span
                       className="text-xs px-2 py-0.5 rounded-full mt-1 inline-block"
                       style={
@@ -305,20 +315,20 @@ export default function CallsPage() {
                     </span>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-bold" style={{ color: '#3d2b1f' }}>#{getCallTableLabel(call)}</div>
+                    <div className="text-2xl font-bold" style={{ color: TEXT }}>#{getCallTableLabel(call)}</div>
                     <div className="text-gray-400 text-xs">Masa</div>
                   </div>
                 </div>
 
                 {call.waiterName && (
                   <p className="text-xs text-gray-500">
-                    Garson: <span className="font-semibold text-[#3d2b1f]">{call.waiterName}</span>
+                    Garson: <span className="font-semibold text-[var(--text)]">{call.waiterName}</span>
                   </p>
                 )}
 
                 {call.customerName && call.tip !== 'sipariş' && (
                   <p className="text-xs text-gray-500">
-                    Müşteri: <span className="font-semibold text-[#3d2b1f]">{call.customerName}</span>
+                    Müşteri: <span className="font-semibold text-[var(--text)]">{call.customerName}</span>
                   </p>
                 )}
 
@@ -344,7 +354,8 @@ export default function CallsPage() {
       ) : (
         <div className="space-y-3">
           {completedCalls.map((call) => {
-            const cfg = TIP_CONFIG[call.tip] ?? TIP_CONFIG.yardım
+            const tipUi = getCallTipUi(call.tip)
+            const TipIcon = tipUi.Icon
             const completedAt = getCallCompletedAt(call)
             const selected = selectedCompletedIds.has(call.id)
 
@@ -352,7 +363,7 @@ export default function CallsPage() {
               <div
                 key={call.id}
                 className="bg-white rounded-2xl border px-5 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-                style={{ borderColor: selected ? '#d4a017' : '#f3f4f6', boxShadow: selected ? '0 0 0 2px rgba(212,160,23,0.15)' : undefined }}
+                style={{ borderColor: selected ? PRIMARY : 'var(--border-soft)', boxShadow: selected ? '0 0 0 2px var(--primary-soft)' : undefined }}
               >
                 <div className="flex items-start gap-4">
                   {selectionMode && (
@@ -360,18 +371,19 @@ export default function CallsPage() {
                       type="checkbox"
                       checked={selected}
                       onChange={() => toggleCompletedSelection(call.id)}
-                      className="mt-3 h-4 w-4 accent-[#d4a017]"
+                      className="mt-3 h-4 w-4"
+                      style={{ accentColor: PRIMARY }}
                     />
                   )}
                   <div
-                    className="w-11 h-11 rounded-2xl flex items-center justify-center text-2xl"
-                    style={{ background: cfg.bg }}
+                    className="w-11 h-11 rounded-2xl flex items-center justify-center"
+                    style={{ background: tipUi.surface, color: tipUi.accent }}
                   >
-                    {cfg.icon}
+                    <TipIcon className="h-5 w-5" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold" style={{ color: '#3d2b1f' }}>
+                      <p className="font-semibold" style={{ color: TEXT }}>
                         Masa {getCallTableLabel(call)}
                       </p>
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#dcfce7', color: '#15803d' }}>
@@ -379,12 +391,12 @@ export default function CallsPage() {
                       </span>
                     </div>
                     <p className="text-sm text-gray-500 mt-1">
-                      {cfg.label}
+                      {tipUi.label}
                       {call.waiterName ? ` • ${call.waiterName}` : ''}
                     </p>
                     {call.customerName && call.tip !== 'sipariş' && (
                       <p className="text-xs text-gray-500 mt-1">
-                        Müşteri: <span className="font-semibold text-[#3d2b1f]">{call.customerName}</span>
+                        Müşteri: <span className="font-semibold text-[var(--text)]">{call.customerName}</span>
                       </p>
                     )}
                     <OrderBreakdown call={call} className="mt-3" />

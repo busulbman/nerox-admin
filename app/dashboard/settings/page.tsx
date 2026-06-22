@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { Upload, Trash2, Link as LinkIcon } from 'lucide-react'
+import { Upload, Trash2, Link as LinkIcon, Wifi } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { db } from '@/lib/firebase'
 import {
@@ -174,7 +174,7 @@ export default function SettingsPage() {
     const trimmedSlug = generatedSlug
 
     if (trimmedPrimary && !isValidRestaurantThemeColor(trimmedPrimary)) {
-      setMessage({ tone: 'error', text: 'Ana renk geçerli bir hex renk olmalı. Örnek: #3d2b1f' })
+      setMessage({ tone: 'error', text: 'Ana renk geçerli bir hex renk olmalı. Örnek: #7c3aed' })
       return
     }
 
@@ -189,6 +189,9 @@ export default function SettingsPage() {
           slug: trimmedSlug,
           logoUrl: form.logoUrl.trim(),
           primaryColor: trimmedPrimary || DEFAULT_PRIMARY_COLOR,
+          wifiEnabled: form.wifiEnabled ?? false,
+          wifiName: form.wifiName?.trim() ?? '',
+          wifiPassword: form.wifiPassword ?? '',
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -220,8 +223,7 @@ export default function SettingsPage() {
   const previewLogoUrl = form.logoUrl.trim() || DEFAULT_BRAND_LOGO_PATH
   const menuLink = `/menu/${generatedSlug}/1`
 
-  const inputCls =
-    'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#3d2b1f] focus:ring-1 focus:ring-[#3d2b1f]'
+  const inputCls = 'theme-input rounded-lg text-sm'
 
   if (settingsLoading) {
     return (
@@ -238,7 +240,7 @@ export default function SettingsPage() {
   return (
     <div className="p-8">
       <div className="mb-6">
-        <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>
+        <h1 className="font-bold text-2xl text-[var(--text)]">
           Genel Ayarlar
         </h1>
         <p className="text-gray-400 text-sm mt-0.5">
@@ -247,8 +249,8 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,540px)_minmax(0,1fr)] gap-6 items-start">
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-[0_12px_30px_rgba(0,0,0,0.04)]">
-          <h2 className="font-semibold text-lg mb-1" style={{ color: '#3d2b1f' }}>
+        <div className="theme-card rounded-2xl p-6">
+          <h2 className="mb-1 text-lg font-semibold text-[var(--text)]">
             İşletme Bilgileri
           </h2>
           <p className="text-gray-400 text-sm mb-5">
@@ -257,7 +259,7 @@ export default function SettingsPage() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
+              <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
                 İşletme Adı
               </label>
               <input
@@ -269,10 +271,10 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
+              <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
                 Menü Linkiniz
               </label>
-              <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-3 border border-gray-200">
+              <div className="flex items-center gap-2 rounded-lg border border-[var(--border-soft)] bg-white px-3 py-3">
                 <LinkIcon size={14} className="text-gray-400 shrink-0" />
                 <code className="text-xs text-gray-600 flex-1 truncate">{menuLink}</code>
               </div>
@@ -282,7 +284,7 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
+              <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
                 Logo
               </label>
               <div className="flex items-center gap-3 mb-2">
@@ -298,7 +300,7 @@ export default function SettingsPage() {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
-                  style={{ color: '#3d2b1f' }}
+                  style={{ color: 'var(--text)', borderColor: 'var(--border-soft)' }}
                 >
                   <Upload size={16} />
                   {uploading ? 'Yükleniyor...' : 'Dosya Seç'}
@@ -330,7 +332,7 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: '#3d2b1f' }}>
+              <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
                 Tema Rengi
               </label>
               <div className="flex items-center gap-3">
@@ -350,6 +352,53 @@ export default function SettingsPage() {
               <p className="text-xs text-gray-400 mt-1">
                 Sidebar, butonlar, QR menü ve tüm vurgu alanları için kullanılır.
               </p>
+            </div>
+
+            <div className="pt-4 border-t border-[var(--border-soft)]">
+              <div className="flex items-center gap-3 mb-4">
+                <Wifi size={20} className="text-gray-500" />
+                <h3 className="font-semibold text-[var(--text)]">Wi-Fi Ayarları</h3>
+              </div>
+
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.wifiEnabled ?? false}
+                    onChange={(event) => setForm((current) => ({ ...current, wifiEnabled: event.target.checked }))}
+                    className="h-5 w-5 rounded border-gray-300 text-[var(--primary)] focus:ring-[var(--primary)]"
+                  />
+                  <span className="text-sm text-[var(--text)]">Wi-Fi bilgilerini menüde göster</span>
+                </label>
+
+                {form.wifiEnabled && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
+                        Wi-Fi Adı (SSID)
+                      </label>
+                      <input
+                        className={inputCls}
+                        value={form.wifiName ?? ''}
+                        onChange={(event) => setForm((current) => ({ ...current, wifiName: event.target.value }))}
+                        placeholder="Örnek: LocalCafe_WiFi"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
+                        Wi-Fi Şifresi
+                      </label>
+                      <input
+                        className={inputCls}
+                        value={form.wifiPassword ?? ''}
+                        onChange={(event) => setForm((current) => ({ ...current, wifiPassword: event.target.value }))}
+                        placeholder="Wi-Fi şifrenizi girin"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -378,10 +427,10 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-[0_12px_30px_rgba(0,0,0,0.04)]">
+        <div className="theme-card rounded-2xl p-6">
           <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">Canlı Önizleme</p>
 
-          <div className="rounded-[20px] overflow-hidden border border-gray-100">
+          <div className="overflow-hidden rounded-[20px] border border-[var(--border-soft)]">
             <div className="p-5" style={{ background: previewColor }}>
               <div className="flex items-center gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -400,9 +449,9 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="p-5 bg-[#faf7f4]">
+            <div className="p-5" style={{ background: 'var(--surface-muted)' }}>
               <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">QR Menü Linki</p>
-              <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-gray-100">
+              <div className="flex items-center gap-2 rounded-lg border border-[var(--border-soft)] bg-white px-3 py-2">
                 <LinkIcon size={14} className="text-gray-400" />
                 <code className="text-xs text-gray-600 flex-1 truncate">{menuLink}</code>
               </div>

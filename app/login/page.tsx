@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { signInWithEmailAndPassword } from 'firebase/auth'
 import { useRouter } from 'next/navigation'
+import { LockKeyhole } from 'lucide-react'
 import { auth } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
-import { DEFAULT_BRAND_LOGO_PATH } from '@/lib/restaurant-settings'
+import BrandAuthShell from '@/components/BrandAuthShell'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -14,9 +16,6 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const { user, profile, loading } = useAuth()
   const router = useRouter()
-  const businessName = 'Nerox'
-  const logoUrl = DEFAULT_BRAND_LOGO_PATH
-  const panelTitle = 'Yönetim Paneli'
 
   useEffect(() => {
     if (loading || !user) return
@@ -45,55 +44,76 @@ export default function LoginPage() {
   if (loading) return null
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: '#faf7f4' }}>
-      <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm border border-gray-100">
-        <div className="text-center mb-8">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logoUrl} alt={businessName} className="h-14 w-14 rounded-2xl object-cover mx-auto mb-3" />
-          <h1 className="font-bold text-2xl" style={{ color: '#3d2b1f' }}>{panelTitle}</h1>
-          <p className="text-gray-400 text-sm mt-1">Admin Girişi</p>
+    <BrandAuthShell
+      eyebrow="Güvenli yönetim erişimi"
+      title="Yönetim Paneline Giriş"
+      description="QR menü, masa, ürün ve sipariş yönetiminize güvenli şekilde erişin."
+      alternateHref="/waiter/login"
+      alternateLabel="Garson girişi"
+      alternateText="Garson hesabıyla devam edecekseniz"
+    >
+      <div className="mb-7">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-[#d8c3ff]">
+          <LockKeyhole className="h-3.5 w-3.5" />
+          Nerox Studio
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#3d2b1f' }}>E-posta</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
-              placeholder="admin@isletme.com"
-              required
-              autoComplete="email"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: '#3d2b1f' }}>Şifre</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]"
-              placeholder="••••••••"
-              required
-              autoComplete="current-password"
-            />
-          </div>
-          {error && <p className="text-red-500 text-sm">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full font-semibold py-2.5 rounded-lg disabled:opacity-50 text-sm"
-            style={{ background: '#d4a017', color: '#3d2b1f' }}
-          >
-            {submitting ? 'Giriş yapılıyor...' : 'Giriş Yap'}
-          </button>
-        </form>
-        <p className="text-center mt-5">
-          <a href="/waiter/login" className="text-xs text-gray-400 hover:text-gray-600">
-            Garson girişi →
-          </a>
+        <p className="mt-4 text-sm leading-6 text-white/60">
+          İşletme hesabınızla giriş yapın. Super admin kullanıcıları otomatik olarak kendi paneline yönlendirilir.
         </p>
       </div>
-    </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-white/82">E-posta</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="theme-input"
+            placeholder="admin@isletme.com"
+            required
+            autoComplete="email"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-sm font-medium text-white/82">Şifre</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="theme-input"
+            placeholder="••••••••"
+            required
+            autoComplete="current-password"
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3">
+            <p className="text-sm text-red-200">{error}</p>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="theme-button-primary w-full rounded-2xl px-5 py-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-55"
+        >
+          {submitting ? 'Giriş yapılıyor...' : 'Giriş Yap'}
+        </button>
+
+        <p className="text-center text-xs leading-5 text-white/48">
+          Giriş yaparak{' '}
+          <Link href="/terms" className="text-white/68 underline decoration-white/15 underline-offset-2 transition hover:text-white">
+            Kullanım Şartları
+          </Link>{' '}
+          ve{' '}
+          <Link href="/privacy" className="text-white/68 underline decoration-white/15 underline-offset-2 transition hover:text-white">
+            Gizlilik Politikası’nı
+          </Link>{' '}
+          kabul etmiş olursunuz.
+        </p>
+      </form>
+    </BrandAuthShell>
   )
 }

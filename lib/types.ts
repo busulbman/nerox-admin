@@ -40,7 +40,25 @@ export interface RestaurantGeneralSettings {
   slug: string
   logoUrl: string
   primaryColor: string
+  wifiEnabled?: boolean
+  wifiName?: string
+  wifiPassword?: string
   updatedAt?: number | null
+}
+
+export interface SharedCartItem {
+  id: string
+  sessionId: string
+  customerId: string
+  customerName: string
+  productId: string
+  productName: string
+  productDescription?: string
+  productImage?: string
+  price: number
+  quantity: number
+  createdAt: number
+  updatedAt: number
 }
 
 export type RestaurantStatus = 'active' | 'passive'

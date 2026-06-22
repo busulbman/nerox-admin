@@ -18,8 +18,16 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import {
+  type LucideIcon,
+  Armchair,
+  Bell,
+  CircleCheckBig,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { useOpenCalls } from "@/components/dashboard/OpenCallsProvider";
+import { getCallTipUi } from "@/lib/call-tip-ui";
 import { db } from "@/lib/firebase";
 import { logFirestoreRead } from "@/lib/firestore-debug";
 import {
@@ -35,15 +43,8 @@ import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsPro
 import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import type { WaiterCall, Table } from "@/lib/types";
 
-const BROWN = "#3d2b1f";
-const GOLD = "#d4a017";
-
-const TIP_CFG: Record<string, { label: string; icon: string; color: string }> =
-  {
-    sipariş: { label: "Sipariş", icon: "📋", color: "#f97316" },
-    hesap: { label: "Hesap", icon: "💳", color: "#10b981" },
-    yardım: { label: "Yardım", icon: "🙋", color: "#3b82f6" },
-  };
+const TEXT = "var(--text)";
+const PRIMARY = "var(--primary)";
 
 function getTodayStart() {
   const d = new Date();
@@ -208,7 +209,7 @@ export default function DashboardPage() {
   return (
     <div className="p-6 md:p-8">
       <div className="mb-6">
-        <h1 className="font-bold text-2xl" style={{ color: BROWN }}>
+        <h1 className="font-bold text-2xl" style={{ color: TEXT }}>
           Genel Bakış
         </h1>
         <p className="text-gray-400 text-sm mt-0.5">
@@ -219,19 +220,19 @@ export default function DashboardPage() {
       {/* ── Üst istatistikler ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <StatCard
-          icon="🔔"
+          Icon={Bell}
           label="Bekleyen Çağrı"
           value={pendingCalls.length}
           urgent={pendingCalls.length > 0}
           onClick={() => router.push("/dashboard/calls")}
         />
-        <StatCard icon="🪑" label="Aktif Masa" value={activeTables} />
+        <StatCard Icon={Armchair} label="Aktif Masa" value={activeTables} />
         <StatCard
-          icon="✅"
+          Icon={CircleCheckBig}
           label="Bugün Tamamlanan"
           value={todayCompleted.length}
         />
-        <StatCard icon="👨‍🍳" label="Aktif Garson" value={activeWaiters} />
+        <StatCard Icon={Users} label="Aktif Garson" value={activeWaiters} />
       </div>
 
       {/* ── Orta bölüm ───────────────────────────────────────────────────── */}
@@ -239,16 +240,16 @@ export default function DashboardPage() {
         {/* Canlı çağrılar */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-lg" style={{ color: BROWN }}>
+            <h2 className="font-semibold text-lg" style={{ color: TEXT }}>
               Bekleyen Çağrılar
             </h2>
             <button
               onClick={() => router.push("/dashboard/calls")}
               className="text-xs font-medium px-3 py-1.5 rounded-lg"
               style={{
-                background: "#faf7f4",
-                color: BROWN,
-                border: "1px solid #e9e2da",
+                background: "var(--surface-muted)",
+                color: TEXT,
+                border: "1px solid var(--border-soft)",
               }}
             >
               Tümünü Gör →
@@ -257,32 +258,38 @@ export default function DashboardPage() {
 
           {top5Pending.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
-              <p className="text-3xl mb-2">✅</p>
+              <CircleCheckBig className="mx-auto mb-2 h-8 w-8 text-[var(--primary)]" />
               <p className="text-gray-400 text-sm">Bekleyen çağrı yok</p>
             </div>
           ) : (
             <div className="space-y-2">
               {top5Pending.map((call) => {
-                const cfg = TIP_CFG[call.tip] ?? TIP_CFG.yardım;
+                const tipUi = getCallTipUi(call.tip);
+                const TipIcon = tipUi.Icon;
                 return (
                   <div
                     key={call.id}
                     className="bg-white rounded-2xl border border-gray-100 px-5 py-3.5 flex items-center justify-between gap-4 hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-xl">{cfg.icon}</span>
+                      <span
+                        className="flex h-10 w-10 items-center justify-center rounded-2xl"
+                        style={{ background: tipUi.surface, color: tipUi.accent }}
+                      >
+                        <TipIcon className="h-5 w-5" />
+                      </span>
                       <div>
                         <p
                           className="font-semibold text-sm"
-                          style={{ color: BROWN }}
+                          style={{ color: TEXT }}
                         >
                           Masa {getCallTableLabel(call)}
                         </p>
                         <p
                           className="text-xs mt-0.5"
-                          style={{ color: cfg.color }}
+                          style={{ color: tipUi.accent }}
                         >
-                          {cfg.label}
+                          {tipUi.label}
                         </p>
                       </div>
                     </div>
@@ -303,7 +310,7 @@ export default function DashboardPage() {
 
         {/* Günün özeti */}
         <section>
-          <h2 className="font-semibold text-lg mb-3" style={{ color: BROWN }}>
+          <h2 className="font-semibold text-lg mb-3" style={{ color: TEXT }}>
             Günün Özeti
           </h2>
           <div className="grid grid-cols-3 gap-3 mb-4">
@@ -322,7 +329,7 @@ export default function DashboardPage() {
 
           {/* Saatlik grafik */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <p className="text-sm font-semibold mb-4" style={{ color: BROWN }}>
+            <p className="text-sm font-semibold mb-4" style={{ color: TEXT }}>
               Son 8 Saat — Çağrı Dağılımı
             </p>
             <ResponsiveContainer width="100%" height={140}>
@@ -332,7 +339,7 @@ export default function DashboardPage() {
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  stroke="#f0ede9"
+                  stroke="var(--border-soft)"
                   vertical={false}
                 />
                 <XAxis
@@ -350,15 +357,15 @@ export default function DashboardPage() {
                 <Tooltip
                   contentStyle={{
                     borderRadius: "10px",
-                    border: "1px solid #f0ede9",
+                    border: "1px solid var(--border-soft)",
                     fontSize: "12px",
                   }}
                   formatter={(value) => [value, "Çağrı"]}
-                  cursor={{ fill: "rgba(212,160,23,0.08)" }}
+                  cursor={{ fill: "var(--primary-soft)" }}
                 />
                 <Bar
                   dataKey="count"
-                  fill={GOLD}
+                  fill={PRIMARY}
                   radius={[4, 4, 0, 0]}
                   maxBarSize={32}
                 />
@@ -374,13 +381,13 @@ export default function DashboardPage() {
 // ─── Alt bileşenler ──────────────────────────────────────────────────────────
 
 function StatCard({
-  icon,
+  Icon,
   label,
   value,
   urgent,
   onClick,
 }: {
-  icon: string;
+  Icon: LucideIcon;
   label: string;
   value: number;
   urgent?: boolean;
@@ -390,16 +397,18 @@ function StatCard({
     <div
       className={`bg-white rounded-2xl p-5 border-2 transition-shadow${onClick ? " cursor-pointer hover:shadow-md" : ""}`}
       style={{
-        borderColor: urgent ? GOLD : "#f0ede9",
-        boxShadow: urgent ? "0 2px 12px rgba(212,160,23,0.12)" : undefined,
+        borderColor: urgent ? PRIMARY : "var(--border-soft)",
+        boxShadow: urgent ? "0 18px 32px var(--primary-soft)" : undefined,
       }}
       onClick={onClick}
     >
-      <div className="text-2xl mb-2">{icon}</div>
+      <div className="mb-2">
+        <Icon className="h-6 w-6" style={{ color: urgent ? PRIMARY : TEXT }} />
+      </div>
       <div className="flex items-center gap-2">
         <span
           className="text-3xl font-bold"
-          style={{ color: urgent ? GOLD : BROWN }}
+          style={{ color: urgent ? PRIMARY : TEXT }}
         >
           {value}
         </span>
@@ -424,7 +433,7 @@ function SummaryCard({
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center">
       <p className="text-xs text-gray-400 mb-1">{label}</p>
-      <p className="font-bold text-lg leading-tight" style={{ color: BROWN }}>
+      <p className="font-bold text-lg leading-tight" style={{ color: TEXT }}>
         {value}
       </p>
       {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}

@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { addDoc, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, updateDoc, writeBatch } from 'firebase/firestore'
 import { Upload, Trash2, Image as ImageIcon, FileUp, Settings, Pencil, Trash, Check, Square } from 'lucide-react'
 import { db, rc, rd } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
-import { DEFAULT_MENU_PRIMARY_COLOR, isValidMenuPrimaryColor, getMenuPrimaryTextColor } from '@/lib/menu-theme'
 import type { Category, Product } from '@/lib/types'
 
 type ProdForm = { name: string; description: string; price: string; categoryId: string; available: boolean; image: string }
@@ -27,8 +26,11 @@ type ImportResult = {
 
 const EMPTY_PROD: ProdForm = { name: '', description: '', price: '', categoryId: '', available: true, image: '' }
 
-const BROWN = '#3d2b1f'
-const GOLD = '#d4a017'
+const PRIMARY = 'var(--primary)'
+const PRIMARY_FOREGROUND = 'var(--primary-foreground)'
+const SURFACE = 'var(--surface)'
+const TEXT = 'var(--text)'
+const BORDER_SOFT = 'var(--border-soft)'
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
 
@@ -132,9 +134,12 @@ async function uploadToImgBB(file: File): Promise<{ success: true; url: string }
 export default function MenuPage() {
   const { profile } = useAuth()
   const restaurantId = profile?.restaurantId || ''
+  const isDevelopment = process.env.NODE_ENV === 'development'
 
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [categoriesRestaurantId, setCategoriesRestaurantId] = useState<string | null>(null)
+  const [productsRestaurantId, setProductsRestaurantId] = useState<string | null>(null)
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null)
 
   const [catModal, setCatModal] = useState<{ open: boolean; editing?: Category }>({ open: false })
@@ -152,28 +157,29 @@ export default function MenuPage() {
   const [bulkErrors, setBulkErrors] = useState<string[]>([])
   const [bulkStep, setBulkStep] = useState<'input' | 'preview' | 'importing' | 'done'>('input')
   const [bulkResult, setBulkResult] = useState<ImportResult | null>(null)
-
-  const [menuColor, setMenuColor] = useState(DEFAULT_MENU_PRIMARY_COLOR)
-  const [menuColorSaving, setMenuColorSaving] = useState(false)
-  const [menuColorMessage, setMenuColorMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
-  const menuColorInitialized = useRef(false)
   const categoryDocRef = (categoryId: string) => rd(restaurantId, 'categories', categoryId)
   const productDocRef = (productId: string) => rd(restaurantId, 'products', productId)
 
   useEffect(() => {
     if (!restaurantId) return
 
+    const currentRestaurantId = restaurantId
+
     const unsubCats = onSnapshot(
-      query(rc(restaurantId, 'categories'), orderBy('order', 'asc')),
+      query(rc(currentRestaurantId, 'categories'), orderBy('order', 'asc')),
       (snapshot) => {
         const cats = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Category))
         setCategories(cats)
-        setSelectedCatId((prev) => prev ?? (cats[0]?.id ?? null))
+        setCategoriesRestaurantId(currentRestaurantId)
+        setSelectedCatId((prev) => (prev && cats.some((category) => category.id === prev) ? prev : (cats[0]?.id ?? null)))
       }
     )
     const unsubProds = onSnapshot(
-      query(rc(restaurantId, 'products'), orderBy('name', 'asc')),
-      (snapshot) => setProducts(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Product)))
+      query(rc(currentRestaurantId, 'products'), orderBy('name', 'asc')),
+      (snapshot) => {
+        setProducts(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Product)))
+        setProductsRestaurantId(currentRestaurantId)
+      }
     )
     return () => {
       unsubCats()
@@ -181,34 +187,12 @@ export default function MenuPage() {
     }
   }, [restaurantId])
 
-  useEffect(() => {
-    if (!restaurantId || menuColorInitialized.current) return
-    if (menuColorInitialized.current) return
-
-    async function loadMenuSettings() {
-      try {
-        const snap = await getDoc(doc(db, 'restaurants', restaurantId, 'settings', 'menu'))
-        if (snap.exists()) {
-          const data = snap.data()
-          if (typeof data.menuPrimaryColor === 'string' && isValidMenuPrimaryColor(data.menuPrimaryColor)) {
-            setMenuColor(data.menuPrimaryColor)
-          }
-        }
-        menuColorInitialized.current = true
-      } catch (error) {
-        console.error('Menu settings load error:', error)
-      }
-    }
-
-    void loadMenuSettings()
-  }, [restaurantId])
-
   async function saveCat() {
     if (!catName.trim()) return
     if (catModal.editing) {
       await updateDoc(categoryDocRef(catModal.editing.id), { name: catName.trim() })
     } else {
-      const maxOrder = categories.length > 0 ? Math.max(...categories.map((category) => category.order)) : 0
+      const maxOrder = tenantCategories.length > 0 ? Math.max(...tenantCategories.map((category) => category.order)) : 0
       await addDoc(rc(restaurantId, 'categories'), { name: catName.trim(), order: maxOrder + 1 })
     }
     setCatModal({ open: false })
@@ -217,7 +201,7 @@ export default function MenuPage() {
   async function deleteCat(catId: string) {
     if (!confirm('Bu kategoriyi silmek istediğinizden emin misiniz?')) return
     await deleteDoc(categoryDocRef(catId))
-    setSelectedCatId((prev) => (prev === catId ? (categories.find((category) => category.id !== catId)?.id ?? null) : prev))
+    setSelectedCatId((prev) => (prev === catId ? (tenantCategories.find((category) => category.id !== catId)?.id ?? null) : prev))
   }
 
   async function handleProdImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -293,7 +277,7 @@ export default function MenuPage() {
     const categoryNames = [...new Set(validItems.map((item) => item.category))]
 
     const categoryMap = new Map<string, string>()
-    for (const cat of categories) {
+    for (const cat of tenantCategories) {
       categoryMap.set(cat.name.toLowerCase(), cat.id)
     }
 
@@ -302,7 +286,7 @@ export default function MenuPage() {
     let productsUpdated = 0
 
     const batch = writeBatch(db)
-    let maxOrder = categories.length > 0 ? Math.max(...categories.map((c) => c.order)) : 0
+    let maxOrder = tenantCategories.length > 0 ? Math.max(...tenantCategories.map((c) => c.order)) : 0
 
     for (const catName of categoryNames) {
       const existing = categoryMap.get(catName.toLowerCase())
@@ -323,7 +307,7 @@ export default function MenuPage() {
       const categoryId = categoryMap.get(item.category.toLowerCase())
       if (!categoryId) continue
 
-      const existingProduct = products.find(
+      const existingProduct = tenantProducts.find(
         (p) => p.name.toLowerCase() === item.name.toLowerCase() && p.categoryId === categoryId
       )
 
@@ -364,42 +348,20 @@ export default function MenuPage() {
     setBulkResult(null)
   }
 
-  async function saveMenuColor() {
-    if (!isValidMenuPrimaryColor(menuColor)) {
-      setMenuColorMessage({ tone: 'error', text: 'Geçerli bir hex renk girin. Örnek: #d4a017' })
-      return
-    }
+  const tenantCategories = categoriesRestaurantId === restaurantId ? categories : []
+  const tenantProducts = productsRestaurantId === restaurantId ? products : []
 
-    setMenuColorSaving(true)
-    setMenuColorMessage(null)
-
-    try {
-      await setDoc(
-        doc(db, 'restaurants', restaurantId, 'settings', 'menu'),
-        { menuPrimaryColor: menuColor, updatedAt: serverTimestamp() },
-        { merge: true }
-      )
-      setMenuColorMessage({ tone: 'success', text: 'Menü rengi kaydedildi.' })
-    } catch (error) {
-      console.error('Menu color save error:', error)
-      setMenuColorMessage({ tone: 'error', text: 'Renk kaydedilemedi. Lütfen tekrar deneyin.' })
-    } finally {
-      setMenuColorSaving(false)
-    }
-  }
-
-  const visibleProducts = products.filter((product) => product.categoryId === selectedCatId)
-  const selectedCat = categories.find((category) => category.id === selectedCatId)
-  const inputCls = 'w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-[#d4a017] focus:ring-1 focus:ring-[#d4a017]'
+  const visibleProducts = tenantProducts.filter((product) => product.categoryId === selectedCatId)
+  const selectedCat = tenantCategories.find((category) => category.id === selectedCatId)
+  const inputCls = 'theme-input rounded-xl text-sm'
   const validItemsCount = bulkParsed.filter((i) => i.valid).length
   const invalidItemsCount = bulkParsed.filter((i) => !i.valid).length
-  const menuColorPreviewTextColor = getMenuPrimaryTextColor(menuColor)
 
   return (
     <div className="p-8">
       <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="font-bold text-2xl" style={{ color: BROWN }}>Menü Yönetimi</h1>
+          <h1 className="font-bold text-2xl" style={{ color: TEXT }}>Menü Yönetimi</h1>
           <p className="text-gray-400 text-sm mt-0.5">Menü içerikleri ve QR menü görünümü buradan yönetilir.</p>
           {process.env.NODE_ENV === 'development' && restaurantId && (
             <p className="text-[11px] mt-2 font-mono text-gray-400">Aktif restaurantId: {restaurantId}</p>
@@ -407,18 +369,20 @@ export default function MenuPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setBulkModal(true)}
-            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
-            style={{ background: GOLD, color: BROWN }}
-          >
-            <FileUp size={16} />
-            Toplu Ürün Ekle
-          </button>
+          {isDevelopment && (
+            <button
+              onClick={() => setBulkModal(true)}
+              className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
+              style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
+            >
+              <FileUp size={16} />
+              Toplu Ürün Ekle
+            </button>
+          )}
           <Link
             href="/dashboard/settings"
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold border border-gray-200 hover:bg-gray-50 transition-colors"
-            style={{ color: BROWN }}
+            style={{ color: TEXT, borderColor: BORDER_SOFT, background: SURFACE }}
           >
             <Settings size={16} />
             Genel Ayarlar
@@ -426,73 +390,29 @@ export default function MenuPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-6 shadow-[0_8px_24px_rgba(0,0,0,0.04)]">
-        <h2 className="font-semibold text-sm mb-3" style={{ color: BROWN }}>QR Menü Rengi</h2>
-        <p className="text-xs text-gray-400 mb-4">
-          QR menüdeki butonlar, kategori sekmeleri ve vurgu renkleri için ayrı bir renk belirleyin.
-          Belirlenmezse genel ayarlardaki ana renk kullanılır.
-        </p>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={menuColor}
-              onChange={(e) => setMenuColor(e.target.value)}
-              className="h-10 w-12 rounded-lg border border-gray-200 bg-white p-1 cursor-pointer"
-            />
-            <input
-              className="w-28 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#d4a017]"
-              value={menuColor}
-              onChange={(e) => setMenuColor(e.target.value)}
-              placeholder="#d4a017"
-            />
-          </div>
-          <button
-            onClick={() => void saveMenuColor()}
-            disabled={menuColorSaving}
-            className="px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-            style={{ background: menuColor, color: menuColorPreviewTextColor }}
-          >
-            {menuColorSaving ? 'Kaydediliyor...' : 'Kaydet'}
-          </button>
-          {menuColorMessage && (
-            <span
-              className="text-xs px-3 py-1.5 rounded-full"
-              style={
-                menuColorMessage.tone === 'success'
-                  ? { background: '#dcfce7', color: '#15803d' }
-                  : { background: '#fee2e2', color: '#b91c1c' }
-              }
-            >
-              {menuColorMessage.text}
-            </span>
-          )}
-        </div>
-      </div>
-
       <div className="flex gap-6">
         <div className="w-52 shrink-0">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold" style={{ color: BROWN }}>Kategoriler</span>
+            <span className="text-sm font-semibold" style={{ color: TEXT }}>Kategoriler</span>
             <button
               onClick={() => {
                 setCatName('')
                 setCatModal({ open: true })
               }}
               className="text-lg font-bold leading-none hover:opacity-70"
-              style={{ color: GOLD }}
+              style={{ color: PRIMARY }}
             >
               +
             </button>
           </div>
           <ul className="space-y-1">
-            {categories.map((category) => {
+            {tenantCategories.map((category) => {
               const active = selectedCatId === category.id
               return (
                 <li key={category.id}>
                   <div
                     className="flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer group text-sm transition-colors"
-                    style={active ? { background: BROWN, color: '#fff' } : { background: '#fff', border: '1px solid #f0ede9', color: BROWN }}
+                    style={active ? { background: PRIMARY, color: PRIMARY_FOREGROUND } : { background: SURFACE, border: `1px solid ${BORDER_SOFT}`, color: TEXT }}
                     onClick={() => setSelectedCatId(category.id)}
                   >
                     <span className="truncate">{category.name}</span>
@@ -522,12 +442,12 @@ export default function MenuPage() {
               )
             })}
           </ul>
-          {categories.length === 0 && <p className="text-gray-400 text-xs text-center mt-4">Henüz kategori yok</p>}
+          {tenantCategories.length === 0 && <p className="text-gray-400 text-xs text-center mt-4">Henüz kategori eklenmedi.</p>}
         </div>
 
         <div className="flex-1">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold" style={{ color: BROWN }}>
+            <h2 className="font-semibold" style={{ color: TEXT }}>
               {selectedCat?.name ?? 'Kategori seçin'}
               <span className="text-gray-400 font-normal text-sm ml-2">({visibleProducts.length} ürün)</span>
             </h2>
@@ -539,7 +459,7 @@ export default function MenuPage() {
                   setProdModal({ open: true })
                 }}
                 className="text-sm font-semibold px-4 py-2 rounded-lg"
-                style={{ background: GOLD, color: BROWN }}
+                style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
               >
                 + Ürün Ekle
               </button>
@@ -548,7 +468,12 @@ export default function MenuPage() {
 
           {visibleProducts.length === 0 ? (
             <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
-              {selectedCatId ? 'Bu kategoride ürün yok.' : 'Soldaki listeden bir kategori seçin.'}
+              {tenantProducts.length === 0 ? (
+                <>
+                  <p>Henüz ürün eklenmedi.</p>
+                  <p className="mt-2 text-xs text-gray-400">İlk ürününüzü yönetim panelinden ekleyebilirsiniz.</p>
+                </>
+              ) : selectedCatId ? 'Bu kategoride ürün yok.' : 'Soldaki listeden bir kategori seçin.'}
             </div>
           ) : (
             <div className="space-y-2">
@@ -556,7 +481,7 @@ export default function MenuPage() {
                 <div
                   key={product.id}
                   className="bg-white rounded-xl border p-4 flex items-center gap-4"
-                  style={{ borderColor: '#f0ede9', opacity: product.available ? 1 : 0.6 }}
+                  style={{ borderColor: BORDER_SOFT, opacity: product.available ? 1 : 0.6, background: SURFACE }}
                 >
                   <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
                     {product.image ? (
@@ -568,21 +493,21 @@ export default function MenuPage() {
                         onError={(e) => {
                           const target = e.target as HTMLImageElement
                           target.style.display = 'none'
-                          target.parentElement!.innerHTML = '<span class="text-2xl">🍽️</span>'
+                          target.parentElement!.innerHTML = '<span class="text-[11px] font-semibold text-gray-400">Görsel</span>'
                         }}
                       />
                     ) : (
-                      <span className="text-2xl">🍽️</span>
+                      <span className="text-[11px] font-semibold text-gray-400">Görsel</span>
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-medium text-sm" style={{ color: BROWN }}>{product.name}</span>
+                      <span className="font-medium text-sm" style={{ color: TEXT }}>{product.name}</span>
                       {!product.available && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Pasif</span>}
                     </div>
                     <p className="text-gray-400 text-xs truncate">{product.description}</p>
                   </div>
-                  <div className="shrink-0 font-semibold text-sm" style={{ color: BROWN }}>₺{product.price}</div>
+                  <div className="shrink-0 font-semibold text-sm" style={{ color: PRIMARY }}>₺{product.price}</div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     <button
                       onClick={() => void toggleAvailable(product)}
@@ -605,7 +530,7 @@ export default function MenuPage() {
                         setProdModal({ open: true, editing: product })
                       }}
                       className="p-1.5 rounded hover:bg-gray-50"
-                      style={{ color: BROWN }}
+                      style={{ color: TEXT }}
                     >
                       <Pencil size={16} />
                     </button>
@@ -626,7 +551,7 @@ export default function MenuPage() {
       {catModal.open && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h3 className="font-semibold mb-4" style={{ color: BROWN }}>{catModal.editing ? 'Kategori Düzenle' : 'Yeni Kategori'}</h3>
+            <h3 className="font-semibold mb-4" style={{ color: TEXT }}>{catModal.editing ? 'Kategori Düzenle' : 'Yeni Kategori'}</h3>
             <input
               className={inputCls}
               value={catName}
@@ -637,7 +562,7 @@ export default function MenuPage() {
             />
             <div className="flex gap-2 justify-end mt-4">
               <button onClick={() => setCatModal({ open: false })} className="px-4 py-2 text-sm text-gray-500">İptal</button>
-              <button onClick={() => void saveCat()} className="font-semibold px-5 py-2 rounded-lg text-sm" style={{ background: GOLD, color: BROWN }}>Kaydet</button>
+              <button onClick={() => void saveCat()} className="font-semibold px-5 py-2 rounded-lg text-sm" style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}>Kaydet</button>
             </div>
           </div>
         </div>
@@ -646,10 +571,10 @@ export default function MenuPage() {
       {prodModal.open && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
-            <h3 className="font-semibold mb-4" style={{ color: BROWN }}>{prodModal.editing ? 'Ürün Düzenle' : 'Yeni Ürün'}</h3>
+            <h3 className="font-semibold mb-4" style={{ color: TEXT }}>{prodModal.editing ? 'Ürün Düzenle' : 'Yeni Ürün'}</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: BROWN }}>Ürün Görseli</label>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: TEXT }}>Ürün Görseli</label>
                 <div className="flex items-start gap-3">
                   <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden border border-gray-200">
                     {prodForm.image ? (
@@ -661,7 +586,7 @@ export default function MenuPage() {
                         onError={(e) => {
                           const target = e.target as HTMLImageElement
                           target.style.display = 'none'
-                          target.parentElement!.innerHTML = '<span class="text-3xl">🍽️</span>'
+                          target.parentElement!.innerHTML = '<span class="text-[11px] font-semibold text-gray-400">Görsel</span>'
                         }}
                       />
                     ) : (
@@ -682,7 +607,7 @@ export default function MenuPage() {
                         onClick={() => prodFileInputRef.current?.click()}
                         disabled={prodImageUploading || !IMGBB_API_KEY}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
-                        style={{ color: BROWN }}
+                        style={{ color: TEXT, borderColor: BORDER_SOFT }}
                       >
                         <Upload size={14} />
                         {prodImageUploading ? 'Yükleniyor...' : 'Dosya Seç'}
@@ -698,10 +623,10 @@ export default function MenuPage() {
                       )}
                     </div>
                     {!IMGBB_API_KEY && (
-                      <p className="text-xs text-amber-600">ImgBB API anahtarı ayarlanmamış. Manuel URL kullanın.</p>
+                      <p className="text-xs text-gray-500">ImgBB API anahtarı ayarlanmamış. Manuel URL kullanın.</p>
                     )}
                     <input
-                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#d4a017]"
+                      className="theme-input rounded-lg px-3 py-1.5 text-xs"
                       value={prodForm.image}
                       onChange={(e) => setProdForm((current) => ({ ...current, image: e.target.value }))}
                       placeholder="veya URL girin: https://..."
@@ -717,24 +642,24 @@ export default function MenuPage() {
                 <option value="">Kategori seç *</option>
                 {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
               </select>
-              <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: BROWN }}>
+              <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: TEXT }}>
                 <input type="checkbox" checked={prodForm.available} onChange={(event) => setProdForm((current) => ({ ...current, available: event.target.checked }))} className="rounded" />
                 Aktif (menüde göster)
               </label>
             </div>
             <div className="flex gap-2 justify-end mt-5">
               <button onClick={() => setProdModal({ open: false })} className="px-4 py-2 text-sm text-gray-500">İptal</button>
-              <button onClick={() => void saveProd()} disabled={prodImageUploading} className="font-semibold px-5 py-2 rounded-lg text-sm disabled:opacity-50" style={{ background: GOLD, color: BROWN }}>Kaydet</button>
+              <button onClick={() => void saveProd()} disabled={prodImageUploading} className="font-semibold px-5 py-2 rounded-lg text-sm disabled:opacity-50" style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}>Kaydet</button>
             </div>
           </div>
         </div>
       )}
 
-      {bulkModal && (
+      {isDevelopment && bulkModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-3xl shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-lg" style={{ color: BROWN }}>Toplu Ürün Ekle</h3>
+              <h3 className="font-semibold text-lg" style={{ color: TEXT }}>Toplu Ürün Ekle</h3>
               <button onClick={closeBulkModal} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
             </div>
 
@@ -743,7 +668,7 @@ export default function MenuPage() {
                 <p className="text-sm text-gray-500 mb-4">
                   Menü verilerini aşağıdaki formatta yapıştırın. Her satır bir ürün olmalıdır.
                 </p>
-                <div className="bg-gray-50 rounded-lg p-3 mb-4 text-xs font-mono" style={{ color: BROWN }}>
+                <div className="bg-gray-50 rounded-lg p-3 mb-4 text-xs font-mono" style={{ color: TEXT }}>
                   Kategori | Ürün Adı | Açıklama | Fiyat | Görsel URL (opsiyonel)
                 </div>
                 <textarea
@@ -759,7 +684,7 @@ export default function MenuPage() {
                     onClick={handleBulkParse}
                     disabled={!bulkInput.trim()}
                     className="font-semibold px-5 py-2 rounded-lg text-sm disabled:opacity-50"
-                    style={{ background: GOLD, color: BROWN }}
+                    style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
                   >
                     Önizle
                   </button>
@@ -798,12 +723,12 @@ export default function MenuPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Görsel</th>
-                        <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Kategori</th>
-                        <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Ürün</th>
-                        <th className="text-left px-3 py-2 font-medium" style={{ color: BROWN }}>Açıklama</th>
-                        <th className="text-right px-3 py-2 font-medium" style={{ color: BROWN }}>Fiyat</th>
-                        <th className="text-center px-3 py-2 font-medium" style={{ color: BROWN }}>Durum</th>
+                        <th className="text-left px-3 py-2 font-medium" style={{ color: TEXT }}>Görsel</th>
+                        <th className="text-left px-3 py-2 font-medium" style={{ color: TEXT }}>Kategori</th>
+                        <th className="text-left px-3 py-2 font-medium" style={{ color: TEXT }}>Ürün</th>
+                        <th className="text-left px-3 py-2 font-medium" style={{ color: TEXT }}>Açıklama</th>
+                        <th className="text-right px-3 py-2 font-medium" style={{ color: TEXT }}>Fiyat</th>
+                        <th className="text-center px-3 py-2 font-medium" style={{ color: TEXT }}>Durum</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -853,7 +778,7 @@ export default function MenuPage() {
                     onClick={() => void handleBulkImport()}
                     disabled={validItemsCount === 0}
                     className="font-semibold px-5 py-2 rounded-lg text-sm disabled:opacity-50"
-                    style={{ background: GOLD, color: BROWN }}
+                    style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
                   >
                     {validItemsCount} Ürünü İçe Aktar
                   </button>
@@ -863,7 +788,7 @@ export default function MenuPage() {
 
             {bulkStep === 'importing' && (
               <div className="py-12 text-center">
-                <div className="w-12 h-12 border-4 border-gray-200 border-t-[#d4a017] rounded-full animate-spin mx-auto mb-4" />
+                <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-[var(--primary)]" />
                 <p className="text-sm text-gray-500">Ürünler ekleniyor...</p>
               </div>
             )}
@@ -873,7 +798,7 @@ export default function MenuPage() {
                 <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
                   <Check size={32} className="text-green-600" />
                 </div>
-                <p className="font-semibold text-lg mb-4" style={{ color: BROWN }}>İçe aktarma tamamlandı!</p>
+                <p className="font-semibold text-lg mb-4" style={{ color: TEXT }}>İçe aktarma tamamlandı!</p>
                 <div className="inline-flex flex-col gap-2 text-sm text-left">
                   <p><strong>{bulkResult.categoriesCreated}</strong> yeni kategori oluşturuldu</p>
                   <p><strong>{bulkResult.productsCreated}</strong> yeni ürün eklendi</p>
@@ -883,7 +808,7 @@ export default function MenuPage() {
                   <button
                     onClick={closeBulkModal}
                     className="font-semibold px-6 py-2.5 rounded-lg text-sm"
-                    style={{ background: GOLD, color: BROWN }}
+                    style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
                   >
                     Tamam
                   </button>

@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getDocs } from "firebase/firestore";
 import { ref as dbRef, onValue } from "firebase/database";
+import { ArrowLeft } from "lucide-react";
 import { logFirestoreRead } from "@/lib/firestore-debug";
 import { getRestaurantActiveWaitersQuery } from "@/lib/firestore-queries";
 import { auth, rtdb } from "@/lib/firebase";
 import { useAuth } from "@/components/AuthProvider";
-import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { useRestaurantSettings } from "@/hooks/useRestaurantSettings";
+import { resolveRestaurantBusinessName } from "@/lib/restaurant-settings";
+import { buildThemePalette, buildThemeStyleVars } from "@/lib/ui-theme";
 import type { UserProfile } from "@/lib/types";
 
 type PresenceData = {
@@ -18,17 +20,15 @@ type PresenceData = {
   lastSeen: number;
 };
 
-const BROWN = "#3d2b1f";
-const GOLD = "#d4a017";
-const MEDALS = ["🥇", "🥈", "🥉"];
-
 function tsToMs(ts: unknown): number {
   if (!ts) return 0;
   if (typeof ts === "number") return ts;
-  if (typeof (ts as { toMillis?: unknown }).toMillis === "function")
+  if (typeof (ts as { toMillis?: unknown }).toMillis === "function") {
     return (ts as { toMillis(): number }).toMillis();
-  if (typeof (ts as { toDate?: unknown }).toDate === "function")
+  }
+  if (typeof (ts as { toDate?: unknown }).toDate === "function") {
     return (ts as { toDate(): Date }).toDate().getTime();
+  }
   return 0;
 }
 
@@ -46,13 +46,22 @@ function formatLastSeen(ts: unknown): string {
 export default function LeaderboardPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const restaurantId = profile?.restaurantId || ''
-  const { settings } = useRestaurantSettings(restaurantId)
+  const restaurantId = profile?.restaurantId || "";
+  const { settings } = useRestaurantSettings(restaurantId);
   const [waiters, setWaiters] = useState<UserProfile[]>([]);
   const [presence, setPresence] = useState<Record<string, PresenceData>>({});
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState("");
-  const businessName = resolveRestaurantBusinessName(settings)
+
+  const businessName = resolveRestaurantBusinessName(settings);
+  const themePalette = buildThemePalette(settings.primaryColor);
+  const themeVars = buildThemeStyleVars(themePalette.primary);
+  const primary = themePalette.primary;
+  const primaryForeground = themePalette.primaryForeground;
+  const text = themePalette.text;
+  const muted = themePalette.muted;
+  const borderSoft = themePalette.borderSoft;
+  const surfaceMuted = themePalette.surfaceMuted;
 
   useEffect(() => {
     if (loading) return;
@@ -61,10 +70,15 @@ export default function LeaderboardPage() {
       return;
     }
     if (profile.role !== "waiter") {
-      router.replace(profile.role === "super_admin" ? "/super-admin" : profile.role === "admin" ? "/dashboard" : "/waiter/login");
-      return;
+      router.replace(
+        profile.role === "super_admin"
+          ? "/super-admin"
+          : profile.role === "admin"
+            ? "/dashboard"
+            : "/waiter/login",
+      );
     }
-  }, [user, profile, loading, router]);
+  }, [loading, profile, router, user]);
 
   useEffect(() => {
     if (loading) return;
@@ -80,7 +94,7 @@ export default function LeaderboardPage() {
         const snap = await getDocs(getRestaurantActiveWaitersQuery(restaurantId));
         if (cancelled) return;
         const list = snap.docs.map(
-          (d) => ({ uid: d.id, ...d.data() }) as UserProfile,
+          (docSnap) => ({ uid: docSnap.id, ...docSnap.data() }) as UserProfile,
         );
         list.sort((a, b) => {
           const callDiff = (b.totalCalls ?? 0) - (a.totalCalls ?? 0);
@@ -105,7 +119,6 @@ export default function LeaderboardPage() {
     };
   }, [loading, profile, restaurantId, user]);
 
-  // RTDB presence listener - only start after auth is ready
   useEffect(() => {
     if (!user || !profile || profile.role !== "waiter" || !restaurantId || !rtdb) return;
 
@@ -126,30 +139,23 @@ export default function LeaderboardPage() {
         }
       },
     );
+
     return () => unsubscribe();
   }, [profile, restaurantId, user]);
 
   if (loading || !profile || profile.role !== "waiter") {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: "#faf7f4" }}
-      >
-        <p
-          className="text-sm animate-pulse"
-          style={{ color: "rgba(61,43,31,0.4)" }}
-        >
-          Yükleniyor...
-        </p>
+      <div className="theme-page flex min-h-screen items-center justify-center" style={themeVars}>
+        <p className="animate-pulse text-sm text-[var(--muted)]">Yükleniyor...</p>
       </div>
     );
   }
 
   if (!restaurantId) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "#faf7f4" }}>
-        <div className="max-w-sm rounded-2xl border border-[#eadfd5] bg-white px-6 py-8 text-center shadow-sm">
-          <p className="font-semibold text-lg" style={{ color: "#3d2b1f" }}>İşletme hesabı bulunamadı.</p>
+      <div className="theme-page flex min-h-screen items-center justify-center px-6" style={themeVars}>
+        <div className="theme-card max-w-sm rounded-[1.75rem] px-6 py-8 text-center">
+          <p className="text-lg font-semibold text-[var(--text)]">İşletme hesabı bulunamadı.</p>
           <p className="mt-2 text-sm text-gray-500">Garson profilinde `restaurantId` alanı eksik.</p>
         </div>
       </div>
@@ -157,162 +163,138 @@ export default function LeaderboardPage() {
   }
 
   return (
-    <div className="min-h-screen pb-8" style={{ background: "#faf7f4" }}>
-      <header className="sticky top-0 z-20" style={{ background: BROWN }}>
-        <div className="px-5 pt-4 pb-4 flex items-center justify-between">
+    <div className="theme-page min-h-screen pb-8" style={themeVars}>
+      <header
+        className="sticky top-0 z-20"
+        style={{ background: `linear-gradient(135deg, ${primary} 0%, ${primary}dd 100%)` }}
+      >
+        <div className="flex items-center justify-between px-5 pb-4 pt-4">
           <div>
-            <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+            <p className="text-xs" style={{ color: "rgba(255,255,255,0.62)" }}>
               {businessName}
             </p>
-            <p
-              className="font-bold text-lg leading-tight mt-0.5"
-              style={{ color: GOLD }}
-            >
+            <p className="mt-0.5 text-lg font-bold leading-tight" style={{ color: primaryForeground }}>
               Garson Sıralaması
             </p>
           </div>
           <button
             onClick={() => router.replace("/waiter")}
-            className="text-xs px-3 py-1.5 rounded-lg"
+            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium"
             style={{
-              background: "rgba(255,255,255,0.1)",
-              color: "rgba(255,255,255,0.6)",
+              background: "rgba(255,255,255,0.12)",
+              color: "rgba(255,255,255,0.82)",
             }}
           >
-            ← Geri
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Geri
           </button>
         </div>
       </header>
 
-      <div className="px-4 py-5 max-w-lg mx-auto">
+      <div className="mx-auto max-w-lg px-4 py-5">
         {dataLoading ? (
           <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map((i) => (
+            {[1, 2, 3, 4, 5].map((item) => (
               <div
-                key={i}
-                className="bg-white rounded-2xl h-16 animate-pulse"
-                style={{ border: "1px solid #f0ede9" }}
+                key={item}
+                className="h-16 rounded-2xl bg-white animate-pulse"
+                style={{ border: `1px solid ${borderSoft}` }}
               />
             ))}
           </div>
         ) : dataError ? (
-          <div
-            className="bg-white rounded-2xl p-8 text-center"
-            style={{ border: "1px solid #f0ede9" }}
-          >
+          <div className="rounded-2xl bg-white p-8 text-center" style={{ border: `1px solid ${borderSoft}` }}>
             <p className="text-sm" style={{ color: "#c2410c" }}>
               {dataError}
             </p>
             <button
               onClick={() => router.refresh()}
-              className="mt-4 text-xs px-4 py-2 rounded-lg"
-              style={{ background: "#3d2b1f", color: "#fefaf3" }}
+              className="mt-4 rounded-lg px-4 py-2 text-xs"
+              style={{ background: primary, color: primaryForeground }}
             >
               Tekrar Dene
             </button>
           </div>
         ) : waiters.length === 0 ? (
-          <div
-            className="bg-white rounded-2xl p-12 text-center"
-            style={{ border: "1px solid #f0ede9" }}
-          >
-            <p className="text-gray-400 text-sm">Garson bulunamadı.</p>
+          <div className="rounded-2xl bg-white p-12 text-center" style={{ border: `1px solid ${borderSoft}` }}>
+            <p className="text-sm text-gray-400">Garson bulunamadı.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {waiters.map((waiter, index) => {
               const isMe = waiter.uid === profile.uid;
-              const medal = MEDALS[index] ?? null;
+              const online = presence[waiter.uid]?.online;
 
               return (
                 <div
                   key={waiter.uid}
-                  className="rounded-2xl px-5 py-4 flex items-center gap-4"
+                  className="flex items-center gap-4 rounded-2xl px-5 py-4"
                   style={{
-                    background: isMe ? BROWN : "#fff",
-                    border: `2px solid ${isMe ? GOLD : "#f0ede9"}`,
-                    boxShadow: isMe
-                      ? "0 2px 12px rgba(61,43,31,0.2)"
-                      : undefined,
+                    background: isMe ? primary : "#fff",
+                    border: `2px solid ${isMe ? primary : borderSoft}`,
+                    boxShadow: isMe ? `0 18px 40px ${themePalette.primarySoft}` : undefined,
                   }}
                 >
-                  <div className="w-8 text-center shrink-0">
-                    {medal ? (
-                      <span className="text-xl">{medal}</span>
-                    ) : (
-                      <span
-                        className="text-sm font-bold"
-                        style={{
-                          color: isMe ? "rgba(255,255,255,0.4)" : "#d1d5db",
-                        }}
-                      >
-                        {index + 1}
-                      </span>
-                    )}
+                  <div className="w-8 shrink-0 text-center">
+                    <span
+                      className="text-sm font-bold"
+                      style={{ color: isMe ? "rgba(255,255,255,0.7)" : muted }}
+                    >
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
                   </div>
 
                   <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold"
                     style={{
-                      background: isMe ? GOLD : "#f0ede9",
-                      color: isMe ? BROWN : "#6b7280",
+                      background: isMe ? "rgba(255,255,255,0.16)" : surfaceMuted,
+                      color: isMe ? primaryForeground : muted,
                     }}
                   >
                     {waiter.name.charAt(0).toUpperCase()}
                   </div>
 
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p
-                        className="font-semibold text-sm truncate"
-                        style={{ color: isMe ? GOLD : BROWN }}
+                        className="truncate text-sm font-semibold"
+                        style={{ color: isMe ? primaryForeground : text }}
                       >
                         {waiter.name}
                       </p>
                       {isMe && (
                         <span
-                          className="text-xs px-2 py-0.5 rounded-full shrink-0"
-                          style={{ background: GOLD, color: BROWN }}
+                          className="shrink-0 rounded-full px-2 py-0.5 text-xs"
+                          style={{ background: "rgba(255,255,255,0.16)", color: primaryForeground }}
                         >
                           Sen
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {presence[waiter.uid]?.online ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                      ) : (
-                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
-                      )}
+                    <div className="mt-0.5 flex items-center gap-2">
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${online ? "bg-green-400" : "bg-gray-300"}`} />
                       <p
                         className="text-xs"
-                        style={{
-                          color: isMe ? "rgba(255,255,255,0.45)" : "#9ca3af",
-                        }}
+                        style={{ color: isMe ? "rgba(255,255,255,0.7)" : muted }}
                       >
-                        {(waiter.avgRating ?? 0) > 0
-                          ? `${waiter.avgRating!.toFixed(1)} ★`
-                          : "—"}
-                        {!presence[waiter.uid]?.online &&
-                        presence[waiter.uid]?.lastSeen
+                        {(waiter.avgRating ?? 0) > 0 ? `${waiter.avgRating!.toFixed(1)} ★` : "—"}
+                        {!online && presence[waiter.uid]?.lastSeen
                           ? ` · ${formatLastSeen(presence[waiter.uid].lastSeen)}`
                           : ""}
                       </p>
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
+                  <div className="shrink-0 text-right">
                     <p
-                      className="font-bold text-xl leading-none"
-                      style={{ color: isMe ? GOLD : BROWN }}
+                      className="text-xl font-bold leading-none"
+                      style={{ color: isMe ? primaryForeground : text }}
                     >
                       {waiter.totalCalls ?? 0}
                     </p>
                     <p
-                      className="text-xs mt-0.5"
-                      style={{
-                        color: isMe ? "rgba(255,255,255,0.45)" : "#9ca3af",
-                      }}
+                      className="mt-0.5 text-xs"
+                      style={{ color: isMe ? "rgba(255,255,255,0.7)" : muted }}
                     >
                       çağrı
                     </p>

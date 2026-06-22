@@ -1,12 +1,8 @@
+import { Check, Clock3 } from 'lucide-react'
 import { getCallTableLabel } from '@/lib/firestore-models'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
+import { getCallTipUi } from '@/lib/call-tip-ui'
 import type { WaiterCall } from '@/lib/types'
-
-const TIP_META: Record<string, { icon: string; label: string; accent: string; lightBg: string }> = {
-  sipariş: { icon: '📋', label: 'Sipariş',  accent: '#c2410c', lightBg: '#fff7ed' },
-  hesap:   { icon: '💳', label: 'Hesap',    accent: '#15803d', lightBg: '#f0fdf4' },
-  yardım:  { icon: '🙋', label: 'Yardım',   accent: '#1d4ed8', lightBg: '#eff6ff' },
-}
 
 function elapsed(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000)
@@ -24,7 +20,8 @@ interface Props {
 }
 
 export default function CallCard({ call, variant, onAccept, onComplete, busy = false }: Props) {
-  const meta = TIP_META[call.tip] ?? TIP_META.yardım
+  const meta = getCallTipUi(call.tip)
+  const AccentIcon = meta.Icon
 
   return (
     <div
@@ -32,16 +29,18 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
       style={{
         background: '#fff',
         border: `2px solid ${variant === 'pending' ? '#e5e7eb' : meta.accent}`,
-        boxShadow: variant === 'active' ? `0 0 0 4px ${meta.lightBg}` : undefined,
+        boxShadow: variant === 'active' ? `0 0 0 4px ${meta.surface}` : undefined,
       }}
     >
       {/* Top bar */}
       <div
         className="px-5 py-3 flex items-center justify-between"
-        style={{ background: variant === 'active' ? meta.lightBg : '#f9fafb' }}
+        style={{ background: variant === 'active' ? meta.surface : '#f9fafb' }}
       >
         <div className="flex items-center gap-2">
-          <span className="text-xl">{meta.icon}</span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-2xl" style={{ background: meta.surface, color: meta.accent }}>
+            <AccentIcon className="h-5 w-5" />
+          </span>
           <span
             className="font-semibold text-sm"
             style={{ color: meta.accent }}
@@ -58,8 +57,9 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">
-            ⏱ {elapsed(call.createdAt)} önce
+          <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+            <Clock3 className="h-3.5 w-3.5" />
+            {elapsed(call.createdAt)} önce
           </span>
         </div>
       </div>
@@ -70,7 +70,7 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
           <div>
             <p
               className="text-3xl font-black tracking-tight"
-              style={{ color: '#3d2b1f' }}
+              style={{ color: 'var(--text)' }}
             >
               Masa {getCallTableLabel(call)}
             </p>
@@ -79,7 +79,7 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
             ) : null}
             {call.customerName && call.tip !== 'sipariş' ? (
               <p className="text-xs text-gray-500 mt-1">
-                Müşteri: <span className="font-semibold text-[#3d2b1f]">{call.customerName}</span>
+                Müşteri: <span className="font-semibold text-[var(--text)]">{call.customerName}</span>
               </p>
             ) : null}
             {variant === 'active' && call.acceptedAt ? (
@@ -98,7 +98,7 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
             onClick={onAccept}
             disabled={busy}
             className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-50"
-            style={{ background: '#d4a017', color: '#3d2b1f' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {busy ? 'Kabul Ediliyor...' : 'Kabul Et →'}
           </button>
@@ -106,10 +106,10 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
           <button
             onClick={onComplete}
             disabled={busy}
-            className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-50"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-transform active:scale-95 disabled:opacity-50"
             style={{ background: '#22c55e', color: '#fff' }}
           >
-            {busy ? 'Tamamlanıyor...' : '✓ Tamamlandı'}
+            {busy ? 'Tamamlanıyor...' : <><Check className="h-5 w-5" />Tamamlandı</>}
           </button>
         ) : null}
       </div>

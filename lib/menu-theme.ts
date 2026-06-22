@@ -1,9 +1,10 @@
+import { DEFAULT_PRIMARY_COLOR, getContrastColor } from '@/lib/restaurant-settings'
 import type { MenuThemeSettings } from '@/lib/types'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 export const DEFAULT_MENU_DISPLAY_NAME = 'İşletme'
-export const DEFAULT_MENU_PRIMARY_COLOR = '#d4a017'
+export const DEFAULT_MENU_PRIMARY_COLOR = DEFAULT_PRIMARY_COLOR
 export const EMPTY_MENU_THEME_SETTINGS: MenuThemeSettings = {
   displayName: '',
   logoUrl: '',
@@ -52,15 +53,5 @@ export function resolveMenuDisplayName(settings: Pick<MenuThemeSettings, 'displa
 }
 
 export function getMenuPrimaryTextColor(primaryColor: string) {
-  const color = primaryColor.trim().replace('#', '')
-  const normalized = color.length === 3 ? color.split('').map((char) => `${char}${char}`).join('') : color
-
-  if (normalized.length !== 6) return '#3d2b1f'
-
-  const red = Number.parseInt(normalized.slice(0, 2), 16)
-  const green = Number.parseInt(normalized.slice(2, 4), 16)
-  const blue = Number.parseInt(normalized.slice(4, 6), 16)
-  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255
-
-  return luminance > 0.62 ? '#3d2b1f' : '#ffffff'
+  return getContrastColor(primaryColor)
 }

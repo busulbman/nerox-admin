@@ -22,7 +22,7 @@ export default function BrandAuthShell({
   alternateText,
 }: BrandAuthShellProps) {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#05010d] text-white">
+    <main className="relative min-h-[100svh] overflow-x-clip bg-[#05010d] text-white">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute inset-x-0 top-[-18rem] h-[34rem] bg-[radial-gradient(circle_at_top,_rgba(135,87,255,0.28),_transparent_58%)]" />
         <div className="absolute right-[-8rem] top-16 h-80 w-80 rounded-full bg-[#5f1ae5]/20 blur-3xl" />
@@ -30,8 +30,8 @@ export default function BrandAuthShell({
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
       </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 py-5 sm:px-8 lg:px-10">
-        <header className="flex items-center justify-between rounded-full border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-xl">
+      <div className="relative mx-auto flex min-h-[100svh] w-full max-w-6xl flex-col px-5 py-4 sm:px-8 sm:py-5 lg:min-h-screen lg:px-10">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-[1.75rem] border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-xl sm:rounded-full">
           <Link href="/" className="flex items-center gap-3 text-sm font-semibold tracking-[0.18em] text-white/90">
             <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5">
               <Image
@@ -48,16 +48,17 @@ export default function BrandAuthShell({
 
           <Link
             href="/"
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/85 transition hover:border-white/20 hover:bg-white/10"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/85 transition hover:border-white/20 hover:bg-white/10 sm:w-auto"
           >
             <ArrowLeft className="h-4 w-4" />
-            Ana sayfaya dön
+            <span className="sm:hidden">Ana sayfa</span>
+            <span className="hidden sm:inline">Ana sayfaya dön</span>
           </Link>
         </header>
 
-        <div className="flex flex-1 items-center py-10 sm:py-12">
-          <div className="grid w-full gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-            <section className="max-w-xl">
+        <div className="flex py-6 sm:py-10 lg:flex-1 lg:items-center lg:py-12">
+          <div className="grid w-full gap-6 sm:gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+            <section className="max-w-xl min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/30 bg-[#11061f]/80 px-4 py-2 text-sm font-medium text-[#d8c3ff]">
                 <ShieldCheck className="h-4 w-4" />
                 {eyebrow}

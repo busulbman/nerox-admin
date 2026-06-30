@@ -1,5 +1,15 @@
 import { calculateCartTotal, groupCartItemsByCustomer, normalizeCartItem } from '@/lib/order-utils'
-import type { CartItem, CustomerGroup, Rating, RatingStatus, Table, TableStatus, WaiterCall } from '@/lib/types'
+import type {
+  CartItem,
+  CustomerGroup,
+  LoyaltyCampaign,
+  Rating,
+  RatingStatus,
+  RestaurantCustomer,
+  Table,
+  TableStatus,
+  WaiterCall,
+} from '@/lib/types'
 
 type FirestoreTimestampLike = {
   toMillis: () => number
@@ -78,10 +88,58 @@ export function normalizeTable(id: string, data: Record<string, unknown>): Table
     id,
     number: Number.isFinite(parsedNumber) ? parsedNumber : 0,
     status: isTableStatus(data.status) ? data.status : 'boş',
+    active: data.active !== false,
     sessionId: typeof data.sessionId === 'string' ? data.sessionId : null,
     openedAt: toMillis(data.openedAt),
     lastPaymentCompletedAt: toMillis(data.lastPaymentCompletedAt),
     lastPaymentWaiterName: typeof data.lastPaymentWaiterName === 'string' ? data.lastPaymentWaiterName : null,
+    createdAt: toMillis(data.createdAt),
+    updatedAt: toMillis(data.updatedAt),
+  }
+}
+
+export function normalizeLoyaltyCampaign(id: string, data: Record<string, unknown>): LoyaltyCampaign {
+  return {
+    id,
+    name: typeof data.name === 'string' ? data.name.trim() : '',
+    active: data.active === true,
+    targetProductId: typeof data.targetProductId === 'string' ? data.targetProductId : '',
+    targetProductName: typeof data.targetProductName === 'string' ? data.targetProductName.trim() : '',
+    requiredQuantity:
+      typeof data.requiredQuantity === 'number' && Number.isFinite(data.requiredQuantity) && data.requiredQuantity > 0
+        ? Math.floor(data.requiredQuantity)
+        : 1,
+    rewardProductId: typeof data.rewardProductId === 'string' ? data.rewardProductId : '',
+    rewardProductName: typeof data.rewardProductName === 'string' ? data.rewardProductName.trim() : '',
+    rewardQuantity:
+      typeof data.rewardQuantity === 'number' && Number.isFinite(data.rewardQuantity) && data.rewardQuantity > 0
+        ? Math.floor(data.rewardQuantity)
+        : 1,
+    description: typeof data.description === 'string' ? data.description.trim() : '',
+    createdAt: toMillis(data.createdAt),
+    updatedAt: toMillis(data.updatedAt),
+  }
+}
+
+export function normalizeRestaurantCustomer(id: string, data: Record<string, unknown>): RestaurantCustomer {
+  return {
+    id,
+    name: typeof data.name === 'string' ? data.name.trim() : '',
+    phone: typeof data.phone === 'string' ? data.phone.trim() : '',
+    email: typeof data.email === 'string' ? data.email.trim() : '',
+    loyaltyEnabled: data.loyaltyEnabled === true,
+    points:
+      typeof data.points === 'number' && Number.isFinite(data.points) && data.points >= 0
+        ? data.points
+        : 0,
+    totalOrders:
+      typeof data.totalOrders === 'number' && Number.isFinite(data.totalOrders) && data.totalOrders >= 0
+        ? data.totalOrders
+        : 0,
+    totalSpent:
+      typeof data.totalSpent === 'number' && Number.isFinite(data.totalSpent) && data.totalSpent >= 0
+        ? data.totalSpent
+        : 0,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   }

@@ -34,8 +34,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="tr" className={`${montserrat.variable} h-full antialiased`}>
-      <body className="min-h-full">
+    <html lang="tr" className={`${montserrat.variable} h-full overflow-x-hidden antialiased`}>
+      <body className="min-h-full overflow-x-hidden">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

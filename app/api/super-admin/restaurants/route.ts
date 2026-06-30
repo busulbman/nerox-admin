@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { FirebaseAdminError } from '@/lib/firebase-admin'
 import {
+  extendRestaurantSubscription,
+  parseSubscriptionExtension,
   SuperAdminApiError,
   listRestaurantsSummary,
   mapFirebaseAdminError,
@@ -106,10 +108,13 @@ export async function PATCH(request: NextRequest) {
 
     await requireSuperAdmin(request)
     const body = await request.json()
+    const action = body.action === 'extend-subscription' ? 'extend-subscription' : 'set-status'
     const restaurantId = typeof body.restaurantId === 'string' ? body.restaurantId : ''
-    const status = body.status === 'passive' ? 'passive' : 'active'
 
-    const result = await updateRestaurantStatus(restaurantId, status)
+    const result = action === 'extend-subscription'
+      ? await extendRestaurantSubscription(restaurantId, parseSubscriptionExtension(body.preset))
+      : await updateRestaurantStatus(restaurantId, body.status === 'passive' ? 'passive' : 'active')
+
     return NextResponse.json(result)
   } catch (error) {
     return toErrorResponse(error, 'PATCH')

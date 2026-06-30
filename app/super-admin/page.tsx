@@ -7,8 +7,12 @@ import {
   ArrowUpRight,
   Building2,
   CalendarClock,
+  CalendarPlus2,
   Loader2,
   LogOut,
+  Mail,
+  MapPinned,
+  Phone,
   Power,
   RefreshCw,
   Shield,
@@ -19,7 +23,8 @@ import {
 import { useAuth } from '@/components/AuthProvider'
 import { auth } from '@/lib/firebase'
 import { generateSlug, getUniqueRestaurantSlug } from '@/lib/restaurant-settings'
-import type { RestaurantStatus } from '@/lib/types'
+import { SUBSCRIPTION_EXTENSION_LABELS, type SubscriptionExtensionPreset } from '@/lib/subscription-extension'
+import type { RestaurantPlan, RestaurantStatus } from '@/lib/types'
 import { buildThemeStyleVars } from '@/lib/ui-theme'
 
 const SUPER_ADMIN_THEME_COLOR = '#5c3d2e'
@@ -28,8 +33,18 @@ type SuperAdminRestaurant = {
   id: string
   name: string
   slug: string
+  ownerName: string
+  email: string
+  phone: string
+  businessType: string
+  city: string
+  district: string
+  plan: RestaurantPlan
   status: RestaurantStatus
+  trialEndsAt: number | null
+  remainingDays: number | null
   subscriptionExpiresAt: number | null
+  isExpired: boolean
   productCount: number
   tableCount: number
   waiterCount: number
@@ -77,8 +92,22 @@ function formatSubscriptionDate(value: number | null) {
   }).format(value)
 }
 
-function isExpired(value: number | null) {
-  return typeof value === 'number' && value < Date.now()
+function formatRemainingDays(value: number | null) {
+  if (value === null) return 'Belirtilmedi'
+  if (value <= 0) return 'Süresi doldu'
+  if (value === 1) return '1 gün'
+  return `${value} gün`
+}
+
+function buildLocationLabel(restaurant: Pick<SuperAdminRestaurant, 'city' | 'district'>) {
+  const parts = [restaurant.city.trim(), restaurant.district.trim()].filter(Boolean)
+  return parts.length > 0 ? parts.join(' / ') : 'Belirtilmedi'
+}
+
+function buildRiskState(restaurant: Pick<SuperAdminRestaurant, 'status' | 'isExpired'>) {
+  if (restaurant.isExpired) return 'expired'
+  if (restaurant.status === 'passive') return 'passive'
+  return 'healthy'
 }
 
 function StatCard({
@@ -115,7 +144,7 @@ export default function SuperAdminPage() {
   const [listLoading, setListLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [statusTarget, setStatusTarget] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<FeedbackState>(null)
   const [form, setForm] = useState<CreateRestaurantForm>({ ...EMPTY_FORM })
 
@@ -201,7 +230,7 @@ export default function SuperAdminPage() {
   const totalRestaurants = restaurants.length
   const activeRestaurants = restaurants.filter((restaurant) => restaurant.status === 'active').length
   const passiveRestaurants = restaurants.filter((restaurant) => restaurant.status === 'passive').length
-  const expiredRestaurants = restaurants.filter((restaurant) => isExpired(restaurant.subscriptionExpiresAt)).length
+  const expiredRestaurants = restaurants.filter((restaurant) => restaurant.isExpired).length
 
   async function handleCreateRestaurant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -232,30 +261,60 @@ export default function SuperAdminPage() {
 
   async function handleToggleStatus(restaurant: SuperAdminRestaurant) {
     const nextStatus: RestaurantStatus = restaurant.status === 'active' ? 'passive' : 'active'
-    setStatusTarget(restaurant.id)
+    setPendingAction(`status:${restaurant.id}`)
     setFeedback(null)
 
     try {
       await authorizedFetch('/api/super-admin/restaurants', {
         method: 'PATCH',
         body: JSON.stringify({
+          action: 'set-status',
           restaurantId: restaurant.id,
           status: nextStatus,
         }),
       })
 
-      setRestaurants((current) => current.map((entry) => (
-        entry.id === restaurant.id
-          ? { ...entry, status: nextStatus }
-          : entry
-      )))
+      setFeedback({
+        tone: 'success',
+        text: `${restaurant.name} durumu ${nextStatus} olarak güncellendi.`,
+      })
+      await loadRestaurants({ silent: true })
     } catch (error) {
       setFeedback({
         tone: 'error',
         text: error instanceof Error ? error.message : 'İşletme durumu güncellenemedi.',
       })
     } finally {
-      setStatusTarget(null)
+      setPendingAction(null)
+    }
+  }
+
+  async function handleExtendSubscription(restaurant: SuperAdminRestaurant, preset: SubscriptionExtensionPreset) {
+    setPendingAction(`extend:${restaurant.id}:${preset}`)
+    setFeedback(null)
+
+    try {
+      await authorizedFetch('/api/super-admin/restaurants', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          action: 'extend-subscription',
+          restaurantId: restaurant.id,
+          preset,
+        }),
+      })
+
+      setFeedback({
+        tone: 'success',
+        text: `${restaurant.name} için süre ${SUBSCRIPTION_EXTENSION_LABELS[preset]} uzatıldı.`,
+      })
+      await loadRestaurants({ silent: true })
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        text: error instanceof Error ? error.message : 'Süre uzatılamadı.',
+      })
+    } finally {
+      setPendingAction(null)
     }
   }
 
@@ -286,7 +345,7 @@ export default function SuperAdminPage() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-6 md:px-8 md:py-8" style={{ ...themeVars, background: 'var(--page-bg)' }}>
+    <main className="min-h-screen overflow-x-hidden px-4 py-6 md:px-8 md:py-8" style={{ ...themeVars, background: 'var(--page-bg)' }}>
       <div className="mx-auto max-w-7xl">
         <section className="rounded-[2rem] p-6 shadow-[0_18px_50px_rgba(61,43,31,0.06)] md:p-8" style={{ border: '1px solid var(--border-soft)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-muted) 100%)' }}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -460,113 +519,132 @@ export default function SuperAdminPage() {
                 <p className="text-sm" style={{ color: 'var(--muted)' }}>Henüz işletme bulunmuyor.</p>
               </div>
             ) : (
-              <div className="mt-6 overflow-hidden rounded-[1.5rem]" style={{ border: '1px solid var(--border-soft)' }}>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
-                    <thead style={{ background: 'var(--surface-muted)', color: 'var(--text-secondary)' }}>
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">İşletme</th>
-                        <th className="px-4 py-3 font-semibold">Durum</th>
-                        <th className="px-4 py-3 font-semibold">Bitiş</th>
-                        <th className="px-4 py-3 font-semibold">Ürün</th>
-                        <th className="px-4 py-3 font-semibold">Masa</th>
-                        <th className="px-4 py-3 font-semibold">Garson</th>
-                        <th className="px-4 py-3 font-semibold">Menü</th>
-                        <th className="px-4 py-3 font-semibold">Aksiyon</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {restaurants.map((restaurant) => {
-                        const expired = isExpired(restaurant.subscriptionExpiresAt)
-                        const statusBusy = statusTarget === restaurant.id
+              <div className="mt-6 space-y-4">
+                {restaurants.map((restaurant) => {
+                  const riskState = buildRiskState(restaurant)
+                  const statusBusy = pendingAction === `status:${restaurant.id}`
 
-                        return (
-                          <tr key={restaurant.id} className="align-top" style={{ borderTop: '1px solid var(--border-soft)' }}>
-                            <td className="px-4 py-4">
-                              <div className="flex items-start gap-3">
-                                <div className="rounded-2xl p-2.5" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
-                                  <Building2 className="h-4 w-4" />
-                                </div>
-                                <div>
-                                  <p className="font-semibold" style={{ color: 'var(--text)' }}>
-                                    {restaurant.name}
-                                  </p>
-                                  <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>Slug: {restaurant.slug}</p>
-                                  <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>ID: {restaurant.id}</p>
-                                </div>
-                              </div>
-                            </td>
+                  return (
+                    <article
+                      key={restaurant.id}
+                      className="rounded-[1.5rem] p-5 shadow-[0_12px_30px_rgba(61,43,31,0.04)]"
+                      style={
+                        riskState === 'expired'
+                          ? { border: '1px solid rgba(239,68,68,0.24)', background: 'linear-gradient(180deg, rgba(254,242,242,1) 0%, rgba(255,255,255,1) 100%)' }
+                          : riskState === 'passive'
+                            ? { border: '1px solid rgba(245,158,11,0.24)', background: 'linear-gradient(180deg, rgba(255,251,235,1) 0%, rgba(255,255,255,1) 100%)' }
+                            : { border: '1px solid var(--border-soft)', background: 'white' }
+                      }
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="rounded-2xl p-3" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
+                            <Building2 className="h-5 w-5" />
+                          </div>
 
-                            <td className="px-4 py-4">
-                              <div className="flex flex-col gap-2">
-                                <span
-                                  className="inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold"
-                                  style={
-                                    restaurant.status === 'active'
-                                      ? { background: 'var(--success-soft)', color: 'var(--success)' }
-                                      : { background: 'var(--surface-muted)', color: 'var(--muted)' }
-                                  }
-                                >
-                                  {restaurant.status === 'active' ? 'Aktif' : 'Pasif'}
-                                </span>
-                                {expired && (
-                                  <span className="inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
-                                    Süresi doldu
-                                  </span>
-                                )}
-                              </div>
-                            </td>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-lg font-semibold" style={{ color: 'var(--text)' }}>
+                                {restaurant.name}
+                              </h3>
+                              <PlanPill plan={restaurant.plan} />
+                              <StatusPill status={restaurant.status} />
+                              {restaurant.isExpired && <AlertPill text="Süresi doldu" tone="error" />}
+                            </div>
 
-                            <td className="px-4 py-4" style={{ color: 'var(--text)' }}>
-                              {formatSubscriptionDate(restaurant.subscriptionExpiresAt)}
-                            </td>
+                            <p className="mt-1 break-all text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+                              Slug: {restaurant.slug}
+                            </p>
+                            <p className="mt-1 break-all text-xs" style={{ color: 'var(--muted)' }}>
+                              ID: {restaurant.id}
+                            </p>
+                          </div>
+                        </div>
 
-                            <td className="px-4 py-4">
-                              <CountPill icon={SquareMenu} value={restaurant.productCount} />
-                            </td>
+                        <a
+                          href={restaurant.menuLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex w-full items-center justify-center gap-2 self-start rounded-2xl border px-4 py-2.5 text-sm font-semibold transition hover:opacity-80 sm:w-auto"
+                          style={{ borderColor: 'var(--border-soft)', color: 'var(--text)' }}
+                        >
+                          Menüyü Aç
+                          <ArrowUpRight className="h-4 w-4" />
+                        </a>
+                      </div>
 
-                            <td className="px-4 py-4">
-                              <CountPill icon={TableProperties} value={restaurant.tableCount} />
-                            </td>
+                      {(restaurant.isExpired || restaurant.status === 'passive') && (
+                        <div
+                          className="mt-4 rounded-2xl px-4 py-3 text-sm"
+                          style={
+                            restaurant.isExpired
+                              ? { background: 'var(--error-soft)', color: 'var(--error)' }
+                              : { background: 'var(--warning-soft)', color: 'var(--warning)' }
+                          }
+                        >
+                          {restaurant.isExpired
+                            ? 'Bu işletmenin abonelik süresi dolmuş. Admin panelinde uyarı görünür ve QR menü geçici olarak kullanılamaz.'
+                            : 'Bu işletme pasif durumda. Admin panelinde uyarı görünür ve QR menü geçici olarak kullanılamaz.'}
+                        </div>
+                      )}
 
-                            <td className="px-4 py-4">
-                              <CountPill icon={Users} value={restaurant.waiterCount} />
-                            </td>
+                      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <InfoItem label="Yetkili adı" value={restaurant.ownerName || 'Belirtilmedi'} />
+                        <InfoItem label="E-posta" value={restaurant.email || 'Belirtilmedi'} icon={Mail} />
+                        <InfoItem label="Telefon" value={restaurant.phone || 'Belirtilmedi'} icon={Phone} />
+                        <InfoItem label="İşletme türü" value={restaurant.businessType || 'Belirtilmedi'} />
+                        <InfoItem label="Şehir / İlçe" value={buildLocationLabel(restaurant)} icon={MapPinned} />
+                        <InfoItem label="Trial bitiş tarihi" value={formatSubscriptionDate(restaurant.trialEndsAt)} />
+                        <InfoItem label="Kalan gün" value={formatRemainingDays(restaurant.remainingDays)} />
+                        <InfoItem label="Subscription bitiş tarihi" value={formatSubscriptionDate(restaurant.subscriptionExpiresAt)} />
+                      </div>
 
-                            <td className="px-4 py-4">
-                              <a
-                                href={restaurant.menuLink}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="theme-link inline-flex items-center gap-1.5 font-semibold underline-offset-4"
-                              >
-                                Menüyü aç
-                                <ArrowUpRight className="h-3.5 w-3.5" />
-                              </a>
-                            </td>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        <CountPill icon={SquareMenu} value={restaurant.productCount} label="Ürün" />
+                        <CountPill icon={TableProperties} value={restaurant.tableCount} label="Masa" />
+                        <CountPill icon={Users} value={restaurant.waiterCount} label="Garson" />
+                      </div>
 
-                            <td className="px-4 py-4">
+                      <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleStatus(restaurant)}
+                          disabled={statusBusy || pendingAction?.startsWith(`extend:${restaurant.id}:`) === true}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60"
+                          style={
+                            restaurant.status === 'active'
+                              ? { background: 'var(--error-soft)', color: 'var(--error)', border: '1px solid rgba(239,68,68,0.24)' }
+                              : { background: 'var(--success-soft)', color: 'var(--success)', border: '1px solid rgba(16,185,129,0.24)' }
+                          }
+                        >
+                          {statusBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+                          {restaurant.status === 'active' ? 'Aktif/Pasif yap' : 'Aktif/Pasif yap'}
+                        </button>
+
+                        <div className="grid gap-2 sm:grid-cols-2 xl:flex">
+                          {Object.entries(SUBSCRIPTION_EXTENSION_LABELS).map(([preset, label]) => {
+                            const typedPreset = preset as SubscriptionExtensionPreset
+                            const busy = pendingAction === `extend:${restaurant.id}:${typedPreset}`
+
+                            return (
                               <button
+                                key={typedPreset}
                                 type="button"
-                                onClick={() => void handleToggleStatus(restaurant)}
-                                disabled={statusBusy}
-                                className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-semibold transition disabled:opacity-60"
-                                style={
-                                  restaurant.status === 'active'
-                                    ? { borderColor: 'var(--error)', background: 'var(--error-soft)', color: 'var(--error)' }
-                                    : { borderColor: 'var(--success)', background: 'var(--success-soft)', color: 'var(--success)' }
-                                }
+                                onClick={() => void handleExtendSubscription(restaurant, typedPreset)}
+                                disabled={busy || statusBusy || pendingAction?.startsWith(`extend:${restaurant.id}:`) === true}
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition disabled:opacity-60"
+                                style={{ borderColor: 'var(--border-soft)', background: 'var(--surface-muted)', color: 'var(--text)' }}
                               >
-                                {statusBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Power className="h-3.5 w-3.5" />}
-                                {restaurant.status === 'active' ? 'Pasife Al' : 'Aktifleştir'}
+                                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarPlus2 className="h-4 w-4" />}
+                                {label}
                               </button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
             )}
           </section>
@@ -608,17 +686,100 @@ function Field({
   )
 }
 
+function PlanPill({ plan }: { plan: RestaurantPlan }) {
+  return (
+    <span
+      className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold lowercase"
+      style={
+        plan === 'trial'
+          ? { background: 'var(--primary-soft)', color: 'var(--primary-soft-foreground)' }
+          : { background: 'rgba(16,185,129,0.12)', color: 'var(--success)' }
+      }
+    >
+      {plan}
+    </span>
+  )
+}
+
+function StatusPill({ status }: { status: RestaurantStatus }) {
+  return (
+    <span
+      className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold lowercase"
+      style={
+        status === 'active'
+          ? { background: 'var(--success-soft)', color: 'var(--success)' }
+          : { background: 'var(--warning-soft)', color: 'var(--warning)' }
+      }
+    >
+      {status}
+    </span>
+  )
+}
+
+function AlertPill({
+  text,
+  tone,
+}: {
+  text: string
+  tone: 'error' | 'warning'
+}) {
+  return (
+    <span
+      className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
+      style={
+        tone === 'error'
+          ? { background: 'var(--error-soft)', color: 'var(--error)' }
+          : { background: 'var(--warning-soft)', color: 'var(--warning)' }
+      }
+    >
+      {text}
+    </span>
+  )
+}
+
+function InfoItem({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string
+  value: string
+  icon?: typeof Mail
+}) {
+  return (
+    <div className="rounded-[1.15rem] px-4 py-3" style={{ background: 'var(--surface-muted)', border: '1px solid var(--border-soft)' }}>
+      <div className="flex items-start gap-3">
+        {Icon && (
+          <div className="rounded-xl p-2" style={{ background: 'white', color: 'var(--primary-soft-foreground)' }}>
+            <Icon className="h-4 w-4" />
+          </div>
+        )}
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--muted)' }}>
+            {label}
+          </p>
+          <p className="mt-1 text-sm font-medium break-words" style={{ color: 'var(--text)' }}>
+            {value}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CountPill({
   icon: Icon,
   value,
+  label,
 }: {
   icon: typeof SquareMenu
   value: number
+  label: string
 }) {
   return (
     <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold" style={{ background: 'var(--surface-muted)', color: 'var(--text-secondary)' }}>
       <Icon className="h-3.5 w-3.5" />
-      {value}
+      {label}: {value}
     </span>
   )
 }

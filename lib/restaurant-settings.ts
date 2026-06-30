@@ -1,6 +1,7 @@
-import type { Restaurant, RestaurantGeneralSettings, RestaurantStatus } from '@/lib/types'
+import type { Restaurant, RestaurantGeneralSettings, RestaurantPlan, RestaurantStatus } from '@/lib/types'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+const DAY_IN_MS = 24 * 60 * 60 * 1000
 
 export const DEFAULT_BUSINESS_NAME = 'İşletme'
 export const DEFAULT_PRIMARY_COLOR = '#7c3aed'
@@ -31,6 +32,10 @@ function toMillis(value: unknown): number | null {
 
 function normalizeRestaurantStatus(value: unknown): RestaurantStatus {
   return value === 'passive' ? 'passive' : 'active'
+}
+
+export function normalizeRestaurantPlan(value: unknown): RestaurantPlan {
+  return value === 'trial' ? 'trial' : 'paid'
 }
 
 export function isValidRestaurantThemeColor(value: string) {
@@ -120,10 +125,20 @@ export function normalizeRestaurantDocument(value: unknown, id = ''): Restaurant
       logoUrl: '',
       primaryColor: '',
       status: 'active',
+      plan: 'paid',
+      trialStartedAt: null,
+      trialEndsAt: null,
       subscriptionExpiresAt: null,
       createdAt: null,
       updatedAt: null,
       phone: '',
+      ownerUid: '',
+      ownerName: '',
+      ownerEmail: '',
+      businessType: '',
+      city: '',
+      district: '',
+      onboardingCompleted: false,
       adminEmail: '',
     }
   }
@@ -139,10 +154,20 @@ export function normalizeRestaurantDocument(value: unknown, id = ''): Restaurant
         ? data.primaryColor.trim()
         : '',
     status: normalizeRestaurantStatus(data.status),
+    plan: normalizeRestaurantPlan(typeof data.plan === 'string' ? data.plan.trim().toLowerCase() : ''),
+    trialStartedAt: toMillis(data.trialStartedAt),
+    trialEndsAt: toMillis(data.trialEndsAt),
     subscriptionExpiresAt: toMillis(data.subscriptionExpiresAt),
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
     phone: typeof data.phone === 'string' ? data.phone.trim() : '',
+    ownerUid: typeof data.ownerUid === 'string' ? data.ownerUid.trim() : '',
+    ownerName: typeof data.ownerName === 'string' ? data.ownerName.trim() : '',
+    ownerEmail: typeof data.ownerEmail === 'string' ? data.ownerEmail.trim() : '',
+    businessType: typeof data.businessType === 'string' ? data.businessType.trim() : '',
+    city: typeof data.city === 'string' ? data.city.trim() : '',
+    district: typeof data.district === 'string' ? data.district.trim() : '',
+    onboardingCompleted: data.onboardingCompleted === true,
     adminEmail: typeof data.adminEmail === 'string' ? data.adminEmail.trim() : '',
   }
 }
@@ -181,6 +206,18 @@ export function getRestaurantAccessBlockMessage(
   if (restaurant.status === 'passive') return 'Aboneliğiniz pasif.'
   if (isRestaurantSubscriptionExpired(restaurant, now)) return 'Aboneliğinizin süresi dolmuş.'
   return null
+}
+
+export function getRestaurantRemainingDays(
+  restaurant: Pick<Restaurant, 'subscriptionExpiresAt'> | null | undefined,
+  now = Date.now(),
+) {
+  if (typeof restaurant?.subscriptionExpiresAt !== 'number') return null
+
+  const diff = restaurant.subscriptionExpiresAt - now
+  if (diff <= 0) return 0
+
+  return Math.ceil(diff / DAY_IN_MS)
 }
 
 export function resolveRestaurantBusinessName(

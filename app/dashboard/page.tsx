@@ -24,13 +24,14 @@ import {
   Armchair,
   Bell,
   CircleCheckBig,
-  Users,
-  TrendingUp,
-  ShoppingBag,
-  Package,
-  Calculator,
   Calendar,
+  Calculator,
   ChevronDown,
+  MessageCircle,
+  Package,
+  ShoppingBag,
+  TrendingUp,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { useOpenCalls } from "@/components/dashboard/OpenCallsProvider";
@@ -57,10 +58,11 @@ import {
   type DateRange,
   type AnalyticsData,
 } from '@/lib/analytics'
-import type { WaiterCall, Table } from "@/lib/types";
+import type { Restaurant, Table, WaiterCall } from "@/lib/types";
 
 const TEXT = "var(--text)";
 const PRIMARY = "var(--primary)";
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 function getTodayStart() {
   const d = new Date();
@@ -100,10 +102,26 @@ const EMPTY_ANALYTICS: AnalyticsData = {
   categoryBreakdown: [],
 }
 
+function getTrialBannerState(restaurant: Restaurant | null) {
+  if (!restaurant || restaurant.plan !== 'trial' || typeof restaurant.trialEndsAt !== 'number') {
+    return null
+  }
+
+  const diff = restaurant.trialEndsAt - Date.now()
+  if (diff <= 0) {
+    return { state: 'expired' as const }
+  }
+
+  return {
+    state: 'active' as const,
+    daysRemaining: Math.max(1, Math.ceil(diff / DAY_IN_MS)),
+  }
+}
+
 export default function DashboardPage() {
   const { profile } = useAuth();
   const { pendingCalls } = useOpenCalls();
-  const { settings } = useRestaurantSettingsContext()
+  const { settings, restaurant } = useRestaurantSettingsContext()
   const router = useRouter();
   const restaurantId = profile?.restaurantId || '';
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([]);
@@ -114,6 +132,7 @@ export default function DashboardPage() {
   const [dateRange, setDateRange] = useState<DateRange>('today');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const businessName = resolveRestaurantBusinessName(settings)
+  const trialBanner = getTrialBannerState(restaurant)
 
   // Calculate analytics using useMemo instead of useEffect
   const analytics = useMemo(() => {
@@ -283,22 +302,67 @@ export default function DashboardPage() {
     : 0;
 
   return (
-    <div className="p-6 md:p-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
+    <div className="overflow-x-hidden p-4 sm:p-6 md:p-8">
+      {trialBanner && (
+        <div
+          className="mb-6 rounded-[1.75rem] border px-5 py-4"
+          style={{
+            background: trialBanner.state === 'active' ? 'var(--primary-soft)' : 'rgba(245, 158, 11, 0.12)',
+            borderColor: trialBanner.state === 'active' ? 'var(--primary-border)' : 'rgba(245, 158, 11, 0.22)',
+          }}
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: TEXT }}>
+                {trialBanner.state === 'active'
+                  ? `7 günlük ücretsiz deneme süreniz aktif. Kalan süre: ${trialBanner.daysRemaining} gün.`
+                  : 'Deneme süreniz bitti. Devam etmek için WhatsApp üzerinden iletişime geçin.'}
+              </p>
+              <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                {trialBanner.state === 'active'
+                  ? 'Deneme süresi boyunca panelinizi ve QR menü altyapınızı kullanmaya devam edebilirsiniz.'
+                  : 'Aboneliği devam ettirmek için hızlıca bizimle bağlantı kurabilirsiniz.'}
+              </p>
+            </div>
+
+            {trialBanner.state === 'expired' ? (
+              <a
+                href="https://wa.me/905421320706"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-92"
+                style={{ background: '#25d366' }}
+              >
+                <MessageCircle className="h-4 w-4" />
+                WhatsApp ile İletişime Geç
+              </a>
+            ) : (
+              <span
+                className="inline-flex items-center justify-center rounded-full px-3.5 py-2 text-xs font-semibold uppercase tracking-[0.18em]"
+                style={{ background: '#ffffff', color: PRIMARY }}
+              >
+                Deneme Aktif
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="font-bold text-2xl" style={{ color: TEXT }}>
             Genel Bakış
           </h1>
-          <p className="text-gray-400 text-sm mt-0.5">
+          <p className="mt-0.5 break-words text-sm text-gray-400">
             {businessName} — Canlı veriler
           </p>
         </div>
 
         {/* Date Range Selector */}
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <button
             onClick={() => setShowDatePicker(!showDatePicker)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border text-sm font-medium transition-all hover:shadow-md"
+            className="flex w-full items-center justify-between gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-medium transition-all hover:shadow-md sm:w-auto sm:justify-start"
             style={{ borderColor: 'var(--border-soft)', color: TEXT }}
           >
             <Calendar size={16} />
@@ -308,7 +372,7 @@ export default function DashboardPage() {
 
           {showDatePicker && (
             <div
-              className="absolute right-0 top-full mt-2 bg-white rounded-xl border shadow-xl z-10 py-2 min-w-[160px]"
+              className="absolute right-0 top-full z-10 mt-2 min-w-[160px] rounded-xl border bg-white py-2 shadow-xl"
               style={{ borderColor: 'var(--border-soft)' }}
             >
               {(['today', 'week', 'month', 'year'] as DateRange[]).map((range) => (
@@ -327,7 +391,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Satış İstatistikleri ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
         <RevenueCard
           Icon={TrendingUp}
           label={`${DATE_RANGE_LABELS[dateRange]} Ciro`}
@@ -352,7 +416,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Operasyonel İstatistikler ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
         <StatCard
           Icon={Bell}
           label="Bekleyen Çağrı"
@@ -370,7 +434,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Orta bölüm ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+      <div className="mb-8 grid grid-cols-1 gap-6 xl:grid-cols-2">
         {/* Canlı çağrılar */}
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -447,7 +511,7 @@ export default function DashboardPage() {
           <h2 className="font-semibold text-lg mb-3" style={{ color: TEXT }}>
             Günün Özeti
           </h2>
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <SummaryCard
               label="En Aktif Garson"
               value={topWaiter ? topWaiter.name.split(" ")[0] : "—"}
@@ -510,7 +574,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Satış Detayları ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* En çok satan ürünler */}
         <section className="bg-white rounded-2xl border border-gray-100 p-5">
           <h3 className="font-semibold text-base mb-4" style={{ color: TEXT }}>
@@ -603,7 +667,7 @@ export default function DashboardPage() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="rounded-xl p-3" style={{ background: 'var(--surface-muted)' }}>
                   <p className="text-xs text-gray-400">Tamamlanan</p>
                   <p className="text-lg font-bold" style={{ color: PRIMARY }}>

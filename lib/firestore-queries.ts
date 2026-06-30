@@ -63,6 +63,22 @@ export function getMenuProductsQuery(restaurantId: string) {
   )
 }
 
+export function getRestaurantLoyaltyCampaignsQuery(restaurantId: string, max = 50) {
+  return query(
+    collection(db, 'restaurants', restaurantId, 'loyaltyCampaigns'),
+    orderBy('updatedAt', 'desc'),
+    limit(max)
+  )
+}
+
+export function getRestaurantActiveLoyaltyCampaignsQuery(restaurantId: string, max = 1) {
+  return query(
+    collection(db, 'restaurants', restaurantId, 'loyaltyCampaigns'),
+    where('active', '==', true),
+    limit(max)
+  )
+}
+
 export function getRestaurantWaiterUsersQuery(restaurantId: string) {
   return query(
     collection(db, 'users'),

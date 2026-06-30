@@ -3,6 +3,7 @@ export interface UserProfile {
   email: string
   role: 'admin' | 'waiter' | 'super_admin'
   name: string
+  phone?: string
   restaurantId?: string
   active: boolean
   avgRating?: number
@@ -26,6 +27,34 @@ export interface Product {
   categoryId: string
   available: boolean
   image?: string
+}
+
+export interface LoyaltyCampaign {
+  id: string
+  name: string
+  active: boolean
+  targetProductId: string
+  targetProductName: string
+  requiredQuantity: number
+  rewardProductId: string
+  rewardProductName: string
+  rewardQuantity: number
+  description: string
+  createdAt: number | null
+  updatedAt: number | null
+}
+
+export interface RestaurantCustomer {
+  id: string
+  name: string
+  phone: string
+  email?: string
+  loyaltyEnabled: boolean
+  points: number
+  totalOrders: number
+  totalSpent: number
+  createdAt: number | null
+  updatedAt: number | null
 }
 
 export interface MenuThemeSettings {
@@ -62,6 +91,7 @@ export interface SharedCartItem {
 }
 
 export type RestaurantStatus = 'active' | 'passive'
+export type RestaurantPlan = 'trial' | 'paid'
 
 export interface Restaurant {
   id: string
@@ -70,10 +100,20 @@ export interface Restaurant {
   logoUrl?: string
   primaryColor?: string
   status?: RestaurantStatus
+  plan?: RestaurantPlan
+  trialStartedAt?: number | null
+  trialEndsAt?: number | null
   subscriptionExpiresAt?: number | null
   createdAt?: number | null
   updatedAt?: number | null
   phone?: string
+  ownerUid?: string
+  ownerName?: string
+  ownerEmail?: string
+  businessType?: string
+  city?: string
+  district?: string
+  onboardingCompleted?: boolean
   adminEmail?: string
 }
 
@@ -139,6 +179,7 @@ export interface Table {
   id: string
   number: number
   status: TableStatus
+  active?: boolean
   sessionId: string | null
   openedAt: number | null
   lastPaymentCompletedAt?: number | null

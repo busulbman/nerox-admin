@@ -163,17 +163,17 @@ export default function LeaderboardPage() {
   }
 
   return (
-    <div className="theme-page min-h-screen pb-8" style={themeVars}>
+    <div className="theme-page min-h-screen overflow-x-hidden pb-8" style={themeVars}>
       <header
         className="sticky top-0 z-20"
         style={{ background: `linear-gradient(135deg, ${primary} 0%, ${primary}dd 100%)` }}
       >
-        <div className="flex items-center justify-between px-5 pb-4 pt-4">
-          <div>
-            <p className="text-xs" style={{ color: "rgba(255,255,255,0.62)" }}>
+        <div className="flex items-center justify-between gap-3 px-4 pb-4 pt-4 sm:px-5">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs" style={{ color: "rgba(255,255,255,0.62)" }}>
               {businessName}
             </p>
-            <p className="mt-0.5 text-lg font-bold leading-tight" style={{ color: primaryForeground }}>
+            <p className="mt-0.5 truncate text-lg font-bold leading-tight" style={{ color: primaryForeground }}>
               Garson Sıralaması
             </p>
           </div>
@@ -186,7 +186,7 @@ export default function LeaderboardPage() {
             }}
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Geri
+            <span className="hidden sm:inline">Geri</span>
           </button>
         </div>
       </header>

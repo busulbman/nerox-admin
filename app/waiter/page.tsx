@@ -612,22 +612,22 @@ export default function WaiterPage() {
   const visibleProducts = menuProducts.filter((p) => p.categoryId === activeCat && p.available).sort((a, b) => a.name.localeCompare(b.name, 'tr'))
 
   return (
-    <div className="theme-page min-h-screen pb-20" style={themeVars}>
+    <div className="theme-page min-h-screen overflow-x-hidden pb-20" style={themeVars}>
 
       {/* ── Header ── */}
       <header
         className="sticky top-0 z-20"
         style={{ background: `linear-gradient(135deg, ${BROWN} 0%, ${BROWN}dd 100%)` }}
       >
-        <div className="px-5 pt-4 pb-3">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.62)' }}>{panelTitle}</p>
-              <p className="font-bold text-lg leading-tight mt-0.5" style={{ color: PRIMARY_FOREGROUND }}>
+        <div className="px-4 pb-3 pt-4 sm:px-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.62)' }}>{panelTitle}</p>
+              <p className="mt-0.5 font-bold text-lg leading-tight" style={{ color: PRIMARY_FOREGROUND }}>
                 Merhaba, {profile.name.split(' ')[0]}
               </p>
             </div>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="mt-1 flex shrink-0 items-center gap-2">
               <button
                 onClick={async () => {
                   if (!audioInitialized) {
@@ -666,7 +666,7 @@ export default function WaiterPage() {
                 style={{ background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.86)' }}
               >
                 <LogOut className="h-3.5 w-3.5" />
-                Çıkış
+                <span className="hidden sm:inline">Çıkış</span>
               </button>
             </div>
           </div>
@@ -734,7 +734,7 @@ export default function WaiterPage() {
       )}
 
       {/* ── Tab content ── */}
-      <div className="px-4 py-5 max-w-lg mx-auto">
+      <div className="mx-auto max-w-lg px-4 py-5">
 
         {/* ÇAĞRILAR TAB */}
         {activeTab === 'calls' && (
@@ -743,7 +743,7 @@ export default function WaiterPage() {
             <section>
               <SectionHeader label="Puanlarım" count={myRatings.length} badge={myRatings.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
               <div className="theme-card rounded-2xl p-5">
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <MiniStatCard label="Ortalama" value={avgWaiterRating === '—' ? '—' : `${avgWaiterRating} ★`} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
                   <MiniStatCard label="Toplam"   value={String(myRatings.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
                   <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
@@ -1013,7 +1013,7 @@ export default function WaiterPage() {
       {/* ── Floating New Order Button ── */}
       <button
         onClick={openOrderModal}
-        className="fixed z-30 flex items-center gap-2 rounded-full px-5 py-3 font-semibold text-sm shadow-lg transition-all active:scale-95"
+        className="fixed left-4 right-4 z-30 flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold shadow-lg transition-all active:scale-95 sm:left-auto sm:right-4 sm:w-auto"
         style={{
           bottom: 'calc(70px + env(safe-area-inset-bottom))',
           right: '16px',

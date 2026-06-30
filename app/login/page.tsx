@@ -8,6 +8,7 @@ import { LockKeyhole } from 'lucide-react'
 import { auth } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
 import BrandAuthShell from '@/components/BrandAuthShell'
+import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -15,18 +16,25 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const { user, profile, loading } = useAuth()
+  const { restaurant, loading: restaurantLoading } = useRestaurantSettings(
+    profile?.role === 'admin' ? profile.restaurantId : null,
+  )
   const router = useRouter()
 
   useEffect(() => {
     if (loading || !user) return
+    if (profile?.role === 'admin' && restaurantLoading) return
+
     if (profile?.role === 'super_admin') {
       router.replace('/super-admin')
     } else if (profile?.role === 'waiter') {
       router.replace('/waiter')
+    } else if (restaurant?.onboardingCompleted === false) {
+      router.replace('/onboarding')
     } else {
       router.replace('/dashboard')
     }
-  }, [user, profile, loading, router])
+  }, [loading, profile, restaurant?.onboardingCompleted, restaurantLoading, router, user])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -41,7 +49,7 @@ export default function LoginPage() {
     }
   }
 
-  if (loading) return null
+  if (loading || (user && profile?.role === 'admin' && restaurantLoading)) return null
 
   return (
     <BrandAuthShell
@@ -101,6 +109,13 @@ export default function LoginPage() {
         >
           {submitting ? 'Giriş yapılıyor...' : 'Giriş Yap'}
         </button>
+
+        <p className="text-center text-sm text-white/60">
+          Hesabınız yok mu?{' '}
+          <Link href="/register" className="font-semibold text-[#d8c3ff] transition hover:text-white">
+            İşletme hesabı oluşturun
+          </Link>
+        </p>
 
         <p className="text-center text-xs leading-5 text-white/48">
           Giriş yaparak{' '}

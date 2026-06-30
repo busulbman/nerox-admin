@@ -18,14 +18,31 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
-import { Check, CircleCheckBig, Copy, Globe, LoaderCircle, SearchX, ShoppingBag, ShoppingCart, UtensilsCrossed, Wifi, X } from 'lucide-react'
+import {
+  BadgeCheck,
+  Check,
+  CircleCheckBig,
+  Copy,
+  Gift,
+  Globe,
+  LoaderCircle,
+  Mail,
+  Phone,
+  SearchX,
+  ShoppingBag,
+  ShoppingCart,
+  UserRound,
+  UtensilsCrossed,
+  Wifi,
+  X,
+} from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
 import { resolveRestaurantBySlugOrId, type ResolvedRestaurant } from '@/lib/restaurant-resolver'
-import { getMenuCategoriesQuery, getMenuProductsQuery } from '@/lib/firestore-queries'
-import { normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
+import { getMenuCategoriesQuery, getMenuProductsQuery, getRestaurantActiveLoyaltyCampaignsQuery } from '@/lib/firestore-queries'
+import { normalizeLoyaltyCampaign, normalizeTable, normalizeWaiterCall } from '@/lib/firestore-models'
 import {
   DEFAULT_MENU_PRIMARY_COLOR,
   EMPTY_MENU_THEME_SETTINGS,
@@ -61,7 +78,16 @@ import {
   subscribeToSharedCart,
   updateSharedCartItemQuantity,
 } from '@/lib/shared-cart'
-import type { Category, MenuThemeSettings, Product, RestaurantGeneralSettings, SharedCartItem, Table, WaiterCall } from '@/lib/types'
+import type {
+  Category,
+  LoyaltyCampaign,
+  MenuThemeSettings,
+  Product,
+  RestaurantGeneralSettings,
+  SharedCartItem,
+  Table,
+  WaiterCall,
+} from '@/lib/types'
 import { formatPriceWithConversion, getExchangeRates, type ExchangeRates } from '@/lib/currency'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
@@ -69,6 +95,8 @@ type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'e
 type TableLookupResult = { tableDocId: string; table: Table }
 type RatingForm = { serviceRating: number; waiterRating: number; comment: string }
 type OnboardingStep = 'language' | 'name' | 'done'
+type LoyaltyCustomerState = { id: string; name: string; phone: string }
+type LoyaltyRegisterForm = { name: string; phone: string; email: string }
 type ProductMeta = {
   imageUrl: string
   fallbackEmoji: string
@@ -88,6 +116,7 @@ type CachedMenuData = {
 const menuDataCache = new Map<string, CachedMenuData>()
 const TIP_OPTIONS: CallTip[] = ['sipariş', 'hesap', 'yardım']
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
+const EMPTY_LOYALTY_FORM: LoyaltyRegisterForm = { name: '', phone: '', email: '' }
 const ANONYMOUS_CUSTOMER_NAME_PATTERN_BASE = /^(Müşteri|Customer|Клиент|عميل)(?:\s+(\d+))?$/
 
 function createSessionId(): string {
@@ -130,6 +159,14 @@ function getCustomerNameKey(restaurantId: string, tableId: string) {
   return `nerox_customer_name_${restaurantId}_${tableId}`
 }
 
+function getLoyaltyPromptKey(restaurantId: string, tableDocId: string, sessionId: string) {
+  return `nerox:loyalty-prompted:${restaurantId}:${tableDocId}:${sessionId}`
+}
+
+function getLoyaltyCustomerStorageKey(restaurantId: string, field: 'id' | 'name' | 'phone') {
+  return `nerox:loyalty-customer:${restaurantId}:${field}`
+}
+
 function normalizeStoredCustomerName(value: string | null): string | null {
   const trimmed = value?.trim() ?? ''
   return trimmed || null
@@ -143,6 +180,39 @@ function readCustomerName(restaurantId: string, tableId: string, sessionId: stri
 
 function saveCustomerName(restaurantId: string, tableId: string, name: string) {
   window.localStorage.setItem(getCustomerNameKey(restaurantId, tableId), name)
+}
+
+function hasLoyaltyPromptBeenHandled(restaurantId: string, tableDocId: string, sessionId: string) {
+  return window.localStorage.getItem(getLoyaltyPromptKey(restaurantId, tableDocId, sessionId)) === '1'
+}
+
+function persistLoyaltyPromptHandled(restaurantId: string, tableDocId: string, sessionId: string) {
+  window.localStorage.setItem(getLoyaltyPromptKey(restaurantId, tableDocId, sessionId), '1')
+}
+
+function readStoredLoyaltyCustomer(restaurantId: string): LoyaltyCustomerState | null {
+  const id = window.localStorage.getItem(getLoyaltyCustomerStorageKey(restaurantId, 'id'))?.trim() ?? ''
+  const name = window.localStorage.getItem(getLoyaltyCustomerStorageKey(restaurantId, 'name'))?.trim() ?? ''
+  const phone = window.localStorage.getItem(getLoyaltyCustomerStorageKey(restaurantId, 'phone'))?.trim() ?? ''
+
+  if (!id || !name || !phone) return null
+
+  return { id, name, phone }
+}
+
+function persistStoredLoyaltyCustomer(restaurantId: string, customer: LoyaltyCustomerState) {
+  window.localStorage.setItem(getLoyaltyCustomerStorageKey(restaurantId, 'id'), customer.id)
+  window.localStorage.setItem(getLoyaltyCustomerStorageKey(restaurantId, 'name'), customer.name)
+  window.localStorage.setItem(getLoyaltyCustomerStorageKey(restaurantId, 'phone'), customer.phone)
+}
+
+function buildLoyaltyCampaignRule(campaign: LoyaltyCampaign, language: MenuLanguage) {
+  return t(language, 'loyaltyCampaignRule', {
+    required: campaign.requiredQuantity,
+    target: campaign.targetProductName,
+    reward: campaign.rewardQuantity,
+    rewardProduct: campaign.rewardProductName,
+  })
 }
 
 function collectCustomerNamesFromCalls(calls: WaiterCall[]): string[] {
@@ -287,6 +357,13 @@ export default function MenuPage() {
   const [customerNamePersisted, setCustomerNamePersisted] = useState(false)
   const [customerNameModal, setCustomerNameModal] = useState(false)
   const [customerNameInput, setCustomerNameInput] = useState('')
+  const [activeLoyaltyCampaign, setActiveLoyaltyCampaign] = useState<LoyaltyCampaign | null>(null)
+  const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomerState | null>(null)
+  const [loyaltyPromptOpen, setLoyaltyPromptOpen] = useState(false)
+  const [loyaltyRegisterOpen, setLoyaltyRegisterOpen] = useState(false)
+  const [loyaltyRegisterForm, setLoyaltyRegisterForm] = useState<LoyaltyRegisterForm>(EMPTY_LOYALTY_FORM)
+  const [loyaltyRegistering, setLoyaltyRegistering] = useState(false)
+  const [loyaltyRegisterMessage, setLoyaltyRegisterMessage] = useState<string | null>(null)
   const [cartDrawer, setCartDrawer] = useState(false)
   const [orderSending, setOrderSending] = useState(false)
   const [orderSent, setOrderSent] = useState(false)
@@ -439,6 +516,11 @@ export default function MenuPage() {
       setCustomerNamePersisted(false)
       setCustomerNameInput('')
       setCustomerNameModal(false)
+      setActiveLoyaltyCampaign(null)
+      setLoyaltyPromptOpen(false)
+      setLoyaltyRegisterOpen(false)
+      setLoyaltyRegisterForm(EMPTY_LOYALTY_FORM)
+      setLoyaltyRegisterMessage(null)
       setSharedCart([])
       setCartDrawer(false)
       setOrderSent(false)
@@ -563,6 +645,85 @@ export default function MenuPage() {
     const timeout = requestAnimationFrame(loadCustomerState)
     return () => { cancelled = true; cancelAnimationFrame(timeout) }
   }, [language, restaurantId, sessionId, tableDocId, tableId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const syncStoredCustomer = () => {
+      if (cancelled) return
+
+      if (!restaurantId) {
+        setLoyaltyCustomer(null)
+        return
+      }
+
+      const storedCustomer = readStoredLoyaltyCustomer(restaurantId)
+      setLoyaltyCustomer(storedCustomer)
+
+      if (storedCustomer) {
+        setLoyaltyRegisterForm({ name: storedCustomer.name, phone: storedCustomer.phone, email: '' })
+      }
+    }
+
+    const frameId = requestAnimationFrame(syncStoredCustomer)
+
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(frameId)
+    }
+  }, [restaurantId])
+
+  useEffect(() => {
+    if (
+      onboardingStep !== 'done' ||
+      accessState !== 'ready' ||
+      !restaurantId ||
+      !sessionId ||
+      !tableDocId ||
+      loyaltyCustomer ||
+      customerNameModal
+    ) {
+      return
+    }
+
+    const currentRestaurantId = restaurantId
+    const currentTableDocId = tableDocId
+    const currentSessionId = sessionId
+    let cancelled = false
+
+    async function loadActiveCampaign() {
+      try {
+        const campaignSnap = await getDocs(getRestaurantActiveLoyaltyCampaignsQuery(currentRestaurantId))
+        if (cancelled) return
+
+        if (campaignSnap.empty) {
+          setActiveLoyaltyCampaign(null)
+          setLoyaltyPromptOpen(false)
+          return
+        }
+
+        const campaign = normalizeLoyaltyCampaign(
+          campaignSnap.docs[0].id,
+          campaignSnap.docs[0].data() as Record<string, unknown>,
+        )
+
+        setActiveLoyaltyCampaign(campaign)
+
+        if (hasLoyaltyPromptBeenHandled(currentRestaurantId, currentTableDocId, currentSessionId)) return
+
+        setLoyaltyPromptOpen(true)
+        setLoyaltyRegisterMessage(null)
+      } catch (error) {
+        console.error('Loyalty campaign load error:', error)
+      }
+    }
+
+    void loadActiveCampaign()
+
+    return () => {
+      cancelled = true
+    }
+  }, [accessState, customerNameModal, loyaltyCustomer, onboardingStep, restaurantId, sessionId, tableDocId])
 
   // Fetch exchange rates for currency conversion
   useEffect(() => {
@@ -718,6 +879,93 @@ export default function MenuPage() {
     setRatingMessage(null)
     setRatingSubmitted(false)
     setRatingForm(EMPTY_RATING_FORM)
+  }
+
+  function dismissLoyaltyPrompt() {
+    if (restaurantId && tableDocId && sessionId) {
+      persistLoyaltyPromptHandled(restaurantId, tableDocId, sessionId)
+    }
+
+    setLoyaltyPromptOpen(false)
+    setLoyaltyRegisterOpen(false)
+    setLoyaltyRegisterMessage(null)
+  }
+
+  function openLoyaltyRegister() {
+    setLoyaltyPromptOpen(false)
+    setLoyaltyRegisterMessage(null)
+    setLoyaltyRegisterForm((current) => ({
+      ...current,
+      name: current.name.trim() || customerName?.trim() || '',
+    }))
+    setLoyaltyRegisterOpen(true)
+  }
+
+  async function submitLoyaltyRegistration() {
+    const name = loyaltyRegisterForm.name.trim()
+    const phone = loyaltyRegisterForm.phone.trim()
+    const email = loyaltyRegisterForm.email.trim()
+
+    if (!restaurantId) {
+      setLoyaltyRegisterMessage(t(language, 'customerInfoError'))
+      return
+    }
+
+    if (!name || !phone) {
+      setLoyaltyRegisterMessage(t(language, 'loyaltyNamePhoneRequired'))
+      return
+    }
+
+    setLoyaltyRegistering(true)
+    setLoyaltyRegisterMessage(null)
+
+    try {
+      const response = await fetch('/api/public/loyalty/customers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          restaurantId,
+          name,
+          phone,
+          email,
+        }),
+      })
+
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Kampanya kaydı tamamlanamadı.')
+      }
+
+      const nextCustomer = {
+        id: typeof payload.customerId === 'string' ? payload.customerId : '',
+        name: typeof payload.customerName === 'string' ? payload.customerName : name,
+        phone: typeof payload.customerPhone === 'string' ? payload.customerPhone : phone,
+      }
+
+      if (!nextCustomer.id || !nextCustomer.name || !nextCustomer.phone) {
+        throw new Error('Kampanya kaydı yanıtı eksik geldi.')
+      }
+
+      persistStoredLoyaltyCustomer(restaurantId, nextCustomer)
+      setLoyaltyCustomer(nextCustomer)
+      setLoyaltyRegisterForm({ name: nextCustomer.name, phone: nextCustomer.phone, email: '' })
+      setLoyaltyRegisterOpen(false)
+      setLoyaltyPromptOpen(false)
+      setLoyaltyRegisterMessage(null)
+      setActionMessage(t(language, 'loyaltyRegistrationReady'))
+
+      if (tableDocId && sessionId) {
+        persistLoyaltyPromptHandled(restaurantId, tableDocId, sessionId)
+      }
+
+      persistCustomerIdentity(nextCustomer.name)
+    } catch (error) {
+      setLoyaltyRegisterMessage(error instanceof Error ? error.message : 'Kampanya kaydı tamamlanamadı.')
+    } finally {
+      setLoyaltyRegistering(false)
+    }
   }
 
   function getKnownCustomerNames() {
@@ -1145,6 +1393,7 @@ export default function MenuPage() {
   const callButtonDisabled = accessState === 'checking' || accessState === 'missing' || accessState === 'error' || !!derivedAccessMessage || sending
   const displayTableLabel = table?.number ? String(table.number) : tableId
   const canDismissCustomerModal = !!customerName
+  const loyaltyCampaignRule = activeLoyaltyCampaign ? buildLoyaltyCampaignRule(activeLoyaltyCampaign, language) : null
   const modalSendDisabled = !selectedTip || sending || !!derivedAccessMessage || !!selectedTipLockMessage
   const primaryActionDisabled =
     accessState === 'checking' || accessState === 'missing' || accessState === 'error' || !!derivedAccessMessage || (cartCount > 0 ? orderSending : sending)
@@ -1268,18 +1517,18 @@ export default function MenuPage() {
         @keyframes menu-modal-pop { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
       `}</style>
 
-      <div className="min-h-screen pb-44 text-[#1a1a1a]" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
+      <div className="min-h-screen overflow-x-hidden pb-44 text-[#1a1a1a]" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
         <header className="sticky top-0 z-20 border-b border-black/5 backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
           <div className="max-w-2xl mx-auto px-4 pt-5 pb-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-3">
                 {menuLogoUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={menuLogoUrl} alt={menuDisplayName} className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" />
                 )}
-                <p className="text-[1.2rem] font-semibold leading-none" style={{ color: menuTextColor }}>{menuDisplayName}</p>
+                <p className="truncate text-[1.2rem] font-semibold leading-none" style={{ color: menuTextColor }}>{menuDisplayName}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   onClick={() => setLanguageModal(true)}
                   className="flex h-10 items-center justify-center gap-1 rounded-full bg-white px-3 shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
@@ -1303,10 +1552,10 @@ export default function MenuPage() {
             </div>
 
             <div className="mt-4 rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'table')} {displayTableLabel} • {t(language, 'welcome')}</p>
-                  <p className="mt-1 text-[14px] font-semibold" style={{ color: menuTextColor }}>
+                  <p className="mt-1 truncate text-[14px] font-semibold" style={{ color: menuTextColor }}>
                     {customerName ? customerName.toUpperCase() : t(language, 'discoverFavorites')}
                   </p>
                 </div>
@@ -1320,6 +1569,12 @@ export default function MenuPage() {
                   </button>
                 )}
               </div>
+              {loyaltyCustomer && (
+                <div className="mt-3 inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold" style={{ borderColor: menuBorderColor, background: menuSurfaceMuted, color: menuTextColor }}>
+                  <BadgeCheck size={14} style={{ color: menuPrimaryColor }} />
+                  <span className="truncate">{t(language, 'loyaltyAccountActive')}</span>
+                </div>
+              )}
             </div>
 
             {generalSettings.wifiEnabled && generalSettings.wifiName && (
@@ -1372,7 +1627,7 @@ export default function MenuPage() {
           </div>
         </header>
 
-        <main className="max-w-2xl mx-auto px-4 pt-5">
+        <main className="max-w-2xl mx-auto overflow-x-hidden px-4 pt-5">
           {visibleProducts.length === 0 ? (
             <div className="rounded-[28px] bg-white px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
               <UtensilsCrossed className="mx-auto mb-3 h-9 w-9 text-[var(--primary)]" />
@@ -1543,6 +1798,183 @@ export default function MenuPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Loyalty Prompt Modal */}
+        {loyaltyPromptOpen && activeLoyaltyCampaign && (
+          <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[2px] sm:items-center sm:justify-center">
+            <div
+              className="w-full rounded-t-[32px] px-5 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-lg sm:rounded-[28px] sm:px-6 sm:pb-6"
+              style={{ background: 'var(--page-bg)', animation: 'menu-modal-pop 240ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+            >
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: menuSurfaceMuted }}>
+                <Gift className="h-6 w-6" style={{ color: menuPrimaryColor }} />
+              </div>
+              <div className="text-center">
+                <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>
+                  {t(language, 'loyaltyPromptTitle')}
+                </h2>
+                <p className="mt-3 text-sm leading-6" style={{ color: menuMutedColor }}>
+                  {t(language, 'loyaltyPromptDescription')}
+                </p>
+              </div>
+
+              <div className="mt-5 rounded-[24px] border bg-white p-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.06)]" style={{ borderColor: menuBorderColor }}>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: menuPrimaryColor }}>
+                  {t(language, 'loyaltyCampaignLabel')}
+                </p>
+                <p className="mt-2 text-base font-semibold" style={{ color: menuTextColor }}>
+                  {activeLoyaltyCampaign.name}
+                </p>
+                {loyaltyCampaignRule && (
+                  <p className="mt-2 text-sm leading-6" style={{ color: menuTextColor }}>
+                    {loyaltyCampaignRule}
+                  </p>
+                )}
+                {activeLoyaltyCampaign.description && (
+                  <p className="mt-2 text-sm leading-6" style={{ color: menuMutedColor }}>
+                    {activeLoyaltyCampaign.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={openLoyaltyRegister}
+                  className="flex-1 rounded-[20px] px-5 py-4 text-sm font-bold"
+                  style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                >
+                  {t(language, 'loyaltyPromptAction')}
+                </button>
+                <button
+                  onClick={dismissLoyaltyPrompt}
+                  className="flex-1 rounded-[20px] px-5 py-4 text-sm font-semibold"
+                  style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
+                >
+                  {t(language, 'loyaltyPromptLater')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Loyalty Register Modal */}
+        {loyaltyRegisterOpen && (
+          <div className="fixed inset-0 z-50 flex items-end bg-black/45 backdrop-blur-[2px] sm:items-center sm:justify-center">
+            <div
+              className="w-full rounded-t-[32px] px-5 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-lg sm:rounded-[28px] sm:px-6 sm:pb-6"
+              style={{ background: 'var(--page-bg)', animation: 'menu-modal-pop 240ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>
+                    {t(language, 'loyaltyRegisterTitle')}
+                  </h2>
+                  <p className="mt-2 text-sm leading-6" style={{ color: menuMutedColor }}>
+                    {t(language, 'loyaltyRegisterDescription')}
+                  </p>
+                </div>
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl" style={{ background: menuSurfaceMuted }}>
+                  <Gift className="h-5 w-5" style={{ color: menuPrimaryColor }} />
+                </div>
+              </div>
+
+              {activeLoyaltyCampaign && loyaltyCampaignRule && (
+                <div className="mt-5 rounded-[22px] border bg-white px-4 py-3" style={{ borderColor: menuBorderColor }}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: menuPrimaryColor }}>
+                    {t(language, 'loyaltyCampaignLabel')}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold leading-6" style={{ color: menuTextColor }}>
+                    {loyaltyCampaignRule}
+                  </p>
+                </div>
+              )}
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void submitLoyaltyRegistration()
+                }}
+                className="mt-5 space-y-4"
+              >
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-2 text-sm font-medium" style={{ color: menuTextColor }}>
+                    <UserRound size={15} />
+                    {t(language, 'loyaltyNameLabel')}
+                  </span>
+                  <input
+                    value={loyaltyRegisterForm.name}
+                    onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder={t(language, 'loyaltyNameLabel')}
+                    className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                    style={{ color: menuTextColor }}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-2 text-sm font-medium" style={{ color: menuTextColor }}>
+                    <Phone size={15} />
+                    {t(language, 'loyaltyPhoneLabel')}
+                  </span>
+                  <input
+                    value={loyaltyRegisterForm.phone}
+                    onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, phone: event.target.value }))}
+                    placeholder={t(language, 'loyaltyPhoneLabel')}
+                    inputMode="tel"
+                    className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                    style={{ color: menuTextColor }}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-2 text-sm font-medium" style={{ color: menuTextColor }}>
+                    <Mail size={15} />
+                    {t(language, 'loyaltyEmailLabel')}
+                  </span>
+                  <input
+                    value={loyaltyRegisterForm.email}
+                    onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, email: event.target.value }))}
+                    placeholder={t(language, 'loyaltyEmailOptional')}
+                    inputMode="email"
+                    className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                    style={{ color: menuTextColor }}
+                  />
+                </label>
+
+                {loyaltyRegisterMessage && (
+                  <p className="rounded-[18px] border px-4 py-3 text-sm leading-6" style={{ borderColor: 'rgba(239,68,68,0.18)', background: 'rgba(239,68,68,0.06)', color: '#b91c1c' }}>
+                    {loyaltyRegisterMessage}
+                  </p>
+                )}
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="submit"
+                    disabled={loyaltyRegistering}
+                    className="flex-1 rounded-[20px] px-5 py-4 text-sm font-bold disabled:opacity-50"
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                  >
+                    {loyaltyRegistering ? (
+                      <span className="inline-flex items-center gap-2">
+                        <LoaderCircle size={16} className="animate-spin" />
+                        {t(language, 'sending')}
+                      </span>
+                    ) : (
+                      t(language, 'loyaltyRegisterSubmit')
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissLoyaltyPrompt}
+                    className="flex-1 rounded-[20px] px-5 py-4 text-sm font-semibold"
+                    style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
+                  >
+                    {t(language, 'loyaltyPromptLater')}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

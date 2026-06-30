@@ -167,6 +167,31 @@ service cloud.firestore {
         ]);
     }
 
+    function validPublicCustomerCreate(rid) {
+      return restaurantAllowsPublicAccess(rid)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() > 0
+        && (
+          !('email' in request.resource.data)
+          || request.resource.data.email == null
+          || request.resource.data.email is string
+        )
+        && request.resource.data.loyaltyEnabled == true
+        && request.resource.data.points == 0
+        && request.resource.data.totalOrders == 0
+        && request.resource.data.totalSpent == 0
+        && request.resource.data.keys().hasAll([
+          'name', 'phone', 'loyaltyEnabled', 'points', 'totalOrders',
+          'totalSpent', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'name', 'phone', 'email', 'loyaltyEnabled', 'points', 'totalOrders',
+          'totalSpent', 'createdAt', 'updatedAt'
+        ]);
+    }
+
     // ─── Users collection ───────────────────────────────────────────────────────
 
     match /users/{uid} {
@@ -223,6 +248,24 @@ service cloud.firestore {
         allow read: if isStaff(rid) || restaurantAllowsPublicAccess(rid);
         // Only admin can modify
         allow write: if isAdmin(rid);
+      }
+
+      // ── Loyalty Campaigns ─────────────────────────────────────────────────────
+
+      match /loyaltyCampaigns/{campaignId} {
+        allow read: if isAdmin(rid) || (
+          restaurantAllowsPublicAccess(rid)
+          && resource.data.active == true
+        );
+        allow write: if isAdmin(rid);
+      }
+
+      // ── Customers ─────────────────────────────────────────────────────────────
+
+      match /customers/{customerId} {
+        allow read: if isAdmin(rid);
+        allow write: if isAdmin(rid);
+        allow create: if validPublicCustomerCreate(rid);
       }
 
       // ── Tables ────────────────────────────────────────────────────────────────
@@ -348,6 +391,42 @@ service cloud.firestore {
           && request.resource.data.status in ['approved', 'suspicious']
           && request.resource.data.comment is string
           && request.resource.data.keys().hasAll(['restaurantId', 'tableId', 'tableNumber', 'sessionId', 'callId', 'waiterId', 'waiterName', 'serviceRating', 'waiterRating', 'comment', 'status', 'createdAt']);
+      }
+
+      // ── Loyalty Campaigns ─────────────────────────────────────────────────────
+
+      match /loyaltyCampaigns/{campaignId} {
+        // Staff can read all campaigns
+        allow read: if isStaff(rid);
+
+        // Public can read active campaigns only
+        allow read: if restaurantAllowsPublicAccess(rid)
+          && resource.data.active == true;
+
+        // Admin can manage campaigns
+        allow create, update, delete: if isAdmin(rid);
+      }
+
+      // ── Customers (Loyalty) ───────────────────────────────────────────────────
+
+      match /customers/{customerId} {
+        // Admin can read/write all customers
+        allow read, write: if isAdmin(rid);
+
+        // Waiter can read customers
+        allow read: if isWaiter(rid);
+
+        // Public can create customer record when registering for loyalty
+        allow create: if restaurantAllowsPublicAccess(rid)
+          && request.resource.data.name is string
+          && request.resource.data.phone is string
+          && request.resource.data.loyaltyEnabled == true
+          && request.resource.data.points == 0
+          && request.resource.data.totalOrders == 0
+          && request.resource.data.totalSpent == 0;
+
+        // Public can read own customer record by phone
+        allow read: if restaurantAllowsPublicAccess(rid);
       }
     }
 

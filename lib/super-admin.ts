@@ -1,6 +1,12 @@
 import type { NextRequest } from 'next/server'
-import type { UserProfile, RestaurantStatus } from '@/lib/types'
-import { DEFAULT_PRIMARY_COLOR, generateSlug, normalizeRestaurantDocument } from '@/lib/restaurant-settings'
+import type { RestaurantPlan, UserProfile, RestaurantStatus } from '@/lib/types'
+import {
+  DEFAULT_PRIMARY_COLOR,
+  generateSlug,
+  getRestaurantRemainingDays,
+  normalizeRestaurantDocument,
+} from '@/lib/restaurant-settings'
+import { SUBSCRIPTION_EXTENSION_PRESETS, type SubscriptionExtensionPreset } from '@/lib/subscription-extension'
 import { getAdminDb, getFieldValue, getTimestamp } from '@/lib/firebase-admin'
 import { verifyIdToken } from '@/lib/firebase-auth-rest'
 
@@ -8,12 +14,24 @@ type FirebaseTimestampLike = {
   toMillis?: () => number
 }
 
+const DAY_IN_MS = 24 * 60 * 60 * 1000
+
 export type SuperAdminRestaurantSummary = {
   id: string
   name: string
   slug: string
+  ownerName: string
+  email: string
+  phone: string
+  businessType: string
+  city: string
+  district: string
+  plan: RestaurantPlan
   status: RestaurantStatus
+  trialEndsAt: number | null
+  remainingDays: number | null
   subscriptionExpiresAt: number | null
+  isExpired: boolean
   productCount: number
   tableCount: number
   waiterCount: number
@@ -114,6 +132,14 @@ export async function parseSubscriptionDate(value: unknown) {
   return Timestamp.fromDate(expiresAt)
 }
 
+export function parseSubscriptionExtension(value: unknown): SubscriptionExtensionPreset {
+  if (SUBSCRIPTION_EXTENSION_PRESETS.includes(value as SubscriptionExtensionPreset)) {
+    return value as SubscriptionExtensionPreset
+  }
+
+  throw new SuperAdminApiError('Geçerli bir süre uzatma tipi gönderin.')
+}
+
 export async function requireSuperAdmin(request: NextRequest) {
   console.log('[requireSuperAdmin] Starting authentication via REST API...')
 
@@ -205,7 +231,7 @@ export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSumm
       const restaurant = normalizeRestaurantDocument(restaurantDoc.data(), restaurantDoc.id)
       const menuSlug = restaurant.slug || restaurantDoc.id
 
-      const [productCountSnap, tableCountSnap, waiterCountSnap] = await Promise.all([
+      const [productCountSnap, tableCountSnap, waiterCountSnap, adminUserSnap] = await Promise.all([
         adminDb.collection('restaurants').doc(restaurantDoc.id).collection('products').count().get(),
         adminDb.collection('restaurants').doc(restaurantDoc.id).collection('tables').count().get(),
         adminDb.collection('users')
@@ -213,14 +239,35 @@ export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSumm
           .where('role', '==', 'waiter')
           .count()
           .get(),
+        adminDb.collection('users')
+          .where('restaurantId', '==', restaurantDoc.id)
+          .where('role', '==', 'admin')
+          .limit(1)
+          .get(),
       ])
+
+      const adminProfile = !adminUserSnap.empty
+        ? ({ uid: adminUserSnap.docs[0].id, ...adminUserSnap.docs[0].data() } as UserProfile)
+        : null
+      const remainingDays = getRestaurantRemainingDays(restaurant)
+      const isExpired = remainingDays === 0 && typeof restaurant.subscriptionExpiresAt === 'number'
 
       return {
         id: restaurantDoc.id,
         name: restaurant.name || menuSlug,
         slug: menuSlug,
+        ownerName: restaurant.ownerName || adminProfile?.name || '',
+        email: restaurant.ownerEmail || restaurant.adminEmail || adminProfile?.email || '',
+        phone: restaurant.phone || adminProfile?.phone || '',
+        businessType: restaurant.businessType || '',
+        city: restaurant.city || '',
+        district: restaurant.district || '',
+        plan: restaurant.plan === 'trial' ? 'trial' : 'paid',
         status: restaurant.status === 'passive' ? 'passive' : 'active',
+        trialEndsAt: toMillis(restaurant.trialEndsAt),
+        remainingDays,
         subscriptionExpiresAt: toMillis(restaurant.subscriptionExpiresAt),
+        isExpired,
         productCount: Number(productCountSnap.data().count ?? 0),
         tableCount: Number(tableCountSnap.data().count ?? 0),
         waiterCount: Number(waiterCountSnap.data().count ?? 0),
@@ -255,6 +302,69 @@ export async function updateRestaurantStatus(restaurantId: string, status: Resta
   return {
     restaurantId: normalizedRestaurantId,
     status: nextStatus,
+  }
+}
+
+function addSubscriptionExtension(baseMs: number, preset: SubscriptionExtensionPreset) {
+  if (preset === '7d') {
+    return baseMs + 7 * DAY_IN_MS
+  }
+
+  const nextDate = new Date(baseMs)
+
+  if (preset === '1m') {
+    nextDate.setUTCMonth(nextDate.getUTCMonth() + 1)
+    return nextDate.getTime()
+  }
+
+  if (preset === '3m') {
+    nextDate.setUTCMonth(nextDate.getUTCMonth() + 3)
+    return nextDate.getTime()
+  }
+
+  nextDate.setUTCFullYear(nextDate.getUTCFullYear() + 1)
+  return nextDate.getTime()
+}
+
+export async function extendRestaurantSubscription(restaurantId: string, preset: SubscriptionExtensionPreset) {
+  const adminDb = await getAdminDb()
+  const FieldValue = await getFieldValue()
+  const Timestamp = await getTimestamp()
+  const normalizedRestaurantId = parseRequiredString(restaurantId, 'İşletme')
+  const restaurantRef = adminDb.collection('restaurants').doc(normalizedRestaurantId)
+  const restaurantSnap = await restaurantRef.get()
+
+  if (!restaurantSnap.exists) {
+    throw new SuperAdminApiError('İşletme bulunamadı.', 404)
+  }
+
+  const restaurant = normalizeRestaurantDocument(restaurantSnap.data(), restaurantSnap.id)
+  const now = Date.now()
+  const subscriptionBase = Math.max(now, restaurant.subscriptionExpiresAt ?? 0)
+  const nextSubscriptionExpiresAt = addSubscriptionExtension(subscriptionBase, preset)
+  const updates: Record<string, unknown> = {
+    subscriptionExpiresAt: Timestamp.fromMillis(nextSubscriptionExpiresAt),
+    status: 'active' as const,
+    updatedAt: FieldValue.serverTimestamp(),
+  }
+
+  if (preset === '7d' && restaurant.plan === 'trial') {
+    const trialBase = Math.max(now, restaurant.trialEndsAt ?? restaurant.subscriptionExpiresAt ?? 0)
+    const nextTrialEndsAt = addSubscriptionExtension(trialBase, preset)
+    updates.trialEndsAt = Timestamp.fromMillis(nextTrialEndsAt)
+    updates.subscriptionExpiresAt = Timestamp.fromMillis(Math.max(nextSubscriptionExpiresAt, nextTrialEndsAt))
+  } else if (preset !== '7d') {
+    updates.plan = 'paid' as const
+  }
+
+  await restaurantRef.set(updates, { merge: true })
+
+  return {
+    restaurantId: normalizedRestaurantId,
+    status: 'active' as const,
+    plan: preset === '7d' && restaurant.plan === 'trial' ? 'trial' as const : (updates.plan === 'paid' ? 'paid' as const : restaurant.plan),
+    subscriptionExpiresAt: toMillis(updates.subscriptionExpiresAt),
+    trialEndsAt: toMillis(updates.trialEndsAt),
   }
 }
 
@@ -300,9 +410,14 @@ export async function buildRestaurantSeedData(input: {
     restaurant: {
       name: restaurantName,
       slug: restaurantId,
+      ownerUid: adminUid,
+      ownerName: adminName,
+      ownerEmail: adminEmail,
       logoUrl: '',
       primaryColor: DEFAULT_PRIMARY_COLOR,
+      plan: 'paid' as const,
       status: 'active' as const,
+      onboardingCompleted: false,
       subscriptionExpiresAt,
       phone,
       adminEmail,
@@ -317,8 +432,10 @@ export async function buildRestaurantSeedData(input: {
       updatedAt: FieldValue.serverTimestamp(),
     },
     firstTable: {
+      id: '1',
       number: 1,
       status: 'boş' as const,
+      active: true,
       sessionId: null,
       openedAt: null,
       lastPaymentCompletedAt: null,

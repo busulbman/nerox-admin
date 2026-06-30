@@ -9,6 +9,7 @@ import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCall
 import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { auth } from '@/lib/firebase'
 import { requestPermission, showLocalNotification } from '@/lib/notifications'
+import { clearRecentOnboardingCompletion, hasRecentOnboardingCompletion } from '@/lib/onboarding'
 import { getRestaurantAccessBlockMessage, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import { buildThemeStyleVars } from '@/lib/ui-theme'
 import Sidebar from '@/components/Sidebar'
@@ -62,11 +63,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const { pendingCalls, pendingCount, connectionLost } = useOpenCalls()
-  const { settings, restaurant, primaryColor, textColor } = useRestaurantSettingsContext()
+  const { settings, restaurant, loading: restaurantLoading, primaryColor, textColor } = useRestaurantSettingsContext()
   const router = useRouter()
+  const restaurantId = profile?.restaurantId || ''
   const businessName = resolveRestaurantBusinessName(settings)
   const panelTitle = `${businessName} Yönetim Paneli`
   const accessBlockMessage = getRestaurantAccessBlockMessage(restaurant)
+  const hasExpiredAccess = accessBlockMessage === 'Aboneliğinizin süresi dolmuş.'
+  const hasOnboardingCompletionOverride = hasRecentOnboardingCompletion(restaurantId)
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -78,7 +82,28 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
     if (!user) { router.replace('/login'); return }
     if (profile?.role === 'super_admin') { router.replace('/super-admin'); return }
     if (profile?.role === 'waiter') { router.replace('/waiter'); return }
-  }, [user, profile, loading, router])
+    if (profile?.role === 'admin') {
+      if (restaurantLoading) return
+
+      if (restaurant?.onboardingCompleted === true) {
+        clearRecentOnboardingCompletion(restaurantId)
+        return
+      }
+
+      if (!hasOnboardingCompletionOverride && restaurant?.onboardingCompleted === false) {
+        router.replace('/onboarding')
+      }
+    }
+  }, [
+    hasOnboardingCompletionOverride,
+    loading,
+    profile,
+    restaurant?.onboardingCompleted,
+    restaurantId,
+    restaurantLoading,
+    router,
+    user,
+  ])
 
   useEffect(() => {
     if (!user || profile?.role === 'waiter') return
@@ -109,7 +134,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
   const themeVars = buildThemeStyleVars(primaryColor)
 
-  if (loading) {
+  if (loading || (profile?.role === 'admin' && restaurantLoading)) {
     return (
       <div className="theme-page flex min-h-screen items-center justify-center">
         <p className="text-sm text-[var(--muted)]">Yükleniyor...</p>
@@ -119,11 +144,14 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
   if (profile?.role === 'waiter') return null
   if (!user) return null
+  if (profile?.role === 'admin' && restaurant?.onboardingCompleted === false && !hasOnboardingCompletionOverride) {
+    return null
+  }
 
   return (
-    <div className="theme-page flex min-h-screen" style={themeVars}>
+    <div className="theme-page flex min-h-screen overflow-x-hidden" style={themeVars}>
       <header
-        className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14"
+        className="md:hidden fixed top-0 left-0 right-0 z-30 flex h-14 items-center justify-between gap-2 px-4"
         style={{ background: 'var(--primary)' }}
       >
         <button
@@ -135,7 +163,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
           <Menu size={20} />
         </button>
 
-        <p className="font-bold text-sm" style={{ color: textColor }}>{panelTitle}</p>
+        <p className="min-w-0 flex-1 truncate px-2 text-center font-bold text-sm" style={{ color: textColor }}>{panelTitle}</p>
 
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -170,7 +198,12 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+      <main
+        className={[
+          'min-w-0 flex-1 overflow-x-hidden pt-14 md:pt-0',
+          sidebarOpen ? 'overflow-y-hidden md:overflow-y-auto' : 'overflow-y-auto',
+        ].join(' ')}
+      >
         {connectionLost && (
           <div
             className="px-4 py-2 text-center text-sm"
@@ -182,9 +215,13 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         {accessBlockMessage && (
           <div
             className="px-4 py-3 text-center text-sm"
-            style={{ background: 'var(--primary-soft)', color: 'var(--text)', borderBottom: '1px solid var(--border-soft)' }}
+            style={
+              hasExpiredAccess
+                ? { background: 'var(--error-soft)', color: 'var(--error)', borderBottom: '1px solid rgba(239,68,68,0.24)' }
+                : { background: 'var(--warning-soft)', color: 'var(--warning)', borderBottom: '1px solid rgba(245,158,11,0.24)' }
+            }
           >
-            {accessBlockMessage} QR menü geçici olarak kullanılamıyor.
+            {accessBlockMessage} Admin panelinde uyarı gösterilir ve QR menü geçici olarak kullanılamıyor.
           </div>
         )}
         {children}

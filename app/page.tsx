@@ -135,7 +135,7 @@ function InstagramIcon({ className }: { className?: string }) {
 
 export default function HomePage() {
   return (
-    <main className="relative overflow-hidden bg-[#05010d] text-white">
+    <main className="relative overflow-x-clip bg-[#05010d] text-white">
       <style>{`
         @keyframes landing-fade-up {
           from {
@@ -185,9 +185,9 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
       </div>
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 pb-12 pt-5 sm:px-8 sm:pb-16 lg:px-10">
+      <div className="relative mx-auto flex min-h-[100svh] w-full max-w-7xl flex-col px-5 pb-10 pt-4 sm:px-8 sm:pb-16 sm:pt-5 lg:min-h-screen lg:px-10">
         <header
-          className="landing-fade-up flex items-center justify-between rounded-full border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-xl sm:px-5"
+          className="landing-fade-up flex flex-wrap items-center justify-between gap-3 rounded-[1.75rem] border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-xl sm:rounded-full sm:px-5"
           style={{ animationDelay: '60ms' }}
         >
           <Link href="/" className="flex items-center gap-3 text-sm font-semibold tracking-[0.18em] text-white/90">
@@ -208,16 +208,16 @@ export default function HomePage() {
             <span className="hidden sm:inline">Nerox Studio</span>
           </Link>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex w-full items-center gap-2 sm:w-auto sm:gap-3 sm:justify-end">
             <Link
               href="/menu/demo/1"
-              className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/85 transition hover:border-white/20 hover:bg-white/10"
+              className="inline-flex flex-1 items-center justify-center rounded-full border border-white/12 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/85 transition hover:border-white/20 hover:bg-white/10 sm:flex-none"
             >
               Demo Menü
             </Link>
             <Link
               href="/login"
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90"
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90 sm:flex-none"
             >
               Giriş Yap
               <ArrowRight className="h-4 w-4" />
@@ -225,8 +225,8 @@ export default function HomePage() {
           </div>
         </header>
 
-        <section className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12 lg:py-14">
-          <div className="max-w-3xl">
+        <section className="grid gap-8 py-6 sm:gap-10 sm:py-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-12 lg:py-14">
+          <div className="max-w-3xl min-w-0">
             <div
               className="landing-fade-up inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/30 bg-[#11061f]/80 px-4 py-2 text-sm font-medium text-[#d8c3ff]"
               style={{ animationDelay: '140ms' }}
@@ -253,7 +253,7 @@ export default function HomePage() {
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <Link
                 href="/menu/demo/1"
-                className="landing-fade-up inline-flex items-center justify-center gap-2 rounded-2xl bg-[#7c3aed] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_20px_60px_rgba(124,58,237,0.35)] transition hover:bg-[#6d28d9]"
+                className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#7c3aed] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_20px_60px_rgba(124,58,237,0.35)] transition hover:bg-[#6d28d9] sm:w-auto"
                 style={{ animationDelay: '380ms' }}
               >
                 Demo Menüyü Gör
@@ -261,9 +261,18 @@ export default function HomePage() {
               </Link>
 
               <Link
+                href="/register"
+                className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90 sm:w-auto"
+                style={{ animationDelay: '440ms' }}
+              >
+                Hesap Oluştur
+                <Building2 className="h-4 w-4" />
+              </Link>
+
+              <Link
                 href="/login"
-                className="landing-fade-up inline-flex items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10"
-                style={{ animationDelay: '460ms' }}
+                className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10 sm:w-auto"
+                style={{ animationDelay: '500ms' }}
               >
                 Yönetim Paneline Giriş
                 <ArrowUpRight className="h-4 w-4" />
@@ -337,7 +346,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-5 lg:py-7">
+        <section className="py-4 sm:py-5 lg:py-7">
           <div className="landing-fade-up max-w-2xl" style={{ animationDelay: '120ms' }}>
             <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">Özellikler</p>
             <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
@@ -366,7 +375,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-5 lg:py-7">
+        <section className="py-4 sm:py-5 lg:py-7">
           <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] p-6 backdrop-blur-xl sm:p-7"
@@ -429,7 +438,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-5 lg:py-7">
+        <section className="py-4 sm:py-5 lg:py-7">
           <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[#0d0618]/90 p-6 sm:p-7"
@@ -461,7 +470,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-5 lg:py-7">
+        <section className="py-4 sm:py-5 lg:py-7">
           <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[linear-gradient(140deg,rgba(124,58,237,0.2),rgba(10,4,24,0.95))] p-6 sm:p-7"
@@ -477,7 +486,7 @@ export default function HomePage() {
 
             <Link
               href="/menu/demo/1"
-              className="landing-fade-up inline-flex items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10"
+              className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10 sm:w-auto"
               style={{ animationDelay: '220ms' }}
             >
               Demo Menüyü Gör
@@ -486,7 +495,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="py-5 lg:py-7">
+        <section className="py-4 sm:py-5 lg:py-7">
           <div
             className="landing-fade-up rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 text-center backdrop-blur-xl sm:p-8"
             style={{ animationDelay: '120ms' }}
@@ -501,17 +510,17 @@ export default function HomePage() {
               Kurulumu hızlı, kullanımı net ve markanıza özel bir sistem için Nerox Studio altyapısını kullanabilirsiniz.
             </p>
 
-            <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <div className="mt-7 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
               <Link
                 href="/login"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90 sm:w-auto"
               >
                 Giriş Yap
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
                 href="/menu/demo/1"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10 sm:w-auto"
               >
                 Demo Menüyü Gör
                 <ArrowUpRight className="h-4 w-4" />

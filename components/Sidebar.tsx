@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
@@ -11,6 +12,7 @@ import {
   Star,
   Users,
   Settings,
+  Gift,
   LogOut,
   X,
 } from 'lucide-react'
@@ -25,6 +27,7 @@ const NAV = [
   { href: '/dashboard/menu',     label: 'Menü',          Icon: UtensilsCrossed },
   { href: '/dashboard/calls',    label: 'Çağrılar',      Icon: Bell },
   { href: '/dashboard/tables',   label: 'Masalar / QR',  Icon: QrCode },
+  { href: '/dashboard/loyalty',  label: 'Kampanyalar',   Icon: Gift },
   { href: '/dashboard/ratings',  label: 'Yorumlar',      Icon: Star },
   { href: '/dashboard/waiters',  label: 'Garsonlar',     Icon: Users },
   { href: '/dashboard/settings', label: 'Genel Ayarlar', Icon: Settings },
@@ -48,6 +51,26 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const activeItemBg = textColor === '#ffffff' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'
   const panelTitle = `${businessName} Yönetim Paneli`
 
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined' || window.innerWidth >= 768) {
+      return
+    }
+
+    const previousBodyOverflow = document.body.style.overflow
+    const previousBodyTouchAction = document.body.style.touchAction
+    const previousHtmlOverflow = document.documentElement.style.overflow
+
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+    document.documentElement.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow
+      document.body.style.touchAction = previousBodyTouchAction
+      document.documentElement.style.overflow = previousHtmlOverflow
+    }
+  }, [isOpen])
+
   async function handleLogout() {
     await signOut(auth).catch(() => {})
     router.replace('/login')
@@ -57,7 +80,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     <>
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] md:hidden"
           aria-hidden="true"
           onClick={onClose}
         />
@@ -66,7 +89,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       <aside
         className={[
           'fixed md:static inset-y-0 left-0 z-50',
-          'w-64 shrink-0 flex flex-col min-h-screen',
+          'w-[min(85vw,18rem)] md:w-64 shrink-0 flex flex-col min-h-[100dvh] md:min-h-screen overflow-y-auto overscroll-contain',
           'transform transition-transform duration-300 ease-in-out',
           isOpen ? 'translate-x-0' : '-translate-x-full',
           'md:translate-x-0',
@@ -74,7 +97,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         style={{ background: primaryColor }}
       >
         <div className="md:hidden flex items-center justify-between px-5 pt-4 pb-1">
-          <p className="font-bold text-base" style={{ color: textColor }}>{panelTitle}</p>
+          <p className="min-w-0 flex-1 truncate pr-3 font-bold text-base" style={{ color: textColor }}>{panelTitle}</p>
           <button
             onClick={onClose}
             className="p-1 rounded-lg transition-colors"
@@ -96,8 +119,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 style={{ border: `1px solid ${textColor}20` }}
               />
             )}
-            <div>
-              <p className="font-bold text-lg" style={{ color: textColor }}>{panelTitle}</p>
+            <div className="min-w-0">
+              <p className="truncate font-bold text-lg" style={{ color: textColor }}>{panelTitle}</p>
               <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>Yönetim</p>
             </div>
           </div>

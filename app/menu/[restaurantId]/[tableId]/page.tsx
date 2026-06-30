@@ -62,6 +62,7 @@ import {
   updateSharedCartItemQuantity,
 } from '@/lib/shared-cart'
 import type { Category, MenuThemeSettings, Product, RestaurantGeneralSettings, SharedCartItem, Table, WaiterCall } from '@/lib/types'
+import { formatPriceWithConversion, getExchangeRates, type ExchangeRates } from '@/lib/currency'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -180,10 +181,6 @@ function hashString(value: string): number {
 
 function normalizeText(value: string) {
   return value.toLocaleLowerCase('tr')
-}
-
-function formatPrice(price: number) {
-  return `₺${price.toLocaleString('tr-TR')}`
 }
 
 function getProductMeta(product: Product, categoryName: string): ProductMeta {
@@ -309,6 +306,7 @@ export default function MenuPage() {
 
   const [wifiCopied, setWifiCopied] = useState(false)
   const [languageModal, setLanguageModal] = useState(false)
+  const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -564,6 +562,16 @@ export default function MenuPage() {
     const timeout = requestAnimationFrame(loadCustomerState)
     return () => { cancelled = true; cancelAnimationFrame(timeout) }
   }, [language, restaurantId, sessionId, tableDocId, tableId])
+
+  // Fetch exchange rates for currency conversion
+  useEffect(() => {
+    if (language === 'tr') return
+    let cancelled = false
+    getExchangeRates().then((rates) => {
+      if (!cancelled) setExchangeRates(rates)
+    })
+    return () => { cancelled = true }
+  }, [language])
 
   // Subscribe to shared cart
   useEffect(() => {
@@ -1069,6 +1077,25 @@ export default function MenuPage() {
 
   const currentLanguageLabel = SUPPORTED_LANGUAGES.find((l) => l.code === language)?.code.toUpperCase() ?? 'TR'
 
+  // Price display helper with currency conversion
+  function renderPrice(amount: number, options?: { large?: boolean; inline?: boolean }) {
+    const { primary, secondary } = formatPriceWithConversion(amount, language, exchangeRates)
+    if (!secondary) {
+      return <>{primary}</>
+    }
+    if (options?.inline) {
+      return <>{primary} <span style={{ opacity: 0.6, fontSize: '0.85em' }}>{secondary}</span></>
+    }
+    return (
+      <>
+        {primary}
+        <span style={{ opacity: 0.55, fontSize: options?.large ? '0.5em' : '0.75em', marginLeft: '4px', fontWeight: 500 }}>
+          {secondary}
+        </span>
+      </>
+    )
+  }
+
   const visibleProducts = products
     .filter((product) => product.categoryId === activeCat && product.available)
     .sort((a, b) => a.name.localeCompare(b.name, 'tr'))
@@ -1387,7 +1414,7 @@ export default function MenuPage() {
                       <p className="mt-1 text-[13px] leading-5" style={{ color: menuMutedColor, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                         {product.description || t(language, 'descriptionFallback')}
                       </p>
-                      <p className="mt-2 text-[16px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(product.price)}</p>
+                      <p className="mt-2 text-[16px] font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(product.price)}</p>
                     </div>
 
                     <button
@@ -1425,7 +1452,7 @@ export default function MenuPage() {
                     <ShoppingBag size={18} />
                     <span>{t(language, 'placeOrder')} ({cartCount})</span>
                   </span>
-                  <span className="font-bold">{formatPrice(cartTotal)}</span>
+                  <span className="font-bold">{renderPrice(cartTotal, { inline: true })}</span>
                 </button>
                 <button
                   type="button"
@@ -1487,7 +1514,7 @@ export default function MenuPage() {
                             {meta.popular && <span className="inline-flex items-center rounded-full bg-[#fff5cf] px-3 py-1 text-xs font-semibold text-[#9a6d00]">{t(language, 'popular')}</span>}
                           </div>
                         </div>
-                        <p className="text-[28px] font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(selectedProduct.price)}</p>
+                        <p className="text-[28px] font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(selectedProduct.price, { large: true })}</p>
                       </div>
                       <div className="h-px bg-black/6 my-6" />
                       <section>
@@ -1510,7 +1537,7 @@ export default function MenuPage() {
                     <button onClick={() => adjustDetailQuantity('inc')} className="h-9 w-9 rounded-full text-xl flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>+</button>
                   </div>
                   <button onClick={handleAddFromSheet} className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 16px 28px ${withAlpha(menuPrimaryColor, 0.28)}` }}>
-                    {t(language, 'addToCart')} — {formatPrice(selectedProduct.price * detailQuantity)}
+                    {t(language, 'addToCart')} — {renderPrice(selectedProduct.price * detailQuantity, { inline: true })}
                   </button>
                 </div>
               </div>
@@ -1621,7 +1648,7 @@ export default function MenuPage() {
                   <div className="flex items-center justify-between mb-5">
                     <div>
                       <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'myCart')}</h2>
-                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'orderItems', { count: cartCount })} • {formatPrice(cartTotal)}</p>
+                      <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'orderItems', { count: cartCount })} • {renderPrice(cartTotal, { inline: true })}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {customerName && (
@@ -1650,7 +1677,7 @@ export default function MenuPage() {
                                   <p className="font-semibold text-base" style={{ color: menuTextColor }}>{groupName}</p>
                                   <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{t(language, 'customerItems', { count: group.items.length })}</p>
                                 </div>
-                                <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(group.total)}</p>
+                                <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{renderPrice(group.total)}</p>
                               </div>
                               <div className="space-y-3">
                                 {group.items.map((item) => {
@@ -1660,9 +1687,9 @@ export default function MenuPage() {
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="flex-1 min-w-0">
                                           <p className="font-semibold text-sm" style={{ color: menuTextColor }}>{item.productName}</p>
-                                          <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{t(language, 'unitPrice')}: {formatPrice(item.price)}</p>
+                                          <p className="mt-1 text-xs" style={{ color: menuMutedColor }}>{t(language, 'unitPrice')}: {renderPrice(item.price, { inline: true })}</p>
                                         </div>
-                                        <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{formatPrice(item.price * item.quantity)}</p>
+                                        <p className="font-bold shrink-0" style={{ color: menuPrimaryColor }}>{renderPrice(item.price * item.quantity)}</p>
                                       </div>
                                       <div className="flex items-center justify-between mt-3">
                                         {canEdit ? (
@@ -1693,12 +1720,12 @@ export default function MenuPage() {
                           {Object.entries(cartGrouped).map(([groupName, group]) => (
                             <div key={`${groupName}-summary`} className="flex items-center justify-between text-sm">
                               <span className="font-medium" style={{ color: menuTextColor }}>{groupName}</span>
-                              <span className="font-semibold" style={{ color: menuTextColor }}>{formatPrice(group.total)}</span>
+                              <span className="font-semibold" style={{ color: menuTextColor }}>{renderPrice(group.total, { inline: true })}</span>
                             </div>
                           ))}
                           <div className="flex items-center justify-between pt-2 border-t border-black/6">
                             <span className="text-sm font-semibold" style={{ color: menuTextColor }}>{t(language, 'tableTotal')}</span>
-                            <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{formatPrice(cartTotal)}</span>
+                            <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(cartTotal, { large: true })}</span>
                           </div>
                         </div>
                         <button onClick={sendOrder} disabled={orderSending || sharedCart.length === 0} className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>

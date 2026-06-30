@@ -55,8 +55,8 @@ export async function POST(request: NextRequest) {
   let adminUid: string | null = null
 
   try {
-    const adminAuth = getAdminAuth()
-    const adminDb = getAdminDb()
+    const adminAuth = await getAdminAuth()
+    const adminDb = await getAdminDb()
     await requireSuperAdmin(request)
     const body = await request.json()
 
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     const adminEmail = parseAdminEmail(body.adminEmail)
     const adminPassword = parseAdminPassword(body.adminPassword)
     const phone = parseOptionalString(body.phone)
-    const subscriptionExpiresAt = parseSubscriptionDate(body.subscriptionExpiresAt)
+    const subscriptionExpiresAt = await parseSubscriptionDate(body.subscriptionExpiresAt)
 
     const restaurantId = await getUniqueRestaurantSlug(restaurantName)
     const userRecord = await adminAuth.createUser({
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     adminUid = userRecord.uid
 
-    const seedData = buildRestaurantSeedData({
+    const seedData = await buildRestaurantSeedData({
       restaurantId,
       restaurantName,
       adminUid: userRecord.uid,
@@ -107,7 +107,8 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     if (adminUid) {
-      await getAdminAuth().deleteUser(adminUid).catch((cleanupError) => {
+      const authForCleanup = await getAdminAuth()
+      await authForCleanup.deleteUser(adminUid).catch((cleanupError) => {
         console.error('Super admin create restaurant rollback error:', cleanupError)
       })
     }

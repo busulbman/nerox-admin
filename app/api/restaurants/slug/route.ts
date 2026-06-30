@@ -23,8 +23,8 @@ function getBearerToken(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const token = getBearerToken(request)
-    const adminAuth = getAdminAuth()
-    const adminDb = getAdminDb()
+    const adminAuth = await getAdminAuth()
+    const adminDb = await getAdminDb()
     const decodedToken = await adminAuth.verifyIdToken(token)
     const profileSnap = await adminDb.collection('users').doc(decodedToken.uid).get()
 

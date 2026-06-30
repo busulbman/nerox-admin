@@ -1,7 +1,6 @@
 import type { App } from 'firebase-admin/app'
-import { cert, getApps, initializeApp } from 'firebase-admin/app'
-import { getAuth } from 'firebase-admin/auth'
-import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore'
+import type { Auth } from 'firebase-admin/auth'
+import type { Firestore as AdminFirestore, FieldValue as AdminFieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -33,14 +32,12 @@ function getFirebaseAdminEnv() {
     throw new FirebaseAdminError(errorMessage, 'env/missing', missing.join(', '))
   }
 
-  // Parse private key - handle both escaped and unescaped newlines
   let privateKey = rawPrivateKey
   if (privateKey.includes('\\n')) {
     privateKey = privateKey.replace(/\\n/g, '\n')
   }
   privateKey = privateKey.trim()
 
-  // Validate private key format
   if (!privateKey.includes('-----BEGIN') || !privateKey.includes('PRIVATE KEY-----')) {
     const errorMessage = 'FIREBASE_ADMIN_PRIVATE_KEY formatı geçersiz. PEM formatında olmalı.'
     console.error('[firebase-admin] PRIVATE KEY ERROR:', errorMessage)
@@ -48,17 +45,17 @@ function getFirebaseAdminEnv() {
     throw new FirebaseAdminError(errorMessage, 'env/invalid-key')
   }
 
-  return {
-    projectId,
-    clientEmail,
-    privateKey,
-  }
+  return { projectId, clientEmail, privateKey }
 }
 
 let cachedAdminApp: App | null = null
+let cachedFirestore: AdminFirestore | null = null
+let cachedAuth: Auth | null = null
 
-export function getAdminApp() {
+async function getAdminApp(): Promise<App> {
   if (cachedAdminApp) return cachedAdminApp
+
+  const { cert, getApps, initializeApp } = await import('firebase-admin/app')
 
   const existingApp = getApps().find((app) => app.name === 'firebase-admin-app')
   if (existingApp) {
@@ -96,22 +93,40 @@ export function getAdminApp() {
   }
 }
 
-export function getAdminAuth() {
+export async function getAdminAuth(): Promise<Auth> {
+  if (cachedAuth) return cachedAuth
+
   try {
-    return getAuth(getAdminApp())
+    const app = await getAdminApp()
+    const { getAuth } = await import('firebase-admin/auth')
+    cachedAuth = getAuth(app)
+    return cachedAuth
   } catch (error) {
     console.error('[firebase-admin] getAdminAuth error:', error)
     throw error
   }
 }
 
-export function getAdminDb() {
+export async function getAdminDb(): Promise<AdminFirestore> {
+  if (cachedFirestore) return cachedFirestore
+
   try {
-    return getFirestore(getAdminApp())
+    const app = await getAdminApp()
+    const { getFirestore } = await import('firebase-admin/firestore')
+    cachedFirestore = getFirestore(app)
+    return cachedFirestore
   } catch (error) {
     console.error('[firebase-admin] getAdminDb error:', error)
     throw error
   }
 }
 
-export { FieldValue, Timestamp }
+export async function getFieldValue(): Promise<typeof AdminFieldValue> {
+  const { FieldValue } = await import('firebase-admin/firestore')
+  return FieldValue
+}
+
+export async function getTimestamp(): Promise<typeof AdminTimestamp> {
+  const { Timestamp } = await import('firebase-admin/firestore')
+  return Timestamp
+}

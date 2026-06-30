@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 import type { UserProfile, RestaurantStatus } from '@/lib/types'
 import { DEFAULT_PRIMARY_COLOR, generateSlug, normalizeRestaurantDocument } from '@/lib/restaurant-settings'
-import { FieldValue, Timestamp, getAdminAuth, getAdminDb } from '@/lib/firebase-admin'
+import { getAdminAuth, getAdminDb, getFieldValue, getTimestamp } from '@/lib/firebase-admin'
 
 type FirebaseTimestampLike = {
   toMillis?: () => number
@@ -91,7 +91,7 @@ export function parseAdminPassword(value: unknown) {
   return password
 }
 
-export function parseSubscriptionDate(value: unknown) {
+export async function parseSubscriptionDate(value: unknown) {
   const input = parseRequiredString(value, 'Abonelik bitiş tarihi')
   const match = input.match(/^(\d{4})-(\d{2})-(\d{2})$/)
 
@@ -109,12 +109,13 @@ export function parseSubscriptionDate(value: unknown) {
     throw new SuperAdminApiError('Abonelik bitiş tarihi geçersiz.')
   }
 
+  const Timestamp = await getTimestamp()
   return Timestamp.fromDate(expiresAt)
 }
 
 export async function requireSuperAdmin(request: NextRequest) {
-  const adminAuth = getAdminAuth()
-  const adminDb = getAdminDb()
+  const adminAuth = await getAdminAuth()
+  const adminDb = await getAdminDb()
   const token = getBearerToken(request)
   const decodedToken = await adminAuth.verifyIdToken(token)
   const profileSnap = await adminDb.collection('users').doc(decodedToken.uid).get()
@@ -140,7 +141,7 @@ export async function requireSuperAdmin(request: NextRequest) {
 }
 
 export async function getUniqueRestaurantSlug(businessName: string, currentRestaurantId?: string | null) {
-  const adminDb = getAdminDb()
+  const adminDb = await getAdminDb()
   const baseSlug = generateSlug(businessName) || 'isletme'
   let candidate = baseSlug
   let index = 2
@@ -164,7 +165,7 @@ export async function getUniqueRestaurantSlug(businessName: string, currentResta
 }
 
 export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSummary[]> {
-  const adminDb = getAdminDb()
+  const adminDb = await getAdminDb()
   const restaurantsSnap = await adminDb.collection('restaurants').get()
 
   const summaries = await Promise.all(
@@ -200,7 +201,8 @@ export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSumm
 }
 
 export async function updateRestaurantStatus(restaurantId: string, status: RestaurantStatus) {
-  const adminDb = getAdminDb()
+  const adminDb = await getAdminDb()
+  const FieldValue = await getFieldValue()
   const normalizedRestaurantId = parseRequiredString(restaurantId, 'İşletme')
   const nextStatus = status === 'passive' ? 'passive' : 'active'
   const restaurantRef = adminDb.collection('restaurants').doc(normalizedRestaurantId)
@@ -241,16 +243,17 @@ export function mapFirebaseAdminError(error: unknown) {
   }
 }
 
-export function buildRestaurantSeedData(input: {
+export async function buildRestaurantSeedData(input: {
   restaurantId: string
   restaurantName: string
   adminUid: string
   adminName: string
   adminEmail: string
   phone: string
-  subscriptionExpiresAt: Timestamp
+  subscriptionExpiresAt: FirebaseFirestore.Timestamp
 }) {
   const { restaurantId, restaurantName, adminUid, adminName, adminEmail, phone, subscriptionExpiresAt } = input
+  const FieldValue = await getFieldValue()
 
   return {
     user: {

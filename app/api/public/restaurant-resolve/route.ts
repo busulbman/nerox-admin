@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const adminDb = getAdminDb()
+    const adminDb = await getAdminDb()
 
     const directSnap = await adminDb.collection('restaurants').doc(slugOrId).get()
 

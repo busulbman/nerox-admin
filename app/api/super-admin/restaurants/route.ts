@@ -13,50 +13,97 @@ export const dynamic = 'force-dynamic'
 
 const isDev = process.env.NODE_ENV === 'development'
 
-function toErrorResponse(error: unknown) {
+function toErrorResponse(error: unknown, context: string) {
+  console.error(`[super-admin/restaurants] ${context} failed:`, error)
+
   const normalizedError = mapFirebaseAdminError(error)
 
   if (normalizedError instanceof SuperAdminApiError) {
-    return NextResponse.json({ error: normalizedError.message }, { status: normalizedError.status })
+    console.error(`[super-admin/restaurants] SuperAdminApiError: ${normalizedError.message} (status: ${normalizedError.status})`)
+    return NextResponse.json(
+      {
+        error: normalizedError.message,
+        code: 'SUPER_ADMIN_ERROR',
+        status: normalizedError.status,
+      },
+      { status: normalizedError.status }
+    )
   }
 
   if (normalizedError instanceof FirebaseAdminError) {
-    console.error('[restaurants] Firebase Admin error:', normalizedError.code, normalizedError.message)
+    console.error(`[super-admin/restaurants] FirebaseAdminError: ${normalizedError.code} - ${normalizedError.message}`)
     return NextResponse.json(
       {
         error: normalizedError.message,
         code: normalizedError.code,
-        details: isDev ? normalizedError.details : undefined,
+        details: normalizedError.details,
       },
       { status: 500 }
     )
   }
 
-  const errorMessage = normalizedError instanceof Error ? normalizedError.message : 'Unknown error'
-  console.error('[restaurants] Unexpected error:', errorMessage)
+  const errorMessage = normalizedError instanceof Error ? normalizedError.message : String(normalizedError)
+  const errorStack = normalizedError instanceof Error ? normalizedError.stack : undefined
+  const errorName = normalizedError instanceof Error ? normalizedError.name : 'UnknownError'
+
+  console.error(`[super-admin/restaurants] Unexpected error:`, {
+    name: errorName,
+    message: errorMessage,
+    stack: errorStack,
+  })
 
   return NextResponse.json(
     {
       error: 'İşlem sırasında beklenmeyen bir hata oluştu.',
-      message: isDev ? errorMessage : undefined,
+      code: errorName,
+      message: errorMessage,
+      stack: isDev ? errorStack : undefined,
     },
     { status: 500 }
   )
 }
 
 export async function GET(request: NextRequest) {
+  console.log('[super-admin/restaurants] GET request received')
+
   try {
-    await requireSuperAdmin(request)
+    const authHeader = request.headers.get('authorization')
+    console.log('[super-admin/restaurants] Auth header present:', !!authHeader)
+
+    if (!authHeader) {
+      console.error('[super-admin/restaurants] No authorization header')
+      return NextResponse.json(
+        { error: 'Authorization header eksik', code: 'NO_AUTH_HEADER' },
+        { status: 401 }
+      )
+    }
+
+    console.log('[super-admin/restaurants] Calling requireSuperAdmin...')
+    const adminUser = await requireSuperAdmin(request)
+    console.log('[super-admin/restaurants] requireSuperAdmin success, uid:', adminUser.uid)
+
+    console.log('[super-admin/restaurants] Calling listRestaurantsSummary...')
     const restaurants = await listRestaurantsSummary()
+    console.log('[super-admin/restaurants] listRestaurantsSummary success, count:', restaurants.length)
 
     return NextResponse.json({ restaurants })
   } catch (error) {
-    return toErrorResponse(error)
+    return toErrorResponse(error, 'GET')
   }
 }
 
 export async function PATCH(request: NextRequest) {
+  console.log('[super-admin/restaurants] PATCH request received')
+
   try {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Authorization header eksik', code: 'NO_AUTH_HEADER' },
+        { status: 401 }
+      )
+    }
+
     await requireSuperAdmin(request)
     const body = await request.json()
     const restaurantId = typeof body.restaurantId === 'string' ? body.restaurantId : ''
@@ -65,6 +112,6 @@ export async function PATCH(request: NextRequest) {
     const result = await updateRestaurantStatus(restaurantId, status)
     return NextResponse.json(result)
   } catch (error) {
-    return toErrorResponse(error)
+    return toErrorResponse(error, 'PATCH')
   }
 }

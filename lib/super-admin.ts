@@ -114,14 +114,50 @@ export async function parseSubscriptionDate(value: unknown) {
 }
 
 export async function requireSuperAdmin(request: NextRequest) {
-  const adminAuth = await getAdminAuth()
-  const adminDb = await getAdminDb()
+  console.log('[requireSuperAdmin] Starting authentication...')
+
+  let adminAuth
+  try {
+    adminAuth = await getAdminAuth()
+    console.log('[requireSuperAdmin] getAdminAuth success')
+  } catch (error) {
+    console.error('[requireSuperAdmin] getAdminAuth failed:', error)
+    throw error
+  }
+
+  let adminDb
+  try {
+    adminDb = await getAdminDb()
+    console.log('[requireSuperAdmin] getAdminDb success')
+  } catch (error) {
+    console.error('[requireSuperAdmin] getAdminDb failed:', error)
+    throw error
+  }
+
   const token = getBearerToken(request)
-  const decodedToken = await adminAuth.verifyIdToken(token)
-  const profileSnap = await adminDb.collection('users').doc(decodedToken.uid).get()
+  console.log('[requireSuperAdmin] Token extracted, length:', token.length)
+
+  let decodedToken
+  try {
+    decodedToken = await adminAuth.verifyIdToken(token)
+    console.log('[requireSuperAdmin] Token verified, uid:', decodedToken.uid)
+  } catch (error) {
+    console.error('[requireSuperAdmin] verifyIdToken failed:', error)
+    throw new SuperAdminApiError('Token doğrulanamadı. Lütfen tekrar giriş yapın.', 401)
+  }
+
+  let profileSnap
+  try {
+    profileSnap = await adminDb.collection('users').doc(decodedToken.uid).get()
+    console.log('[requireSuperAdmin] User doc fetched, exists:', profileSnap.exists)
+  } catch (error) {
+    console.error('[requireSuperAdmin] Firestore read failed:', error)
+    throw error
+  }
 
   if (!profileSnap.exists) {
-    throw new SuperAdminApiError('Super admin profili bulunamadı.', 403)
+    console.error('[requireSuperAdmin] User document not found for uid:', decodedToken.uid)
+    throw new SuperAdminApiError(`Super admin kullanıcı kaydı bulunamadı (uid: ${decodedToken.uid})`, 403)
   }
 
   const profile = {
@@ -129,10 +165,14 @@ export async function requireSuperAdmin(request: NextRequest) {
     ...profileSnap.data(),
   } as UserProfile
 
+  console.log('[requireSuperAdmin] User role:', profile.role)
+
   if (profile.role !== 'super_admin') {
-    throw new SuperAdminApiError('Bu işlem için yetkiniz yok.', 403)
+    console.error('[requireSuperAdmin] User is not super_admin, role:', profile.role)
+    throw new SuperAdminApiError(`Bu kullanıcı super_admin değil (rol: ${profile.role})`, 403)
   }
 
+  console.log('[requireSuperAdmin] Authentication successful')
   return {
     uid: decodedToken.uid,
     email: decodedToken.email ?? profile.email,

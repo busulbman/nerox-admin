@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import type { UserProfile } from '@/lib/types'
-import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin'
+import { getAdminDb } from '@/lib/firebase-admin'
+import { verifyIdToken } from '@/lib/firebase-auth-rest'
 import { getUniqueRestaurantSlug, parseRequiredString } from '@/lib/super-admin'
 
 export const runtime = 'nodejs'
@@ -23,10 +24,9 @@ function getBearerToken(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const token = getBearerToken(request)
-    const adminAuth = await getAdminAuth()
+    const verifiedUser = await verifyIdToken(token)
     const adminDb = await getAdminDb()
-    const decodedToken = await adminAuth.verifyIdToken(token)
-    const profileSnap = await adminDb.collection('users').doc(decodedToken.uid).get()
+    const profileSnap = await adminDb.collection('users').doc(verifiedUser.uid).get()
 
     if (!profileSnap.exists) {
       return NextResponse.json({ error: 'Kullanıcı profili bulunamadı.' }, { status: 403 })

@@ -1,7 +1,8 @@
 import type { NextRequest } from 'next/server'
 import type { UserProfile, RestaurantStatus } from '@/lib/types'
 import { DEFAULT_PRIMARY_COLOR, generateSlug, normalizeRestaurantDocument } from '@/lib/restaurant-settings'
-import { getAdminAuth, getAdminDb, getFieldValue, getTimestamp } from '@/lib/firebase-admin'
+import { getAdminDb, getFieldValue, getTimestamp } from '@/lib/firebase-admin'
+import { verifyIdToken } from '@/lib/firebase-auth-rest'
 
 type FirebaseTimestampLike = {
   toMillis?: () => number
@@ -114,15 +115,18 @@ export async function parseSubscriptionDate(value: unknown) {
 }
 
 export async function requireSuperAdmin(request: NextRequest) {
-  console.log('[requireSuperAdmin] Starting authentication...')
+  console.log('[requireSuperAdmin] Starting authentication via REST API...')
 
-  let adminAuth
+  const token = getBearerToken(request)
+  console.log('[requireSuperAdmin] Token extracted, length:', token.length)
+
+  let verifiedUser
   try {
-    adminAuth = await getAdminAuth()
-    console.log('[requireSuperAdmin] getAdminAuth success')
+    verifiedUser = await verifyIdToken(token)
+    console.log('[requireSuperAdmin] Token verified via REST, uid:', verifiedUser.uid)
   } catch (error) {
-    console.error('[requireSuperAdmin] getAdminAuth failed:', error)
-    throw error
+    console.error('[requireSuperAdmin] verifyIdToken failed:', error)
+    throw new SuperAdminApiError('Token doğrulanamadı. Lütfen tekrar giriş yapın.', 401)
   }
 
   let adminDb
@@ -134,21 +138,9 @@ export async function requireSuperAdmin(request: NextRequest) {
     throw error
   }
 
-  const token = getBearerToken(request)
-  console.log('[requireSuperAdmin] Token extracted, length:', token.length)
-
-  let decodedToken
-  try {
-    decodedToken = await adminAuth.verifyIdToken(token)
-    console.log('[requireSuperAdmin] Token verified, uid:', decodedToken.uid)
-  } catch (error) {
-    console.error('[requireSuperAdmin] verifyIdToken failed:', error)
-    throw new SuperAdminApiError('Token doğrulanamadı. Lütfen tekrar giriş yapın.', 401)
-  }
-
   let profileSnap
   try {
-    profileSnap = await adminDb.collection('users').doc(decodedToken.uid).get()
+    profileSnap = await adminDb.collection('users').doc(verifiedUser.uid).get()
     console.log('[requireSuperAdmin] User doc fetched, exists:', profileSnap.exists)
   } catch (error) {
     console.error('[requireSuperAdmin] Firestore read failed:', error)
@@ -156,8 +148,8 @@ export async function requireSuperAdmin(request: NextRequest) {
   }
 
   if (!profileSnap.exists) {
-    console.error('[requireSuperAdmin] User document not found for uid:', decodedToken.uid)
-    throw new SuperAdminApiError(`Super admin kullanıcı kaydı bulunamadı (uid: ${decodedToken.uid})`, 403)
+    console.error('[requireSuperAdmin] User document not found for uid:', verifiedUser.uid)
+    throw new SuperAdminApiError(`Super admin kullanıcı kaydı bulunamadı (uid: ${verifiedUser.uid})`, 403)
   }
 
   const profile = {
@@ -174,8 +166,8 @@ export async function requireSuperAdmin(request: NextRequest) {
 
   console.log('[requireSuperAdmin] Authentication successful')
   return {
-    uid: decodedToken.uid,
-    email: decodedToken.email ?? profile.email,
+    uid: verifiedUser.uid,
+    email: verifiedUser.email ?? profile.email,
     profile,
   }
 }

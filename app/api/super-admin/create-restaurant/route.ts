@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { FirebaseAdminError, getAdminAuth, getAdminDb } from '@/lib/firebase-admin'
+import { FirebaseAdminError, getAdminDb } from '@/lib/firebase-admin'
+import { createUser, deleteUser, AuthRestError } from '@/lib/firebase-auth-rest'
 import {
   SuperAdminApiError,
   buildRestaurantSeedData,
@@ -19,6 +20,14 @@ export const dynamic = 'force-dynamic'
 const isDev = process.env.NODE_ENV === 'development'
 
 function toErrorResponse(error: unknown) {
+  if (error instanceof AuthRestError) {
+    console.error('[create-restaurant] Auth REST error:', error.code, error.message)
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: 400 }
+    )
+  }
+
   const normalizedError = mapFirebaseAdminError(error)
 
   if (normalizedError instanceof SuperAdminApiError) {
@@ -55,9 +64,8 @@ export async function POST(request: NextRequest) {
   let adminUid: string | null = null
 
   try {
-    const adminAuth = await getAdminAuth()
-    const adminDb = await getAdminDb()
     await requireSuperAdmin(request)
+    const adminDb = await getAdminDb()
     const body = await request.json()
 
     const restaurantName = parseRequiredString(body.restaurantName, 'İşletme adı')
@@ -68,12 +76,9 @@ export async function POST(request: NextRequest) {
     const subscriptionExpiresAt = await parseSubscriptionDate(body.subscriptionExpiresAt)
 
     const restaurantId = await getUniqueRestaurantSlug(restaurantName)
-    const userRecord = await adminAuth.createUser({
-      email: adminEmail,
-      password: adminPassword,
-      displayName: adminName,
-    })
 
+    // Create user via REST API
+    const userRecord = await createUser(adminEmail, adminPassword, adminName)
     adminUid = userRecord.uid
 
     const seedData = await buildRestaurantSeedData({
@@ -107,10 +112,8 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     if (adminUid) {
-      const authForCleanup = await getAdminAuth()
-      await authForCleanup.deleteUser(adminUid).catch((cleanupError) => {
-        console.error('Super admin create restaurant rollback error:', cleanupError)
-      })
+      // Note: REST API deleteUser is limited, just log the UID for manual cleanup
+      await deleteUser(adminUid)
     }
 
     return toErrorResponse(error)

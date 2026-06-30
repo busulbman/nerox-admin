@@ -1,5 +1,4 @@
 import type { App } from 'firebase-admin/app'
-import type { Auth } from 'firebase-admin/auth'
 import type { Firestore as AdminFirestore, FieldValue as AdminFieldValue, Timestamp as AdminTimestamp } from 'firebase-admin/firestore'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -50,7 +49,6 @@ function getFirebaseAdminEnv() {
 
 let cachedAdminApp: App | null = null
 let cachedFirestore: AdminFirestore | null = null
-let cachedAuth: Auth | null = null
 
 async function getAdminApp(): Promise<App> {
   if (cachedAdminApp) return cachedAdminApp
@@ -90,20 +88,6 @@ async function getAdminApp(): Promise<App> {
       'init/failed',
       isDev ? message : undefined
     )
-  }
-}
-
-export async function getAdminAuth(): Promise<Auth> {
-  if (cachedAuth) return cachedAuth
-
-  try {
-    const app = await getAdminApp()
-    const { getAuth } = await import('firebase-admin/auth')
-    cachedAuth = getAuth(app)
-    return cachedAuth
-  } catch (error) {
-    console.error('[firebase-admin] getAdminAuth error:', error)
-    throw error
   }
 }
 

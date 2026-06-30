@@ -110,6 +110,10 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     quickAdd: 'Hızlı ekle',
     min: 'dk',
     kcal: 'kcal',
+    orderConfirmTitle: 'Sipariş mutfağa uçmak üzere! 🍳🚀',
+    orderConfirmText: 'Bir kez gönderildikten sonra geri almak biraz zor olabilir. Gerçekten siparişi vermek istiyor musunuz?',
+    orderConfirmCancel: 'Bir şey daha ekleyeceğim',
+    orderConfirmSend: 'Evet, gönder gitsin',
   },
   en: {
     selectLanguage: 'Select language',
@@ -211,6 +215,10 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     quickAdd: 'Quick add',
     min: 'min',
     kcal: 'kcal',
+    orderConfirmTitle: 'Your order is about to fly to the kitchen! 🍳🚀',
+    orderConfirmText: 'Once sent, it might be a bit hard to take back. Do you really want to place this order?',
+    orderConfirmCancel: 'I\'ll add something else',
+    orderConfirmSend: 'Yes, send it!',
   },
   ru: {
     selectLanguage: 'Выберите язык',
@@ -312,6 +320,10 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     quickAdd: 'Быстро добавить',
     min: 'мин',
     kcal: 'ккал',
+    orderConfirmTitle: 'Ваш заказ летит на кухню! 🍳🚀',
+    orderConfirmText: 'После отправки будет сложно отменить. Вы действительно хотите оформить заказ?',
+    orderConfirmCancel: 'Добавлю ещё что-то',
+    orderConfirmSend: 'Да, отправить!',
   },
   ar: {
     selectLanguage: 'اختر اللغة',
@@ -413,6 +425,10 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     quickAdd: 'إضافة سريعة',
     min: 'دقيقة',
     kcal: 'سعرة',
+    orderConfirmTitle: 'طلبك على وشك الطيران إلى المطبخ! 🍳🚀',
+    orderConfirmText: 'بمجرد الإرسال، قد يكون من الصعب التراجع. هل تريد حقًا تقديم هذا الطلب؟',
+    orderConfirmCancel: 'سأضيف شيئًا آخر',
+    orderConfirmSend: 'نعم، أرسله!',
   },
 }
 

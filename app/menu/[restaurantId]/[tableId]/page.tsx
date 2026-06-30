@@ -290,6 +290,7 @@ export default function MenuPage() {
   const [cartDrawer, setCartDrawer] = useState(false)
   const [orderSending, setOrderSending] = useState(false)
   const [orderSent, setOrderSent] = useState(false)
+  const [orderConfirmModal, setOrderConfirmModal] = useState(false)
 
   const [callModal, setCallModal] = useState(false)
   const [selectedTip, setSelectedTip] = useState<CallTip | null>(null)
@@ -1264,6 +1265,7 @@ export default function MenuPage() {
       <style>{`
         @keyframes menu-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
         @keyframes menu-sheet-in { 0% { transform: translateY(100%); } 100% { transform: translateY(0); } }
+        @keyframes menu-modal-pop { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
       `}</style>
 
       <div className="min-h-screen pb-44 text-[#1a1a1a]" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
@@ -1728,7 +1730,7 @@ export default function MenuPage() {
                             <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(cartTotal, { large: true })}</span>
                           </div>
                         </div>
-                        <button onClick={sendOrder} disabled={orderSending || sharedCart.length === 0} className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
+                        <button onClick={() => setOrderConfirmModal(true)} disabled={orderSending || sharedCart.length === 0} className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
                           {orderSending ? t(language, 'sending') : t(language, 'sendOrder')}
                         </button>
                       </div>
@@ -1774,6 +1776,59 @@ export default function MenuPage() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Order Confirmation Modal */}
+        {orderConfirmModal && (
+          <div
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[3px] flex items-center justify-center p-4"
+            onClick={() => setOrderConfirmModal(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-[28px] p-6 shadow-2xl"
+              style={{
+                background: 'var(--page-bg)',
+                animation: 'menu-modal-pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center mb-5">
+                <div
+                  className="mx-auto mb-4 w-16 h-16 rounded-full flex items-center justify-center text-3xl"
+                  style={{ background: withAlpha(menuPrimaryColor, 0.12) }}
+                >
+                  🍳🚀
+                </div>
+                <h2 className="text-xl font-bold mb-2" style={{ color: menuTextColor }}>
+                  {t(language, 'orderConfirmTitle')}
+                </h2>
+                <p className="text-sm leading-relaxed" style={{ color: menuMutedColor }}>
+                  {t(language, 'orderConfirmText')}
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setOrderConfirmModal(false)}
+                  className="flex-1 rounded-2xl px-4 py-3.5 text-sm font-semibold border transition-all active:scale-[0.98]"
+                  style={{ borderColor: menuBorderColor, color: menuTextColor, background: '#fff' }}
+                >
+                  {t(language, 'orderConfirmCancel')}
+                </button>
+                <button
+                  onClick={() => { setOrderConfirmModal(false); sendOrder() }}
+                  className="flex-1 rounded-2xl px-4 py-3.5 text-sm font-bold transition-all active:scale-[0.98]"
+                  style={{
+                    background: menuPrimaryColor,
+                    color: menuPrimaryTextColor,
+                    boxShadow: `0 8px 20px ${withAlpha(menuPrimaryColor, 0.35)}`,
+                  }}
+                >
+                  {t(language, 'orderConfirmSend')}
+                </button>
+              </div>
             </div>
           </div>
         )}

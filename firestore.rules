@@ -87,6 +87,21 @@ service cloud.firestore {
             .hasOnly(['durum', 'status', 'completedAt', 'resolvedAt', 'completedById', 'completedByName', 'completedByRole']);
     }
 
+    function waiterCanCreateOrder(rid) {
+      return isWaiter(rid)
+        && request.resource.data.restaurantId == rid
+        && request.resource.data.tip == 'sipariş'
+        && request.resource.data.durum == 'kabul edildi'
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.waiterId == request.auth.uid
+        && request.resource.data.waiterName is string
+        && request.resource.data.createdByRole == 'waiter'
+        && request.resource.data.createdById == request.auth.uid
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && isNonNegativeNumber(request.resource.data.totalPrice);
+    }
+
     function isNonNegativeNumber(value) {
       return (value is int || value is float) && value >= 0;
     }
@@ -294,6 +309,9 @@ service cloud.firestore {
         // Admin can manage all calls, waiters only their own accept/complete flow
         allow create, update, delete: if isAdmin(rid);
         allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid);
+
+        // Waiter can create manual orders
+        allow create: if waiterCanCreateOrder(rid);
 
         // QR menu: create new call with tip-specific restricted fields
         allow create: if validPublicOrderCall(rid) || validPublicServiceCall(rid);

@@ -3,12 +3,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  doc, getDocs, onSnapshot,
+  addDoc, collection, doc, getDocs, onSnapshot,
   runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
-import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, LogOut, Trophy, UtensilsCrossed } from 'lucide-react'
+import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, LogOut, Minus, Plus, Trophy, UtensilsCrossed, X } from 'lucide-react'
 import { auth, db, rd, rtdb } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
@@ -43,6 +43,13 @@ import { buildThemePalette, buildThemeStyleVars } from '@/lib/ui-theme'
 
 type Section = 'pending' | 'active' | 'done'
 type Tab = 'calls' | 'menu' | 'tables'
+type OrderStep = 'table' | 'products' | 'confirm'
+type OrderCartItem = {
+  productId: string
+  name: string
+  price: number
+  quantity: number
+}
 
 const DEFAULT_BROWN = DEFAULT_PRIMARY_COLOR
 const DEFAULT_GOLD = 'var(--primary-soft)'
@@ -133,6 +140,14 @@ export default function WaiterPage() {
     if (typeof window === 'undefined') return false
     return isAudioInitialized()
   })
+
+  // Manual order creation
+  const [orderModal, setOrderModal] = useState(false)
+  const [orderStep, setOrderStep] = useState<OrderStep>('table')
+  const [selectedOrderTable, setSelectedOrderTable] = useState<Table | null>(null)
+  const [orderCart, setOrderCart] = useState<OrderCartItem[]>([])
+  const [orderSending, setOrderSending] = useState(false)
+  const [orderActiveCat, setOrderActiveCat] = useState<string | null>(null)
 
   const prevPendingIds    = useRef<Set<string>>(new Set())
   const callsInitialized  = useRef(false)
@@ -440,6 +455,131 @@ export default function WaiterPage() {
     }
     await signOut(auth).catch(() => {})
     router.replace('/waiter/login')
+  }
+
+  // ─── Manual Order Creation ────────────────────────────────────────────────
+
+  function openOrderModal() {
+    setOrderModal(true)
+    setOrderStep('table')
+    setSelectedOrderTable(null)
+    setOrderCart([])
+    setOrderActiveCat(categories[0]?.id ?? null)
+  }
+
+  function closeOrderModal() {
+    setOrderModal(false)
+    setOrderStep('table')
+    setSelectedOrderTable(null)
+    setOrderCart([])
+  }
+
+  async function selectTableForOrder(table: Table) {
+    if (table.status === 'boş') {
+      // Open the table first
+      const newSessionId = createSessionId()
+      try {
+        logFirestoreWrite('waiter/open table for order', { tableId: table.id, sessionId: newSessionId })
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(tableDocRef(table.id))
+          if (!snap.exists()) throw new Error('Masa bulunamadı.')
+          const t = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
+          if (t.status !== 'boş') throw new Error(`Masa şu anda "${TABLE_STATUS_LABEL[t.status] ?? t.status}" durumunda.`)
+          tx.update(tableDocRef(table.id), {
+            status: 'aktif', sessionId: newSessionId, openedAt: serverTimestamp(), lastPaymentCompletedAt: null, lastPaymentWaiterName: null, updatedAt: serverTimestamp(),
+          })
+        })
+        // Refresh table data and proceed
+        setSelectedOrderTable({ ...table, status: 'aktif', sessionId: newSessionId })
+        setOrderStep('products')
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Masa açılamadı.')
+      }
+    } else if (table.status === 'aktif' || table.status === 'çağrı var' || table.status === 'hesap istendi') {
+      // Use existing session
+      setSelectedOrderTable(table)
+      setOrderStep('products')
+    } else {
+      alert(`Bu masa sipariş alınamaz durumda: ${TABLE_STATUS_LABEL[table.status] ?? table.status}`)
+    }
+  }
+
+  function addToOrderCart(product: Product) {
+    setOrderCart((prev) => {
+      const existing = prev.find((item) => item.productId === product.id)
+      if (existing) {
+        return prev.map((item) =>
+          item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        )
+      }
+      return [...prev, { productId: product.id, name: product.name, price: product.price, quantity: 1 }]
+    })
+  }
+
+  function updateOrderCartQuantity(productId: string, delta: number) {
+    setOrderCart((prev) => {
+      return prev
+        .map((item) => item.productId === productId ? { ...item, quantity: item.quantity + delta } : item)
+        .filter((item) => item.quantity > 0)
+    })
+  }
+
+  const orderCartTotal = orderCart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const orderCartCount = orderCart.reduce((sum, item) => sum + item.quantity, 0)
+
+  async function submitOrder() {
+    if (!selectedOrderTable || !profile || orderCart.length === 0) return
+
+    setOrderSending(true)
+    try {
+      const items = orderCart.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+      }))
+
+      const groupedByCustomer = {
+        'Garson Siparişi': {
+          customerId: profile.uid,
+          items: items,
+          total: orderCartTotal,
+        },
+      }
+
+      const callData = {
+        restaurantId,
+        tableId: selectedOrderTable.id,
+        tableNumber: selectedOrderTable.number,
+        sessionId: selectedOrderTable.sessionId,
+        tip: 'sipariş',
+        durum: 'kabul edildi',
+        status: 'accepted',
+        customerName: 'Garson Siparişi',
+        waiterId: profile.uid,
+        waiterName: profile.name,
+        createdByRole: 'waiter',
+        createdById: profile.uid,
+        createdByName: profile.name,
+        items,
+        groupedByCustomer,
+        totalPrice: orderCartTotal,
+        note: '',
+        createdAt: serverTimestamp(),
+        acceptedAt: serverTimestamp(),
+      }
+
+      logFirestoreWrite('waiter/create manual order', { tableId: selectedOrderTable.id, totalPrice: orderCartTotal })
+      await addDoc(collection(db, 'restaurants', restaurantId, 'calls'), callData)
+
+      closeOrderModal()
+      setTablesMsg(`Masa ${selectedOrderTable.number} siparişi oluşturuldu.`)
+    } catch (err) {
+      console.error('Order creation failed:', err)
+      alert(err instanceof Error ? err.message : 'Sipariş oluşturulamadı.')
+    } finally {
+      setOrderSending(false)
+    }
   }
 
   // ─── Guard state ──────────────────────────────────────────────────────────
@@ -785,9 +925,9 @@ export default function WaiterPage() {
               <div
                 className="mb-3 rounded-xl px-4 py-3 text-sm"
                 style={{
-                  background: tablesMsg.includes('açıldı') ? '#f0fdf4' : '#fff7ed',
-                  color:      tablesMsg.includes('açıldı') ? '#15803d'  : '#c2410c',
-                  border: `1px solid ${tablesMsg.includes('açıldı') ? '#86efac' : '#fdba74'}`,
+                  background: tablesMsg.includes('açıldı') || tablesMsg.includes('oluşturuldu') ? '#f0fdf4' : '#fff7ed',
+                  color:      tablesMsg.includes('açıldı') || tablesMsg.includes('oluşturuldu') ? '#15803d'  : '#c2410c',
+                  border: `1px solid ${tablesMsg.includes('açıldı') || tablesMsg.includes('oluşturuldu') ? '#86efac' : '#fdba74'}`,
                 }}
               >
                 {tablesMsg}
@@ -869,6 +1009,243 @@ export default function WaiterPage() {
           </button>
         ))}
       </nav>
+
+      {/* ── Floating New Order Button ── */}
+      <button
+        onClick={openOrderModal}
+        className="fixed z-30 flex items-center gap-2 rounded-full px-5 py-3 font-semibold text-sm shadow-lg transition-all active:scale-95"
+        style={{
+          bottom: 'calc(70px + env(safe-area-inset-bottom))',
+          right: '16px',
+          background: BROWN,
+          color: PRIMARY_FOREGROUND,
+          boxShadow: `0 8px 24px ${BROWN}44`,
+        }}
+      >
+        <Plus size={18} />
+        Yeni Sipariş
+      </button>
+
+      {/* ── Order Creation Modal ── */}
+      {orderModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex flex-col">
+          <div
+            className="flex-1 flex flex-col mt-auto rounded-t-[28px] overflow-hidden"
+            style={{ background: '#fff', maxHeight: '92vh' }}
+          >
+            {/* Modal Header */}
+            <div
+              className="flex items-center justify-between px-5 py-4 border-b shrink-0"
+              style={{ borderColor: BORDER_SOFT, background: SURFACE_MUTED }}
+            >
+              <div className="flex items-center gap-3">
+                {orderStep !== 'table' && (
+                  <button
+                    onClick={() => setOrderStep(orderStep === 'confirm' ? 'products' : 'table')}
+                    className="p-1.5 rounded-lg"
+                    style={{ background: '#fff' }}
+                  >
+                    <X size={18} style={{ color: TEXT, transform: 'rotate(45deg)' }} />
+                  </button>
+                )}
+                <div>
+                  <p className="font-bold text-base" style={{ color: TEXT }}>
+                    {orderStep === 'table' && 'Masa Seç'}
+                    {orderStep === 'products' && `Masa ${selectedOrderTable?.number} - Ürün Ekle`}
+                    {orderStep === 'confirm' && 'Siparişi Onayla'}
+                  </p>
+                  {orderStep === 'products' && orderCartCount > 0 && (
+                    <p className="text-xs" style={{ color: BROWN }}>{orderCartCount} ürün · ₺{orderCartTotal}</p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={closeOrderModal}
+                className="p-2 rounded-full"
+                style={{ background: '#fff' }}
+              >
+                <X size={20} style={{ color: TEXT }} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {/* Step 1: Table Selection */}
+              {orderStep === 'table' && (
+                <div>
+                  <p className="text-xs mb-3" style={{ color: '#9ca3af' }}>
+                    Sipariş almak istediğiniz masayı seçin. Boş masalar otomatik açılır.
+                  </p>
+                  {!tablesLoaded ? (
+                    <div className="grid grid-cols-3 gap-3">
+                      {[1,2,3,4,5,6].map((i) => <div key={i} className="bg-gray-100 rounded-2xl h-20 animate-pulse" />)}
+                    </div>
+                  ) : tables.length === 0 ? (
+                    <EmptyState icon={<Armchair size={32} />} text="Henüz masa eklenmemiş" />
+                  ) : (
+                    <div className="grid grid-cols-3 gap-3">
+                      {tables.map((table) => {
+                        const sc = TABLE_STATUS_COLOR[table.status] ?? TABLE_STATUS_COLOR.boş
+                        const canOrder = ['boş', 'aktif', 'çağrı var', 'hesap istendi'].includes(table.status)
+                        return (
+                          <button
+                            key={table.id}
+                            disabled={!canOrder}
+                            onClick={() => selectTableForOrder(table)}
+                            className="rounded-2xl p-3 text-center transition-all disabled:opacity-40"
+                            style={{
+                              background: canOrder ? '#fff' : sc.bg,
+                              border: `2px solid ${canOrder ? BORDER_SOFT : sc.bg}`,
+                            }}
+                          >
+                            <p className="font-bold text-lg leading-none" style={{ color: canOrder ? TEXT : sc.text }}>
+                              {table.number}
+                            </p>
+                            <p className="text-xs mt-1.5" style={{ color: canOrder ? '#9ca3af' : sc.text }}>
+                              {TABLE_STATUS_LABEL[table.status] ?? table.status}
+                            </p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 2: Product Selection */}
+              {orderStep === 'products' && (
+                <div>
+                  {/* Categories */}
+                  {categories.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-3 mb-4 -mx-4 px-4">
+                      {categories.map((cat) => (
+                        <button
+                          key={cat.id}
+                          onClick={() => setOrderActiveCat(cat.id)}
+                          className="shrink-0 px-4 py-2 rounded-full text-sm font-medium"
+                          style={
+                            orderActiveCat === cat.id
+                              ? { background: BROWN, color: PRIMARY_FOREGROUND }
+                              : { background: '#fff', color: TEXT, border: `1px solid ${BORDER_SOFT}` }
+                          }
+                        >
+                          {cat.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Products */}
+                  <div className="space-y-2">
+                    {products
+                      .filter((p) => p.categoryId === orderActiveCat && p.available)
+                      .sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+                      .map((product) => {
+                        const cartItem = orderCart.find((item) => item.productId === product.id)
+                        const quantity = cartItem?.quantity ?? 0
+
+                        return (
+                          <div
+                            key={product.id}
+                            className="flex items-center justify-between rounded-2xl p-4"
+                            style={{ background: '#fff', border: `1px solid ${BORDER_SOFT}` }}
+                          >
+                            <div className="flex-1 min-w-0 mr-3">
+                              <p className="font-semibold text-sm" style={{ color: TEXT }}>{product.name}</p>
+                              <p className="font-bold text-sm mt-1" style={{ color: BROWN }}>₺{product.price}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {quantity > 0 ? (
+                                <>
+                                  <button
+                                    onClick={() => updateOrderCartQuantity(product.id, -1)}
+                                    className="w-8 h-8 rounded-full flex items-center justify-center"
+                                    style={{ background: SURFACE_MUTED }}
+                                  >
+                                    <Minus size={16} style={{ color: TEXT }} />
+                                  </button>
+                                  <span className="w-6 text-center font-bold text-sm" style={{ color: TEXT }}>{quantity}</span>
+                                  <button
+                                    onClick={() => updateOrderCartQuantity(product.id, 1)}
+                                    className="w-8 h-8 rounded-full flex items-center justify-center"
+                                    style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
+                                  >
+                                    <Plus size={16} />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => addToOrderCart(product)}
+                                  className="px-4 py-2 rounded-xl text-sm font-semibold"
+                                  style={{ background: SURFACE_MUTED, color: BROWN }}
+                                >
+                                  Ekle
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Confirm */}
+              {orderStep === 'confirm' && (
+                <div>
+                  <div className="rounded-2xl p-4 mb-4" style={{ background: SURFACE_MUTED }}>
+                    <p className="text-sm font-semibold mb-2" style={{ color: TEXT }}>Masa {selectedOrderTable?.number}</p>
+                    <div className="space-y-2">
+                      {orderCart.map((item) => (
+                        <div key={item.productId} className="flex items-center justify-between text-sm">
+                          <span style={{ color: TEXT }}>{item.quantity}x {item.name}</span>
+                          <span className="font-semibold" style={{ color: BROWN }}>₺{item.price * item.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t mt-3 pt-3 flex items-center justify-between" style={{ borderColor: BORDER_SOFT }}>
+                      <span className="font-bold" style={{ color: TEXT }}>Toplam</span>
+                      <span className="font-bold text-lg" style={{ color: BROWN }}>₺{orderCartTotal}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            {orderStep === 'products' && orderCart.length > 0 && (
+              <div
+                className="shrink-0 px-4 py-4 border-t"
+                style={{ borderColor: BORDER_SOFT, paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+              >
+                <button
+                  onClick={() => setOrderStep('confirm')}
+                  className="w-full rounded-2xl py-4 font-bold text-sm"
+                  style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
+                >
+                  Devam Et · ₺{orderCartTotal}
+                </button>
+              </div>
+            )}
+
+            {orderStep === 'confirm' && (
+              <div
+                className="shrink-0 px-4 py-4 border-t"
+                style={{ borderColor: BORDER_SOFT, paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+              >
+                <button
+                  onClick={submitOrder}
+                  disabled={orderSending || orderCart.length === 0}
+                  className="w-full rounded-2xl py-4 font-bold text-sm disabled:opacity-50"
+                  style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
+                >
+                  {orderSending ? 'Gönderiliyor...' : 'Siparişi Oluştur'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

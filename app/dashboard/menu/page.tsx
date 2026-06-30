@@ -132,9 +132,15 @@ async function uploadToImgBB(file: File): Promise<{ success: true; url: string }
 }
 
 export default function MenuPage() {
-  const { profile } = useAuth()
+  const { profile, loading: authLoading } = useAuth()
   const restaurantId = profile?.restaurantId || ''
   const isDevelopment = process.env.NODE_ENV === 'development'
+
+  // Debug: log profile state
+  useEffect(() => {
+    console.log('[ADMIN MENU DEBUG] Auth loading:', authLoading)
+    console.log('[ADMIN MENU DEBUG] Profile:', profile ? { uid: profile.uid, restaurantId: profile.restaurantId, role: profile.role } : null)
+  }, [authLoading, profile])
 
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -161,24 +167,38 @@ export default function MenuPage() {
   const productDocRef = (productId: string) => rd(restaurantId, 'products', productId)
 
   useEffect(() => {
-    if (!restaurantId) return
+    if (!restaurantId) {
+      console.log('[ADMIN MENU DEBUG] No restaurantId, skipping load')
+      return
+    }
 
     const currentRestaurantId = restaurantId
+    console.log('[ADMIN MENU DEBUG] Loading menu for restaurantId:', currentRestaurantId)
+    console.log('[ADMIN MENU DEBUG] Categories path: restaurants/' + currentRestaurantId + '/categories')
+    console.log('[ADMIN MENU DEBUG] Products path: restaurants/' + currentRestaurantId + '/products')
 
     const unsubCats = onSnapshot(
       query(rc(currentRestaurantId, 'categories'), orderBy('order', 'asc')),
       (snapshot) => {
         const cats = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Category))
+        console.log('[ADMIN MENU DEBUG] Categories loaded:', cats.length)
         setCategories(cats)
         setCategoriesRestaurantId(currentRestaurantId)
         setSelectedCatId((prev) => (prev && cats.some((category) => category.id === prev) ? prev : (cats[0]?.id ?? null)))
+      },
+      (error) => {
+        console.error('[ADMIN MENU DEBUG] Categories error:', error.code, error.message)
       }
     )
     const unsubProds = onSnapshot(
       query(rc(currentRestaurantId, 'products'), orderBy('name', 'asc')),
       (snapshot) => {
+        console.log('[ADMIN MENU DEBUG] Products loaded:', snapshot.docs.length)
         setProducts(snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as Product)))
         setProductsRestaurantId(currentRestaurantId)
+      },
+      (error) => {
+        console.error('[ADMIN MENU DEBUG] Products error:', error.code, error.message)
       }
     )
     return () => {

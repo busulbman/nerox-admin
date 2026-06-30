@@ -51,8 +51,11 @@ service cloud.firestore {
     }
 
     function isSubscriptionValid(rid) {
-      let expires = get(restaurantPath(rid)).data.subscriptionExpiresAt;
-      return expires == null
+      let data = get(restaurantPath(rid)).data;
+      // If subscriptionExpiresAt field doesn't exist or is null, allow access
+      let expires = data.subscriptionExpiresAt;
+      return !('subscriptionExpiresAt' in data)
+        || expires == null
         || (expires is timestamp && expires >= request.time)
         || (expires is int && expires >= request.time.toMillis());
     }
@@ -194,13 +197,15 @@ service cloud.firestore {
       // ── Categories & Products (Menu) ──────────────────────────────────────────
 
       match /categories/{catId} {
-        allow read: if restaurantAllowsPublicAccess(rid);
+        // Staff can always read their own menu
+        allow read: if isStaff(rid) || restaurantAllowsPublicAccess(rid);
         // Only admin can modify
         allow write: if isAdmin(rid);
       }
 
       match /products/{prodId} {
-        allow read: if restaurantAllowsPublicAccess(rid);
+        // Staff can always read their own menu
+        allow read: if isStaff(rid) || restaurantAllowsPublicAccess(rid);
         // Only admin can modify
         allow write: if isAdmin(rid);
       }

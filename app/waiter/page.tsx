@@ -27,6 +27,13 @@ import {
 } from '@/lib/firestore-models'
 import type { Category, Product, Rating, Table, TableStatus, WaiterCall } from '@/lib/types'
 import { requestPermission, showNotification } from '@/lib/notifications'
+import {
+  initializeAudioWithUserInteraction,
+  isAudioEnabled,
+  isAudioInitialized,
+  playNotificationSound,
+  setAudioEnabled,
+} from '@/lib/audio-notification'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import {
   DEFAULT_PRIMARY_COLOR,
@@ -117,6 +124,16 @@ export default function WaiterPage() {
   // Connection status for resilience
   const [connectionLost, setConnectionLost] = useState(false)
 
+  // Audio notification state - use lazy initialization
+  const [audioEnabled, setAudioEnabledState] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return isAudioEnabled()
+  })
+  const [audioInitialized, setAudioInitializedState] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return isAudioInitialized()
+  })
+
   const prevPendingIds    = useRef<Set<string>>(new Set())
   const callsInitialized  = useRef(false)
 
@@ -180,15 +197,21 @@ export default function WaiterPage() {
 
     function processSnapshot(snap: import('firebase/firestore').QuerySnapshot) {
       setConnectionLost(false)
+      console.log('[WAITER DEBUG] Received calls snapshot, count:', snap.docs.length)
       const all = snap.docs.map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>))
       const pendingList = all.filter((c) => c.durum === 'bekliyor').sort((a, b) => a.createdAt - b.createdAt)
 
       if (callsInitialized.current) {
         const tips: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
+        let hasNewCall = false
         for (const call of pendingList) {
           if (!prevPendingIds.current.has(call.id)) {
+            hasNewCall = true
             showNotification('Yeni çağrı', `Masa ${getCallTableLabel(call)} — ${tips[call.tip] ?? call.tip}`, '/waiter')
           }
+        }
+        if (hasNewCall) {
+          void playNotificationSound()
         }
       }
       callsInitialized.current = true
@@ -466,6 +489,30 @@ export default function WaiterPage() {
             </div>
             <div className="flex items-center gap-2 mt-1">
               <button
+                onClick={async () => {
+                  if (!audioInitialized) {
+                    await initializeAudioWithUserInteraction()
+                    setAudioEnabled(true)
+                    setAudioEnabledState(true)
+                    setAudioInitializedState(true)
+                    void playNotificationSound()
+                  } else {
+                    const newValue = !audioEnabled
+                    setAudioEnabled(newValue)
+                    setAudioEnabledState(newValue)
+                    if (newValue) void playNotificationSound()
+                  }
+                }}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2"
+                style={{
+                  background: audioEnabled ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.10)',
+                  color: PRIMARY_FOREGROUND,
+                }}
+                aria-label={audioEnabled ? 'Sesi kapat' : 'Sesi aç'}
+              >
+                <Bell className="h-4 w-4" style={{ opacity: audioEnabled ? 1 : 0.5 }} />
+              </button>
+              <button
                 onClick={() => router.push('/waiter/leaderboard')}
                 className="inline-flex items-center justify-center rounded-xl px-3 py-2"
                 style={{ background: 'rgba(255,255,255,0.14)', color: PRIMARY_FOREGROUND }}
@@ -493,6 +540,39 @@ export default function WaiterPage() {
           )}
         </div>
       </header>
+
+      {/* ── Audio notification prompt ── */}
+      {!audioInitialized && (
+        <div
+          className="px-4 py-3 text-center"
+          style={{ background: '#fef3c7', color: '#92400e' }}
+        >
+          <p className="text-sm font-medium mb-2">Yeni çağrılarda sesli bildirim almak ister misiniz?</p>
+          <button
+            onClick={async () => {
+              await initializeAudioWithUserInteraction()
+              setAudioEnabled(true)
+              setAudioEnabledState(true)
+              setAudioInitializedState(true)
+              void playNotificationSound()
+            }}
+            className="px-4 py-1.5 rounded-lg text-sm font-semibold"
+            style={{ background: '#f59e0b', color: '#fff' }}
+          >
+            Sesi Aç
+          </button>
+          <button
+            onClick={() => {
+              setAudioEnabled(false)
+              setAudioInitializedState(true)
+            }}
+            className="ml-2 px-4 py-1.5 rounded-lg text-sm"
+            style={{ background: 'rgba(0,0,0,0.08)', color: '#92400e' }}
+          >
+            Hayır
+          </button>
+        </div>
+      )}
 
       {/* ── Connection lost banner ── */}
       {connectionLost && (

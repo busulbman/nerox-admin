@@ -18,7 +18,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
-import { Check, CircleCheckBig, Copy, LoaderCircle, SearchX, ShoppingBag, ShoppingCart, UtensilsCrossed, Wifi, X } from 'lucide-react'
+import { Check, CircleCheckBig, Copy, Globe, LoaderCircle, SearchX, ShoppingBag, ShoppingCart, UtensilsCrossed, Wifi, X } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -308,6 +308,7 @@ export default function MenuPage() {
   const [ratingMessage, setRatingMessage] = useState<string | null>(null)
 
   const [wifiCopied, setWifiCopied] = useState(false)
+  const [languageModal, setLanguageModal] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -581,13 +582,19 @@ export default function MenuPage() {
   useEffect(() => {
     if (!restaurantId || !tableDocId) return
     logFirestoreRead('menu/table listener', { restaurantId, tableId: tableDocId })
-    const unsubscribe = onSnapshot(doc(db, 'restaurants', restaurantId, 'tables', tableDocId), (snapshot) => {
-      if (!snapshot.exists()) {
-        setTable(null)
-        return
+    const unsubscribe = onSnapshot(
+      doc(db, 'restaurants', restaurantId, 'tables', tableDocId),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setTable(null)
+          return
+        }
+        setTable(normalizeTable(snapshot.id, snapshot.data() as Record<string, unknown>))
+      },
+      (error) => {
+        console.error('[MENU] Table listener error:', error.code, error.message)
       }
-      setTable(normalizeTable(snapshot.id, snapshot.data() as Record<string, unknown>))
-    })
+    )
     return () => unsubscribe()
   }, [restaurantId, tableDocId])
 
@@ -601,14 +608,20 @@ export default function MenuPage() {
       orderBy('createdAt', 'desc'),
       limit(50)
     )
-    const unsubscribe = onSnapshot(sessionCallsQuery, (snapshot) => {
-      const allSessionCalls = snapshot.docs
-        .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
-        .filter((call) => call.tableId === tableDocId)
-        .sort((a, b) => b.createdAt - a.createdAt)
-      setSessionCalls(allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi'))
-      setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
-    })
+    const unsubscribe = onSnapshot(
+      sessionCallsQuery,
+      (snapshot) => {
+        const allSessionCalls = snapshot.docs
+          .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
+          .filter((call) => call.tableId === tableDocId)
+          .sort((a, b) => b.createdAt - a.createdAt)
+        setSessionCalls(allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi'))
+        setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
+      },
+      (error) => {
+        console.error('[MENU] Session calls listener error:', error.code, error.message)
+      }
+    )
     return () => unsubscribe()
   }, [restaurantId, sessionId, tableDocId])
 
@@ -1048,6 +1061,14 @@ export default function MenuPage() {
     }
   }
 
+  function handleLanguageChange(lang: MenuLanguage) {
+    setLanguage(lang)
+    saveLanguage(tableId, lang)
+    setLanguageModal(false)
+  }
+
+  const currentLanguageLabel = SUPPORTED_LANGUAGES.find((l) => l.code === language)?.code.toUpperCase() ?? 'TR'
+
   const visibleProducts = products
     .filter((product) => product.categoryId === activeCat && product.available)
     .sort((a, b) => a.name.localeCompare(b.name, 'tr'))
@@ -1229,15 +1250,26 @@ export default function MenuPage() {
                 )}
                 <p className="text-[1.2rem] font-semibold leading-none" style={{ color: menuTextColor }}>{menuDisplayName}</p>
               </div>
-              <div className="relative">
-                <button onClick={openCartDrawer} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'cart')}>
-                  <ShoppingBag size={20} />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setLanguageModal(true)}
+                  className="flex h-10 items-center justify-center gap-1 rounded-full bg-white px-3 shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                  style={{ color: menuTextColor }}
+                  aria-label="Change language"
+                >
+                  <Globe size={16} />
+                  <span className="text-xs font-semibold">{currentLanguageLabel}</span>
                 </button>
-                {cartCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
-                    {cartCount}
-                  </span>
-                )}
+                <div className="relative">
+                  <button onClick={openCartDrawer} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'cart')}>
+                    <ShoppingBag size={20} />
+                  </button>
+                  {cartCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
+                      {cartCount}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1715,6 +1747,36 @@ export default function MenuPage() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Language Modal */}
+        {languageModal && (
+          <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-end sm:items-center sm:justify-center">
+            <div className="w-full rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-sm sm:rounded-[28px] sm:pb-6" style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold" style={{ color: menuTextColor }}>{t(language, 'selectLanguage')}</h2>
+                <button onClick={() => setLanguageModal(false)} className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-2">
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => handleLanguageChange(lang.code)}
+                    className="w-full rounded-2xl px-4 py-3.5 text-left border transition-all"
+                    style={language === lang.code
+                      ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor }
+                      : { background: '#fff', borderColor: menuBorderColor, color: menuTextColor }}
+                    dir={lang.dir}
+                  >
+                    <p className="font-semibold">{lang.nativeName}</p>
+                    <p className="text-sm mt-0.5" style={{ opacity: 0.7 }}>{lang.name}</p>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

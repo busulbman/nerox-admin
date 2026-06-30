@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin'
+import { FirebaseAdminError, getAdminAuth, getAdminDb } from '@/lib/firebase-admin'
 import {
   SuperAdminApiError,
   buildRestaurantSeedData,
@@ -16,6 +16,8 @@ import {
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+const isDev = process.env.NODE_ENV === 'development'
+
 function toErrorResponse(error: unknown) {
   const normalizedError = mapFirebaseAdminError(error)
 
@@ -23,8 +25,30 @@ function toErrorResponse(error: unknown) {
     return NextResponse.json({ error: normalizedError.message }, { status: normalizedError.status })
   }
 
-  console.error('Super admin create restaurant API error:', normalizedError)
-  return NextResponse.json({ error: 'İşletme oluşturulurken beklenmeyen bir hata oluştu.' }, { status: 500 })
+  if (normalizedError instanceof FirebaseAdminError) {
+    console.error('[create-restaurant] Firebase Admin error:', normalizedError.code, normalizedError.message)
+    return NextResponse.json(
+      {
+        error: normalizedError.message,
+        code: normalizedError.code,
+        details: isDev ? normalizedError.details : undefined,
+      },
+      { status: 500 }
+    )
+  }
+
+  const errorMessage = normalizedError instanceof Error ? normalizedError.message : 'Unknown error'
+  const errorStack = normalizedError instanceof Error ? normalizedError.stack : undefined
+  console.error('[create-restaurant] Unexpected error:', errorMessage)
+  if (errorStack) console.error('[create-restaurant] Stack:', errorStack)
+
+  return NextResponse.json(
+    {
+      error: 'İşletme oluşturulurken beklenmeyen bir hata oluştu.',
+      message: isDev ? errorMessage : undefined,
+    },
+    { status: 500 }
+  )
 }
 
 export async function POST(request: NextRequest) {

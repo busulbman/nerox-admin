@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { FirebaseAdminError } from '@/lib/firebase-admin'
 import {
   SuperAdminApiError,
   listRestaurantsSummary,
@@ -10,6 +11,8 @@ import {
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+const isDev = process.env.NODE_ENV === 'development'
+
 function toErrorResponse(error: unknown) {
   const normalizedError = mapFirebaseAdminError(error)
 
@@ -17,8 +20,28 @@ function toErrorResponse(error: unknown) {
     return NextResponse.json({ error: normalizedError.message }, { status: normalizedError.status })
   }
 
-  console.error('Super admin restaurants API error:', normalizedError)
-  return NextResponse.json({ error: 'İşlem sırasında beklenmeyen bir hata oluştu.' }, { status: 500 })
+  if (normalizedError instanceof FirebaseAdminError) {
+    console.error('[restaurants] Firebase Admin error:', normalizedError.code, normalizedError.message)
+    return NextResponse.json(
+      {
+        error: normalizedError.message,
+        code: normalizedError.code,
+        details: isDev ? normalizedError.details : undefined,
+      },
+      { status: 500 }
+    )
+  }
+
+  const errorMessage = normalizedError instanceof Error ? normalizedError.message : 'Unknown error'
+  console.error('[restaurants] Unexpected error:', errorMessage)
+
+  return NextResponse.json(
+    {
+      error: 'İşlem sırasında beklenmeyen bir hata oluştu.',
+      message: isDev ? errorMessage : undefined,
+    },
+    { status: 500 }
+  )
 }
 
 export async function GET(request: NextRequest) {

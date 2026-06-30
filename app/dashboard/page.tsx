@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
   getDocs,
   limit,
+  orderBy,
   query,
   where,
 } from "firebase/firestore";
@@ -24,6 +25,12 @@ import {
   Bell,
   CircleCheckBig,
   Users,
+  TrendingUp,
+  ShoppingBag,
+  Package,
+  Calculator,
+  Calendar,
+  ChevronDown,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { useOpenCalls } from "@/components/dashboard/OpenCallsProvider";
@@ -41,6 +48,15 @@ import {
 } from "@/lib/firestore-queries";
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import {
+  calculateAnalytics,
+  formatCurrency,
+  formatNumber,
+  getDateRangeConfig,
+  DATE_RANGE_LABELS,
+  type DateRange,
+  type AnalyticsData,
+} from '@/lib/analytics'
 import type { WaiterCall, Table } from "@/lib/types";
 
 const TEXT = "var(--text)";
@@ -72,6 +88,18 @@ function buildHourlyData(calls: WaiterCall[]) {
   });
 }
 
+const EMPTY_ANALYTICS: AnalyticsData = {
+  totalRevenue: 0,
+  orderCount: 0,
+  itemsSold: 0,
+  averageCartValue: 0,
+  completedOrders: 0,
+  pendingOrders: 0,
+  topProducts: [],
+  topTables: [],
+  categoryBreakdown: [],
+}
+
 export default function DashboardPage() {
   const { profile } = useAuth();
   const { pendingCalls } = useOpenCalls();
@@ -79,11 +107,22 @@ export default function DashboardPage() {
   const router = useRouter();
   const restaurantId = profile?.restaurantId || '';
   const [completedCalls, setCompletedCalls] = useState<WaiterCall[]>([]);
+  const [allOrderCalls, setAllOrderCalls] = useState<WaiterCall[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [activeWaiters, setActiveWaiters] = useState(0);
   const [, setTick] = useState(0);
+  const [dateRange, setDateRange] = useState<DateRange>('today');
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const businessName = resolveRestaurantBusinessName(settings)
 
+  // Calculate analytics using useMemo instead of useEffect
+  const analytics = useMemo(() => {
+    if (allOrderCalls.length === 0) return EMPTY_ANALYTICS
+    const config = getDateRangeConfig(dateRange)
+    return calculateAnalytics(allOrderCalls, config)
+  }, [allOrderCalls, dateRange])
+
+  // Load completed calls for call distribution chart
   useEffect(() => {
     let cancelled = false;
 
@@ -101,6 +140,39 @@ export default function DashboardPage() {
     }
 
     void loadCompletedCalls();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId]);
+
+  // Load all order calls for analytics (last 90 days)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOrderCalls() {
+      if (!restaurantId) return;
+      const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      logFirestoreRead("dashboard/order calls", restaurantId);
+
+      const orderCallsQuery = query(
+        collection(db, 'restaurants', restaurantId, 'calls'),
+        where('tip', '==', 'sipariş'),
+        orderBy('createdAt', 'desc'),
+        limit(500)
+      );
+
+      const snap = await getDocs(orderCallsQuery);
+      if (cancelled) return;
+
+      const calls = snap.docs
+        .map((doc) => normalizeWaiterCall(doc.id, doc.data() as Record<string, unknown>))
+        .filter((c) => c.createdAt >= ninetyDaysAgo);
+
+      setAllOrderCalls(calls);
+    }
+
+    void loadOrderCalls();
 
     return () => {
       cancelled = true;
@@ -206,18 +278,80 @@ export default function DashboardPage() {
   const hourlyData = buildHourlyData(completedCalls);
   const top5Pending = sortedPendingCalls.slice(0, 5);
 
+  const completionRate = analytics.orderCount > 0
+    ? Math.round((analytics.completedOrders / analytics.orderCount) * 100)
+    : 0;
+
   return (
     <div className="p-6 md:p-8">
-      <div className="mb-6">
-        <h1 className="font-bold text-2xl" style={{ color: TEXT }}>
-          Genel Bakış
-        </h1>
-        <p className="text-gray-400 text-sm mt-0.5">
-          {businessName} — Canlı veriler
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h1 className="font-bold text-2xl" style={{ color: TEXT }}>
+            Genel Bakış
+          </h1>
+          <p className="text-gray-400 text-sm mt-0.5">
+            {businessName} — Canlı veriler
+          </p>
+        </div>
+
+        {/* Date Range Selector */}
+        <div className="relative">
+          <button
+            onClick={() => setShowDatePicker(!showDatePicker)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border text-sm font-medium transition-all hover:shadow-md"
+            style={{ borderColor: 'var(--border-soft)', color: TEXT }}
+          >
+            <Calendar size={16} />
+            {DATE_RANGE_LABELS[dateRange]}
+            <ChevronDown size={16} className={`transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
+          </button>
+
+          {showDatePicker && (
+            <div
+              className="absolute right-0 top-full mt-2 bg-white rounded-xl border shadow-xl z-10 py-2 min-w-[160px]"
+              style={{ borderColor: 'var(--border-soft)' }}
+            >
+              {(['today', 'week', 'month', 'year'] as DateRange[]).map((range) => (
+                <button
+                  key={range}
+                  onClick={() => { setDateRange(range); setShowDatePicker(false); }}
+                  className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${dateRange === range ? 'font-semibold' : ''}`}
+                  style={{ color: dateRange === range ? PRIMARY : TEXT }}
+                >
+                  {DATE_RANGE_LABELS[range]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── Üst istatistikler ─────────────────────────────────────────────── */}
+      {/* ── Satış İstatistikleri ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <RevenueCard
+          Icon={TrendingUp}
+          label={`${DATE_RANGE_LABELS[dateRange]} Ciro`}
+          value={formatCurrency(analytics.totalRevenue)}
+          highlight
+        />
+        <RevenueCard
+          Icon={ShoppingBag}
+          label="Sipariş Sayısı"
+          value={formatNumber(analytics.orderCount)}
+        />
+        <RevenueCard
+          Icon={Package}
+          label="Satılan Ürün"
+          value={formatNumber(analytics.itemsSold)}
+        />
+        <RevenueCard
+          Icon={Calculator}
+          label="Ort. Sepet"
+          value={formatCurrency(analytics.averageCartValue)}
+        />
+      </div>
+
+      {/* ── Operasyonel İstatistikler ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <StatCard
           Icon={Bell}
@@ -374,6 +508,135 @@ export default function DashboardPage() {
           </div>
         </section>
       </div>
+
+      {/* ── Satış Detayları ───────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* En çok satan ürünler */}
+        <section className="bg-white rounded-2xl border border-gray-100 p-5">
+          <h3 className="font-semibold text-base mb-4" style={{ color: TEXT }}>
+            En Çok Satan Ürünler
+          </h3>
+          {analytics.topProducts.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-6">Henüz veri yok</p>
+          ) : (
+            <div className="space-y-3">
+              {analytics.topProducts.map((product, index) => (
+                <div key={product.name} className="flex items-center gap-3">
+                  <span
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{
+                      background: index === 0 ? PRIMARY : 'var(--surface-muted)',
+                      color: index === 0 ? '#fff' : TEXT,
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: TEXT }}>
+                      {product.name}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {product.quantity} adet • {formatCurrency(product.revenue)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* En aktif masalar */}
+        <section className="bg-white rounded-2xl border border-gray-100 p-5">
+          <h3 className="font-semibold text-base mb-4" style={{ color: TEXT }}>
+            En Aktif Masalar
+          </h3>
+          {analytics.topTables.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-6">Henüz veri yok</p>
+          ) : (
+            <div className="space-y-3">
+              {analytics.topTables.map((table, index) => (
+                <div key={table.tableNumber} className="flex items-center gap-3">
+                  <span
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{
+                      background: index === 0 ? PRIMARY : 'var(--surface-muted)',
+                      color: index === 0 ? '#fff' : TEXT,
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium" style={{ color: TEXT }}>
+                      Masa {table.tableNumber}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {table.orderCount} sipariş • {formatCurrency(table.revenue)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Sipariş durumu & kategori dağılımı */}
+        <section className="bg-white rounded-2xl border border-gray-100 p-5">
+          <h3 className="font-semibold text-base mb-4" style={{ color: TEXT }}>
+            Sipariş Durumu
+          </h3>
+
+          {analytics.orderCount === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-6">Henüz veri yok</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex-1">
+                  <div className="h-3 rounded-full overflow-hidden" style={{ background: 'var(--surface-muted)' }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${completionRate}%`, background: PRIMARY }}
+                    />
+                  </div>
+                </div>
+                <span className="text-sm font-bold shrink-0" style={{ color: PRIMARY }}>
+                  %{completionRate}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="rounded-xl p-3" style={{ background: 'var(--surface-muted)' }}>
+                  <p className="text-xs text-gray-400">Tamamlanan</p>
+                  <p className="text-lg font-bold" style={{ color: PRIMARY }}>
+                    {analytics.completedOrders}
+                  </p>
+                </div>
+                <div className="rounded-xl p-3" style={{ background: 'var(--surface-muted)' }}>
+                  <p className="text-xs text-gray-400">Bekleyen</p>
+                  <p className="text-lg font-bold" style={{ color: TEXT }}>
+                    {analytics.pendingOrders}
+                  </p>
+                </div>
+              </div>
+
+              {analytics.categoryBreakdown.length > 0 && (
+                <>
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-4">
+                    Kategori Dağılımı
+                  </h4>
+                  <div className="space-y-2">
+                    {analytics.categoryBreakdown.slice(0, 4).map((cat) => (
+                      <div key={cat.category} className="flex items-center justify-between text-sm">
+                        <span className="truncate" style={{ color: TEXT }}>{cat.category}</span>
+                        <span className="text-gray-400 shrink-0 ml-2">{cat.quantity} adet</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -417,6 +680,36 @@ function StatCard({
         )}
       </div>
       <div className="text-gray-400 text-sm mt-1">{label}</div>
+    </div>
+  );
+}
+
+function RevenueCard({
+  Icon,
+  label,
+  value,
+  highlight,
+}: {
+  Icon: LucideIcon;
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className="bg-white rounded-2xl p-5 border transition-shadow hover:shadow-md"
+      style={{
+        borderColor: highlight ? PRIMARY : "var(--border-soft)",
+        background: highlight ? 'linear-gradient(135deg, var(--primary-soft) 0%, #fff 100%)' : '#fff',
+      }}
+    >
+      <div className="mb-2">
+        <Icon className="h-5 w-5" style={{ color: highlight ? PRIMARY : 'var(--muted)' }} />
+      </div>
+      <div className="text-2xl font-bold" style={{ color: highlight ? PRIMARY : TEXT }}>
+        {value}
+      </div>
+      <div className="text-gray-400 text-xs mt-1">{label}</div>
     </div>
   );
 }

@@ -37,6 +37,7 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import LoadingScreen from '@/components/LoadingScreen'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
@@ -1413,14 +1414,7 @@ export default function MenuPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)]" dir={isRtl ? 'rtl' : 'ltr'}>
-        <div className="text-center text-[var(--text)]">
-          <LoaderCircle className="mx-auto mb-3 h-10 w-10 animate-spin text-[var(--primary)]" />
-          <p className="text-[1.1rem] font-semibold">{t(language, 'loading')}</p>
-        </div>
-      </div>
-    )
+    return <LoadingScreen variant="menu" message={t(language, 'loading')} />
   }
 
   if (restaurantAccessReason) {

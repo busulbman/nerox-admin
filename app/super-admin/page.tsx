@@ -26,6 +26,7 @@ import { generateSlug, getUniqueRestaurantSlug } from '@/lib/restaurant-settings
 import { SUBSCRIPTION_EXTENSION_LABELS, type SubscriptionExtensionPreset } from '@/lib/subscription-extension'
 import type { RestaurantPlan, RestaurantStatus } from '@/lib/types'
 import { buildThemeStyleVars } from '@/lib/ui-theme'
+import LoadingScreen from '@/components/LoadingScreen'
 
 const SUPER_ADMIN_THEME_COLOR = '#5c3d2e'
 
@@ -120,16 +121,16 @@ function StatCard({
   icon: typeof Building2
 }) {
   return (
-    <div className="rounded-[1.5rem] border bg-white p-5 shadow-[0_12px_30px_rgba(61,43,31,0.04)]" style={{ borderColor: 'var(--border-soft)' }}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--muted)' }}>{label}</p>
-          <p className="mt-3 text-3xl font-semibold tracking-[-0.04em]" style={{ color: 'var(--text)' }}>
+    <div className="rounded-[1.5rem] border bg-white p-4 sm:p-5 shadow-[0_12px_30px_rgba(61,43,31,0.04)]" style={{ borderColor: 'var(--border-soft)' }}>
+      <div className="flex items-start justify-between gap-2 sm:gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-[0.14em] sm:tracking-[0.18em] truncate" style={{ color: 'var(--muted)' }}>{label}</p>
+          <p className="mt-2 sm:mt-3 text-2xl sm:text-3xl font-semibold tracking-[-0.04em]" style={{ color: 'var(--text)' }}>
             {value}
           </p>
         </div>
-        <div className="rounded-2xl p-3" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
-          <Icon className="h-5 w-5" />
+        <div className="rounded-xl sm:rounded-2xl p-2 sm:p-3 shrink-0" style={{ background: 'var(--surface-muted)', color: 'var(--primary-soft-foreground)' }}>
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
         </div>
       </div>
     </div>
@@ -324,14 +325,7 @@ export default function SuperAdminPage() {
   }
 
   if (loading || (!user && !profile)) {
-    return (
-      <div className="flex min-h-screen items-center justify-center" style={{ ...themeVars, background: 'var(--page-bg)' }}>
-        <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--muted)' }}>
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Yükleniyor...
-        </div>
-      </div>
-    )
+    return <LoadingScreen variant="admin" message="Super Admin yükleniyor..." />
   }
 
   if (!user || profile?.role !== 'super_admin') {
@@ -384,7 +378,7 @@ export default function SuperAdminPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Toplam İşletme" value={String(totalRestaurants)} icon={Building2} />
             <StatCard label="Aktif" value={String(activeRestaurants)} icon={Power} />
             <StatCard label="Pasif" value={String(passiveRestaurants)} icon={Shield} />

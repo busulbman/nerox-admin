@@ -61,6 +61,30 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), sans-serif;
   overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.body-scroll-locked {
+  overflow: hidden !important;
+  position: fixed;
+  width: 100%;
+  touch-action: none;
+}
+
+@media (max-width: 767px) {
+  .mobile-overflow-fix {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
+  .mobile-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 .theme-page {

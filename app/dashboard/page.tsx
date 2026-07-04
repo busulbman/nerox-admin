@@ -302,7 +302,7 @@ export default function DashboardPage() {
     : 0;
 
   return (
-    <div className="overflow-x-hidden p-4 sm:p-6 md:p-8">
+    <div className="mobile-overflow-fix overflow-x-hidden p-4 sm:p-6 md:p-8">
       {trialBanner && (
         <div
           className="mb-6 rounded-[1.75rem] border px-5 py-4"
@@ -391,7 +391,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Satış İstatistikleri ─────────────────────────────────────────────── */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-4 md:gap-4">
         <RevenueCard
           Icon={TrendingUp}
           label={`${DATE_RANGE_LABELS[dateRange]} Ciro`}
@@ -416,7 +416,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Operasyonel İstatistikler ─────────────────────────────────────────── */}
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-4 md:gap-4">
         <StatCard
           Icon={Bell}
           label="Bekleyen Çağrı"
@@ -722,19 +722,19 @@ function StatCard({
 }) {
   return (
     <div
-      className={`bg-white rounded-2xl p-5 border-2 transition-shadow${onClick ? " cursor-pointer hover:shadow-md" : ""}`}
+      className={`bg-white rounded-2xl p-3 sm:p-5 border-2 transition-shadow${onClick ? " cursor-pointer hover:shadow-md" : ""}`}
       style={{
         borderColor: urgent ? PRIMARY : "var(--border-soft)",
         boxShadow: urgent ? "0 18px 32px var(--primary-soft)" : undefined,
       }}
       onClick={onClick}
     >
-      <div className="mb-2">
-        <Icon className="h-6 w-6" style={{ color: urgent ? PRIMARY : TEXT }} />
+      <div className="mb-1.5 sm:mb-2">
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: urgent ? PRIMARY : TEXT }} />
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         <span
-          className="text-3xl font-bold"
+          className="text-2xl sm:text-3xl font-bold"
           style={{ color: urgent ? PRIMARY : TEXT }}
         >
           {value}
@@ -743,7 +743,7 @@ function StatCard({
           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
         )}
       </div>
-      <div className="text-gray-400 text-sm mt-1">{label}</div>
+      <div className="text-gray-400 text-xs sm:text-sm mt-1 truncate">{label}</div>
     </div>
   );
 }
@@ -761,19 +761,19 @@ function RevenueCard({
 }) {
   return (
     <div
-      className="bg-white rounded-2xl p-5 border transition-shadow hover:shadow-md"
+      className="bg-white rounded-2xl p-3 sm:p-5 border transition-shadow hover:shadow-md"
       style={{
         borderColor: highlight ? PRIMARY : "var(--border-soft)",
         background: highlight ? 'linear-gradient(135deg, var(--primary-soft) 0%, #fff 100%)' : '#fff',
       }}
     >
-      <div className="mb-2">
-        <Icon className="h-5 w-5" style={{ color: highlight ? PRIMARY : 'var(--muted)' }} />
+      <div className="mb-1.5 sm:mb-2">
+        <Icon className="h-4 w-4 sm:h-5 sm:w-5" style={{ color: highlight ? PRIMARY : 'var(--muted)' }} />
       </div>
-      <div className="text-2xl font-bold" style={{ color: highlight ? PRIMARY : TEXT }}>
+      <div className="text-lg sm:text-2xl font-bold truncate" style={{ color: highlight ? PRIMARY : TEXT }}>
         {value}
       </div>
-      <div className="text-gray-400 text-xs mt-1">{label}</div>
+      <div className="text-gray-400 text-[10px] sm:text-xs mt-1 truncate">{label}</div>
     </div>
   );
 }

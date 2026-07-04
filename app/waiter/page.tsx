@@ -39,6 +39,7 @@ import {
   DEFAULT_PRIMARY_COLOR,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
+import LoadingScreen from '@/components/LoadingScreen'
 import { buildThemePalette, buildThemeStyleVars } from '@/lib/ui-theme'
 
 type Section = 'pending' | 'active' | 'done'
@@ -584,11 +585,7 @@ export default function WaiterPage() {
 
   // ─── Guard state ──────────────────────────────────────────────────────────
   if (loading || !profile || profile.role !== 'waiter') {
-    return (
-      <div className="theme-page flex min-h-screen items-center justify-center" style={themeVars}>
-        <p className="animate-pulse text-sm text-[var(--muted)]">Yükleniyor...</p>
-      </div>
-    )
+    return <LoadingScreen variant="waiter" />
   }
 
   if (!restaurantId) {

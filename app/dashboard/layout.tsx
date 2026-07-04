@@ -12,6 +12,7 @@ import { requestPermission, showLocalNotification } from '@/lib/notifications'
 import { clearRecentOnboardingCompletion, hasRecentOnboardingCompletion } from '@/lib/onboarding'
 import { getRestaurantAccessBlockMessage, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import { buildThemeStyleVars } from '@/lib/ui-theme'
+import LoadingScreen from '@/components/LoadingScreen'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
@@ -33,11 +34,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [loading, profile?.role, router, user])
 
   if (loading || !user || profile?.role === 'super_admin') {
-    return (
-      <div className="theme-page flex min-h-screen items-center justify-center">
-        <p className="text-sm text-[var(--muted)]">Yükleniyor...</p>
-      </div>
-    )
+    return <LoadingScreen variant="admin" />
   }
 
   if (!profile?.restaurantId) {
@@ -135,11 +132,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const themeVars = buildThemeStyleVars(primaryColor)
 
   if (loading || (profile?.role === 'admin' && restaurantLoading)) {
-    return (
-      <div className="theme-page flex min-h-screen items-center justify-center">
-        <p className="text-sm text-[var(--muted)]">Yükleniyor...</p>
-      </div>
-    )
+    return <LoadingScreen variant="admin" />
   }
 
   if (profile?.role === 'waiter') return null

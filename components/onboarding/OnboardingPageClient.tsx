@@ -20,6 +20,7 @@ import {
   Table2,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import LoadingScreen from '@/components/LoadingScreen'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
@@ -448,18 +449,7 @@ export default function OnboardingPageClient() {
   }
 
   if (authLoading || (user && profile?.role === 'admin' && restaurantLoading)) {
-    return (
-      <main className="relative flex min-h-[100svh] items-center justify-center overflow-x-clip bg-[#05010d] text-white">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="absolute inset-x-0 top-[-18rem] h-[34rem] bg-[radial-gradient(circle_at_top,_rgba(135,87,255,0.28),_transparent_58%)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
-        </div>
-        <div className="relative flex items-center gap-3 rounded-full border border-white/12 bg-white/8 px-5 py-3 text-sm text-white/78 backdrop-blur-xl">
-          <LoaderCircle className="h-4 w-4 animate-spin" />
-          Kurulum ekranı hazırlanıyor...
-        </div>
-      </main>
-    )
+    return <LoadingScreen variant="admin" message="Kurulum ekranı hazırlanıyor..." />
   }
 
   if (!user) return null

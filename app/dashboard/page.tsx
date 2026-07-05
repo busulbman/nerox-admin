@@ -54,9 +54,11 @@ import {
   formatCurrency,
   formatNumber,
   getDateRangeConfig,
+  buildHourlyOrderData,
   DATE_RANGE_LABELS,
   type DateRange,
   type AnalyticsData,
+  type HourlyDataPoint,
 } from '@/lib/analytics'
 import type { Restaurant, Table, WaiterCall } from "@/lib/types";
 
@@ -75,20 +77,6 @@ function elapsed(ts: number): string {
   return m < 1 ? "az önce" : `${m} dk önce`;
 }
 
-function buildHourlyData(calls: WaiterCall[]) {
-  const now = new Date();
-  return Array.from({ length: 8 }, (_, i) => {
-    const h = new Date(now);
-    h.setHours(h.getHours() - (7 - i), 0, 0, 0);
-    const start = h.getTime();
-    const end = start + 3_600_000;
-    return {
-      hour: `${String(h.getHours()).padStart(2, "0")}:00`,
-      count: calls.filter((c) => c.createdAt >= start && c.createdAt < end)
-        .length,
-    };
-  });
-}
 
 const EMPTY_ANALYTICS: AnalyticsData = {
   totalRevenue: 0,
@@ -131,15 +119,28 @@ export default function DashboardPage() {
   const [, setTick] = useState(0);
   const [dateRange, setDateRange] = useState<DateRange>('today');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const businessName = resolveRestaurantBusinessName(settings)
   const trialBanner = getTrialBannerState(restaurant)
 
   // Calculate analytics using useMemo instead of useEffect
   const analytics = useMemo(() => {
     if (allOrderCalls.length === 0) return EMPTY_ANALYTICS
-    const config = getDateRangeConfig(dateRange)
+    const customStart = customStartDate ? new Date(customStartDate) : undefined
+    const customEnd = customEndDate ? new Date(customEndDate + 'T23:59:59') : undefined
+    const config = getDateRangeConfig(dateRange, customStart, customEnd)
     return calculateAnalytics(allOrderCalls, config)
-  }, [allOrderCalls, dateRange])
+  }, [allOrderCalls, dateRange, customStartDate, customEndDate])
+
+  // Calculate hourly order distribution
+  const hourlyOrderData = useMemo((): HourlyDataPoint[] => {
+    if (allOrderCalls.length === 0) return []
+    const customStart = customStartDate ? new Date(customStartDate) : undefined
+    const customEnd = customEndDate ? new Date(customEndDate + 'T23:59:59') : undefined
+    const config = getDateRangeConfig(dateRange, customStart, customEnd)
+    return buildHourlyOrderData(allOrderCalls, config)
+  }, [allOrderCalls, dateRange, customStartDate, customEndDate])
 
   // Load completed calls for call distribution chart
   useEffect(() => {
@@ -294,7 +295,6 @@ export default function DashboardPage() {
 
   const occupancy =
     tables.length > 0 ? Math.round((activeTables / tables.length) * 100) : 0;
-  const hourlyData = buildHourlyData(completedCalls);
   const top5Pending = sortedPendingCalls.slice(0, 5);
 
   const completionRate = analytics.orderCount > 0
@@ -366,25 +366,60 @@ export default function DashboardPage() {
             style={{ borderColor: 'var(--border-soft)', color: TEXT }}
           >
             <Calendar size={16} />
-            {DATE_RANGE_LABELS[dateRange]}
+            {dateRange === 'custom' && customStartDate && customEndDate
+              ? `${customStartDate} - ${customEndDate}`
+              : DATE_RANGE_LABELS[dateRange]}
             <ChevronDown size={16} className={`transition-transform ${showDatePicker ? 'rotate-180' : ''}`} />
           </button>
 
           {showDatePicker && (
             <div
-              className="absolute right-0 top-full z-10 mt-2 min-w-[160px] rounded-xl border bg-white py-2 shadow-xl"
+              className="absolute right-0 top-full z-10 mt-2 min-w-[200px] rounded-xl border bg-white py-2 shadow-xl"
               style={{ borderColor: 'var(--border-soft)' }}
             >
               {(['today', 'week', 'month', 'year'] as DateRange[]).map((range) => (
                 <button
                   key={range}
                   onClick={() => { setDateRange(range); setShowDatePicker(false); }}
-                  className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${dateRange === range ? 'font-semibold' : ''}`}
-                  style={{ color: dateRange === range ? PRIMARY : TEXT }}
+                  className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors ${dateRange === range && dateRange !== 'custom' ? 'font-semibold' : ''}`}
+                  style={{ color: dateRange === range && dateRange !== 'custom' ? PRIMARY : TEXT }}
                 >
                   {DATE_RANGE_LABELS[range]}
                 </button>
               ))}
+              <div className="border-t my-2" style={{ borderColor: 'var(--border-soft)' }} />
+              <div className="px-4 py-2">
+                <p className="text-xs font-medium mb-2" style={{ color: TEXT }}>Özel Tarih Aralığı</p>
+                <div className="space-y-2">
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="w-full rounded-lg border px-3 py-1.5 text-sm"
+                    style={{ borderColor: 'var(--border-soft)', color: TEXT }}
+                  />
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="w-full rounded-lg border px-3 py-1.5 text-sm"
+                    style={{ borderColor: 'var(--border-soft)', color: TEXT }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (customStartDate && customEndDate) {
+                        setDateRange('custom');
+                        setShowDatePicker(false);
+                      }
+                    }}
+                    disabled={!customStartDate || !customEndDate}
+                    className="w-full rounded-lg px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                    style={{ background: PRIMARY }}
+                  >
+                    Uygula
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -525,50 +560,62 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Saatlik grafik */}
+          {/* Saatlik sipariş grafiği */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <p className="text-sm font-semibold mb-4" style={{ color: TEXT }}>
-              Son 8 Saat — Çağrı Dağılımı
+              Saatlik Sipariş Dağılımı
             </p>
-            <ResponsiveContainer width="100%" height={140}>
-              <BarChart
-                data={hourlyData}
-                margin={{ top: 0, right: 4, bottom: 0, left: -20 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="var(--border-soft)"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="hour"
-                  tick={{ fontSize: 11, fill: "#9ca3af" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: "#9ca3af" }}
-                  axisLine={false}
-                  tickLine={false}
-                  allowDecimals={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: "10px",
-                    border: "1px solid var(--border-soft)",
-                    fontSize: "12px",
-                  }}
-                  formatter={(value) => [value, "Çağrı"]}
-                  cursor={{ fill: "var(--primary-soft)" }}
-                />
-                <Bar
-                  dataKey="count"
-                  fill={PRIMARY}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={32}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            {hourlyOrderData.length === 0 ? (
+              <div className="flex items-center justify-center h-[140px] text-sm text-gray-400">
+                Seçilen aralıkta sipariş yok
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart
+                  data={hourlyOrderData}
+                  margin={{ top: 0, right: 4, bottom: 0, left: -20 }}
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="var(--border-soft)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="hour"
+                    tick={{ fontSize: 10, fill: "#9ca3af" }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval={1}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "#9ca3af" }}
+                    axisLine={false}
+                    tickLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: "10px",
+                      border: "1px solid var(--border-soft)",
+                      fontSize: "12px",
+                    }}
+                    formatter={(value, name) => {
+                      const num = typeof value === 'number' ? value : 0;
+                      if (name === 'count') return [num, 'Sipariş'];
+                      if (name === 'revenue') return [formatCurrency(num), 'Ciro'];
+                      return [num, String(name)];
+                    }}
+                    cursor={{ fill: "var(--primary-soft)" }}
+                  />
+                  <Bar
+                    dataKey="count"
+                    fill={PRIMARY}
+                    radius={[4, 4, 0, 0]}
+                    maxBarSize={24}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </section>
       </div>

@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore'
 import { normalizeTable, normalizeWaiterCall, isOpenWaiterCallStatus } from '@/lib/firestore-models'
 import { db } from '@/lib/firebase'
+import { processRewardsOnOrderComplete } from '@/lib/loyalty-rewards'
 import type { TableStatus, WaiterCall } from '@/lib/types'
 
 type SyncableTableStatus = Extract<TableStatus, 'aktif' | 'çağrı var' | 'hesap istendi'>
@@ -128,4 +129,12 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
   }
 
   await batch.commit()
+
+  if (liveCall.tip === 'sipariş') {
+    try {
+      await processRewardsOnOrderComplete(restaurantId, liveCall, actor)
+    } catch (error) {
+      console.error('Reward processing error:', error)
+    }
+  }
 }

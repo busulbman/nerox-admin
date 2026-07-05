@@ -23,14 +23,14 @@ import { auth } from '@/lib/firebase'
 import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl, getContrastColor } from '@/lib/restaurant-settings'
 
 const NAV = [
-  { href: '/dashboard',          label: 'Genel Bakış',   Icon: LayoutDashboard },
-  { href: '/dashboard/menu',     label: 'Menü',          Icon: UtensilsCrossed },
-  { href: '/dashboard/calls',    label: 'Çağrılar',      Icon: Bell },
-  { href: '/dashboard/tables',   label: 'Masalar / QR',  Icon: QrCode },
-  { href: '/dashboard/loyalty',  label: 'Kampanyalar',   Icon: Gift },
-  { href: '/dashboard/ratings',  label: 'Yorumlar',      Icon: Star },
-  { href: '/dashboard/waiters',  label: 'Garsonlar',     Icon: Users },
-  { href: '/dashboard/settings', label: 'Genel Ayarlar', Icon: Settings },
+  { href: '/dashboard',          label: 'Genel Bakış',   Icon: LayoutDashboard, onboardingId: 'dashboard' },
+  { href: '/dashboard/menu',     label: 'Menü',          Icon: UtensilsCrossed, onboardingId: 'menu' },
+  { href: '/dashboard/calls',    label: 'Çağrılar',      Icon: Bell,            onboardingId: 'calls' },
+  { href: '/dashboard/tables',   label: 'Masalar / QR',  Icon: QrCode,          onboardingId: 'tables' },
+  { href: '/dashboard/loyalty',  label: 'Kampanyalar',   Icon: Gift,            onboardingId: 'campaigns' },
+  { href: '/dashboard/ratings',  label: 'Yorumlar',      Icon: Star,            onboardingId: null },
+  { href: '/dashboard/waiters',  label: 'Garsonlar',     Icon: Users,           onboardingId: 'waiters' },
+  { href: '/dashboard/settings', label: 'Genel Ayarlar', Icon: Settings,        onboardingId: 'settings' },
 ]
 
 interface SidebarProps {
@@ -134,6 +134,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
+                data-onboarding={item.onboardingId || undefined}
                 className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-colors"
                 style={
                   active

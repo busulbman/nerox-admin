@@ -57,6 +57,45 @@ export interface RestaurantCustomer {
   updatedAt: number | null
 }
 
+export type LoyaltyRewardStatus = 'available' | 'used' | 'expired'
+
+export interface LoyaltyReward {
+  id: string
+  campaignId: string
+  campaignName: string
+  rewardProductId: string
+  rewardProductName: string
+  rewardQuantity: number
+  status: LoyaltyRewardStatus
+  earnedFromCallId: string
+  earnedAt: number | null
+  usedAt?: number | null
+  usedById?: string
+  usedByName?: string
+}
+
+export type LoyaltyTransactionAction = 'earn' | 'redeem'
+
+export interface LoyaltyTransaction {
+  id: string
+  customerId: string
+  customerName: string
+  campaignId: string
+  campaignName: string
+  callId: string
+  action: LoyaltyTransactionAction
+  targetProductId: string
+  targetProductName: string
+  targetQuantity: number
+  rewardProductId: string
+  rewardProductName: string
+  rewardQuantity: number
+  createdAt: number | null
+  createdByRole: 'admin' | 'waiter' | 'system'
+  createdById?: string
+  createdByName?: string
+}
+
 export interface MenuThemeSettings {
   displayName: string
   logoUrl: string
@@ -145,6 +184,8 @@ export interface WaiterCall {
   completedByName?: string
   completedByRole?: 'admin' | 'waiter'
   customerName?: string
+  customerId?: string
+  customerPhone?: string
   note?: string
   createdAt: number
   acceptedAt?: number

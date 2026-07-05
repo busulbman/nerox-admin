@@ -5,6 +5,7 @@ import { deleteDoc, doc, getDocs, writeBatch } from 'firebase/firestore'
 import { CircleCheckBig, ClipboardList } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
+import CustomerRewards from '@/components/orders/CustomerRewards'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { getCallTipUi } from '@/lib/call-tip-ui'
@@ -333,6 +334,15 @@ export default function CallsPage() {
                 )}
 
                 <OrderBreakdown call={call} />
+
+                {call.customerId && user && profile && (
+                  <CustomerRewards
+                    restaurantId={call.restaurantId || restaurantId}
+                    customerId={call.customerId}
+                    customerName={call.customerName}
+                    actor={{ uid: user.uid, name: profile.name || 'İşletme', role: profile.role as 'admin' | 'waiter' }}
+                  />
+                )}
 
                 {call.note && <p className="text-gray-500 text-sm italic">&quot;{call.note}&quot;</p>}
 

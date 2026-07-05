@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   collection,
@@ -82,6 +82,7 @@ import {
 import type {
   Category,
   LoyaltyCampaign,
+  LoyaltyReward,
   MenuThemeSettings,
   Product,
   RestaurantGeneralSettings,
@@ -90,6 +91,7 @@ import type {
   WaiterCall,
 } from '@/lib/types'
 import { formatPriceWithConversion, getExchangeRates, type ExchangeRates } from '@/lib/currency'
+import { calculatePendingRewards, getCustomerAvailableRewards } from '@/lib/loyalty-rewards'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -365,6 +367,7 @@ export default function MenuPage() {
   const [loyaltyRegisterForm, setLoyaltyRegisterForm] = useState<LoyaltyRegisterForm>(EMPTY_LOYALTY_FORM)
   const [loyaltyRegistering, setLoyaltyRegistering] = useState(false)
   const [loyaltyRegisterMessage, setLoyaltyRegisterMessage] = useState<string | null>(null)
+  const [availableRewards, setAvailableRewards] = useState<LoyaltyReward[]>([])
   const [cartDrawer, setCartDrawer] = useState(false)
   const [orderSending, setOrderSending] = useState(false)
   const [orderSent, setOrderSent] = useState(false)
@@ -736,6 +739,28 @@ export default function MenuPage() {
     return () => { cancelled = true }
   }, [language])
 
+  // Load available rewards for loyalty customers
+  useEffect(() => {
+    if (!restaurantId || !loyaltyCustomer) return
+    let cancelled = false
+    getCustomerAvailableRewards(restaurantId, loyaltyCustomer.id)
+      .then((rewards) => {
+        if (!cancelled) setAvailableRewards(rewards)
+      })
+      .catch((error) => console.error('Load rewards error:', error))
+    return () => {
+      cancelled = true
+      setAvailableRewards([])
+    }
+  }, [restaurantId, loyaltyCustomer?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Calculate pending rewards based on cart items using useMemo
+  const pendingRewardsComputed = useMemo(() => {
+    if (!loyaltyCustomer || !activeLoyaltyCampaign || sharedCart.length === 0) return []
+    const cartItems = sharedCartToCartItems(sharedCart)
+    return calculatePendingRewards(cartItems, [activeLoyaltyCampaign])
+  }, [sharedCart, activeLoyaltyCampaign, loyaltyCustomer])
+
   // Subscribe to shared cart
   useEffect(() => {
     if (!restaurantId || !tableDocId || !sessionId) return
@@ -1095,6 +1120,10 @@ export default function MenuPage() {
         durum: 'bekliyor',
         status: 'open',
         customerName: activeCustomerName,
+        ...(loyaltyCustomer ? {
+          customerId: loyaltyCustomer.id,
+          customerPhone: loyaltyCustomer.phone,
+        } : {}),
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,
@@ -1567,6 +1596,21 @@ export default function MenuPage() {
                 <div className="mt-3 inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold" style={{ borderColor: menuBorderColor, background: menuSurfaceMuted, color: menuTextColor }}>
                   <BadgeCheck size={14} style={{ color: menuPrimaryColor }} />
                   <span className="truncate">{t(language, 'loyaltyAccountActive')}</span>
+                </div>
+              )}
+              {availableRewards.length > 0 && (
+                <div className="mt-3 rounded-[18px] px-4 py-3 border" style={{ background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.22)' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: 'rgba(34,197,94,0.15)' }}>
+                      <Gift size={18} style={{ color: '#16a34a' }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold" style={{ color: '#166534' }}>{t(language, 'youHaveRewards')}</p>
+                      <p className="text-sm font-bold mt-0.5" style={{ color: '#15803d' }}>
+                        {availableRewards.map((r) => `${r.rewardQuantity} ${r.rewardProductName}`).join(', ')}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -2140,6 +2184,22 @@ export default function MenuPage() {
                             </div>
                           ))}
                       </div>
+
+                      {pendingRewardsComputed.length > 0 && (
+                        <div className="mt-4 rounded-[18px] px-4 py-3 border" style={{ background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.22)' }}>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: 'rgba(34,197,94,0.15)' }}>
+                              <Gift size={20} style={{ color: '#16a34a' }} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold" style={{ color: '#166534' }}>{t(language, 'rewardPending')}</p>
+                              <p className="text-sm font-bold mt-0.5" style={{ color: '#15803d' }}>
+                                {pendingRewardsComputed.map((r) => `${r.rewardQuantity} ${r.rewardProductName}`).join(', ')}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {actionMessage && <p className="text-sm mt-4 text-[#c2410c]">{actionMessage}</p>}
 

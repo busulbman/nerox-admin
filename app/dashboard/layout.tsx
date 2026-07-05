@@ -12,6 +12,9 @@ import { requestPermission, showLocalNotification } from '@/lib/notifications'
 import { clearRecentOnboardingCompletion, hasRecentOnboardingCompletion } from '@/lib/onboarding'
 import { getRestaurantAccessBlockMessage, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import { buildThemeStyleVars } from '@/lib/ui-theme'
+import FloatingHelpButton from '@/components/dashboard/FloatingHelpButton'
+import { OnboardingProvider } from '@/components/dashboard/OnboardingProvider'
+import TrialWelcomeCard from '@/components/dashboard/TrialWelcomeCard'
 import LoadingScreen from '@/components/LoadingScreen'
 import Sidebar from '@/components/Sidebar'
 
@@ -142,83 +145,88 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="theme-page flex min-h-screen overflow-x-hidden" style={themeVars}>
-      <header
-        className="md:hidden fixed top-0 left-0 right-0 z-30 flex h-14 items-center justify-between gap-2 px-4"
-        style={{ background: 'var(--primary)' }}
-      >
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="w-9 h-9 flex items-center justify-center rounded-lg"
-          style={{ color: textColor, background: `${textColor}15` }}
-          aria-label="Menüyü aç"
+    <OnboardingProvider restaurantId={restaurantId} onOpenSidebar={() => setSidebarOpen(true)}>
+      <div className="theme-page flex min-h-screen overflow-x-hidden" style={themeVars}>
+        <header
+          className="md:hidden fixed top-0 left-0 right-0 z-30 flex h-14 items-center justify-between gap-2 px-4"
+          style={{ background: 'var(--primary)' }}
         >
-          <Menu size={20} />
-        </button>
-
-        <p className="min-w-0 flex-1 truncate px-2 text-center font-bold text-sm" style={{ color: textColor }}>{panelTitle}</p>
-
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <button
-              onClick={() => router.push('/dashboard/calls')}
-              className="w-9 h-9 flex items-center justify-center rounded-lg"
-              style={{ color: textColor, background: `${textColor}15` }}
-              aria-label="Çağrılar"
-            >
-              <Bell size={18} />
-            </button>
-            {pendingCount > 0 && (
-              <span
-                className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-white font-bold animate-pulse"
-                style={{ background: '#ef4444', fontSize: '10px' }}
-              >
-                {pendingCount > 9 ? '9+' : pendingCount}
-              </span>
-            )}
-          </div>
-
           <button
-            onClick={handleLogout}
+            onClick={() => setSidebarOpen(true)}
             className="w-9 h-9 flex items-center justify-center rounded-lg"
             style={{ color: textColor, background: `${textColor}15` }}
-            aria-label="Çıkış"
+            aria-label="Menüyü aç"
           >
-            <LogOut size={18} />
+            <Menu size={20} />
           </button>
-        </div>
-      </header>
 
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          <p className="min-w-0 flex-1 truncate px-2 text-center font-bold text-sm" style={{ color: textColor }}>{panelTitle}</p>
 
-      <main
-        className={[
-          'min-w-0 flex-1 overflow-x-hidden pt-14 md:pt-0',
-          sidebarOpen ? 'overflow-y-hidden md:overflow-y-auto' : 'overflow-y-auto',
-        ].join(' ')}
-      >
-        {connectionLost && (
-          <div
-            className="px-4 py-2 text-center text-sm"
-            style={{ background: 'var(--surface-muted)', color: 'var(--text)', borderBottom: '1px solid var(--border-soft)' }}
-          >
-            Bağlantı koptu, yeniden bağlanılıyor...
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                onClick={() => router.push('/dashboard/calls')}
+                className="w-9 h-9 flex items-center justify-center rounded-lg"
+                style={{ color: textColor, background: `${textColor}15` }}
+                aria-label="Çağrılar"
+              >
+                <Bell size={18} />
+              </button>
+              {pendingCount > 0 && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-white font-bold animate-pulse"
+                  style={{ background: '#ef4444', fontSize: '10px' }}
+                >
+                  {pendingCount > 9 ? '9+' : pendingCount}
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="w-9 h-9 flex items-center justify-center rounded-lg"
+              style={{ color: textColor, background: `${textColor}15` }}
+              aria-label="Çıkış"
+            >
+              <LogOut size={18} />
+            </button>
           </div>
-        )}
-        {accessBlockMessage && (
-          <div
-            className="px-4 py-3 text-center text-sm"
-            style={
-              hasExpiredAccess
-                ? { background: 'var(--error-soft)', color: 'var(--error)', borderBottom: '1px solid rgba(239,68,68,0.24)' }
-                : { background: 'var(--warning-soft)', color: 'var(--warning)', borderBottom: '1px solid rgba(245,158,11,0.24)' }
-            }
-          >
-            {accessBlockMessage} Admin panelinde uyarı gösterilir ve QR menü geçici olarak kullanılamıyor.
-          </div>
-        )}
-        {children}
-      </main>
-    </div>
+        </header>
+
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+        <FloatingHelpButton />
+        <TrialWelcomeCard restaurant={restaurant} restaurantId={restaurantId} />
+
+        <main
+          className={[
+            'min-w-0 flex-1 overflow-x-hidden pt-14 md:pt-0',
+            sidebarOpen ? 'overflow-y-hidden md:overflow-y-auto' : 'overflow-y-auto',
+          ].join(' ')}
+        >
+          {connectionLost && (
+            <div
+              className="px-4 py-2 text-center text-sm"
+              style={{ background: 'var(--surface-muted)', color: 'var(--text)', borderBottom: '1px solid var(--border-soft)' }}
+            >
+              Bağlantı koptu, yeniden bağlanılıyor...
+            </div>
+          )}
+          {accessBlockMessage && (
+            <div
+              className="px-4 py-3 text-center text-sm"
+              style={
+                hasExpiredAccess
+                  ? { background: 'var(--error-soft)', color: 'var(--error)', borderBottom: '1px solid rgba(239,68,68,0.24)' }
+                  : { background: 'var(--warning-soft)', color: 'var(--warning)', borderBottom: '1px solid rgba(245,158,11,0.24)' }
+              }
+            >
+              {accessBlockMessage} Admin panelinde uyarı gösterilir ve QR menü geçici olarak kullanılamıyor.
+            </div>
+          )}
+          {children}
+        </main>
+      </div>
+    </OnboardingProvider>
   )
 }

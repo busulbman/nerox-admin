@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { Upload, Trash2, Link as LinkIcon, Wifi } from 'lucide-react'
+import { Upload, Trash2, Link as LinkIcon, Wifi, HelpCircle, Rocket, CreditCard, Clock, MessageCircle, CheckCircle } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import { useOnboarding } from '@/components/dashboard/OnboardingProvider'
+import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { db } from '@/lib/firebase'
 import {
   DEFAULT_BRAND_LOGO_PATH,
@@ -19,11 +21,24 @@ import type { RestaurantGeneralSettings } from '@/lib/types'
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
 
+function calculateRemainingTrialDays(trialEndsAt: number | null | undefined): number {
+  if (!trialEndsAt) return 7
+  const now = typeof window !== 'undefined' ? Date.now() : 0
+  return Math.max(0, Math.ceil((trialEndsAt - now) / (1000 * 60 * 60 * 24)))
+}
+
 export default function SettingsPage() {
   const { user, profile } = useAuth()
   const restaurantId = profile?.restaurantId || ''
+  const { resetOnboarding } = useOnboarding()
+  const { restaurant } = useRestaurantSettingsContext()
 
   const { settings, loading: settingsLoading } = useRestaurantSettings(restaurantId)
+
+  const isTrial = restaurant?.plan === 'trial'
+  const trialEndsAt = restaurant?.trialEndsAt
+  const remainingDays = calculateRemainingTrialDays(trialEndsAt)
+  const isTrialExpired = isTrial && remainingDays <= 0
 
   const [form, setForm] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
   const [generatedSlugResult, setGeneratedSlugResult] = useState<{
@@ -473,6 +488,97 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Subscription Info Card */}
+        <div className="theme-card rounded-2xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <CreditCard size={20} className="text-gray-500" />
+            <h3 className="font-semibold text-[var(--text)]">Üyelik Bilgileri</h3>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-2 border-b border-[var(--border-soft)]">
+              <span className="text-sm text-gray-500">Paket</span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                {isTrial ? 'Trial (7 Gün)' : 'Aktif Üyelik'}
+              </span>
+            </div>
+
+            {isTrial && (
+              <div className="flex items-center justify-between py-2 border-b border-[var(--border-soft)]">
+                <span className="text-sm text-gray-500">Kalan Süre</span>
+                <div className="flex items-center gap-2">
+                  <Clock size={14} style={{ color: isTrialExpired ? '#ef4444' : 'var(--primary)' }} />
+                  <span
+                    className="text-sm font-semibold"
+                    style={{ color: isTrialExpired ? '#ef4444' : 'var(--text)' }}
+                  >
+                    {isTrialExpired ? 'Süre Doldu' : `${remainingDays} Gün`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between py-2 border-b border-[var(--border-soft)]">
+              <span className="text-sm text-gray-500">Durum</span>
+              <div className="flex items-center gap-2">
+                <CheckCircle size={14} style={{ color: isTrialExpired ? '#ef4444' : '#22c55e' }} />
+                <span
+                  className="text-sm font-semibold"
+                  style={{ color: isTrialExpired ? '#ef4444' : '#22c55e' }}
+                >
+                  {isTrialExpired ? 'Pasif' : 'Aktif'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <span className="text-sm text-gray-500">Destek</span>
+              <a
+                href="tel:+905421320706"
+                className="text-sm font-semibold hover:underline"
+                style={{ color: 'var(--primary)' }}
+              >
+                +90 542 132 07 06
+              </a>
+            </div>
+          </div>
+
+          {isTrialExpired && (
+            <div className="mt-4 rounded-xl p-4" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              <p className="text-sm font-semibold text-[#dc2626] mb-2">Deneme süreniz sona erdi.</p>
+              <a
+                href="https://wa.me/905421320706"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white"
+                style={{ background: '#25d366' }}
+              >
+                <MessageCircle size={16} />
+                WhatsApp ile İletişime Geç
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* System Help Card */}
+        <div className="theme-card rounded-2xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <HelpCircle size={20} className="text-gray-500" />
+            <h3 className="font-semibold text-[var(--text)]">Sistem Yardımı</h3>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">
+            Sistemi yeniden tanımak isterseniz rehberi tekrar başlatabilirsiniz.
+          </p>
+          <button
+            onClick={resetOnboarding}
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-all hover:opacity-90"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
+          >
+            <Rocket size={16} />
+            Sistem Turunu Yeniden Başlat
+          </button>
         </div>
       </div>
     </div>

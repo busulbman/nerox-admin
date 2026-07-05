@@ -179,3 +179,43 @@ export const DATE_RANGE_LABELS: Record<DateRange, string> = {
   year: 'Bu Yıl',
   custom: 'Özel',
 }
+
+export type HourlyDataPoint = {
+  hour: string
+  count: number
+  revenue: number
+}
+
+export function buildHourlyOrderData(calls: WaiterCall[], dateRange: DateRangeConfig): HourlyDataPoint[] {
+  const { start, end } = dateRange
+  const startTs = start.getTime()
+  const endTs = end.getTime()
+
+  const orderCalls = calls.filter((call) => {
+    if (call.tip !== 'sipariş') return false
+    const callTime = call.createdAt
+    return callTime >= startTs && callTime <= endTs
+  })
+
+  const hourlyMap = new Map<number, { count: number; revenue: number }>()
+
+  for (const call of orderCalls) {
+    const date = new Date(call.createdAt)
+    const hour = date.getHours()
+    const existing = hourlyMap.get(hour) ?? { count: 0, revenue: 0 }
+    const callTotal = typeof call.totalPrice === 'number' ? call.totalPrice : 0
+    hourlyMap.set(hour, {
+      count: existing.count + 1,
+      revenue: existing.revenue + callTotal,
+    })
+  }
+
+  return Array.from({ length: 24 }, (_, i) => ({
+    hour: `${String(i).padStart(2, '0')}:00`,
+    count: hourlyMap.get(i)?.count ?? 0,
+    revenue: hourlyMap.get(i)?.revenue ?? 0,
+  })).filter((h) => {
+    const hourNum = parseInt(h.hour)
+    return hourNum >= 8 && hourNum <= 23
+  })
+}

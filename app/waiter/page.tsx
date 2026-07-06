@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
-import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, Globe, LogOut, Minus, Plus, Settings, Star, Trophy, X } from 'lucide-react'
+import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, Globe, LogOut, Minus, Plus, RefreshCw, Settings, Star, Trophy, X } from 'lucide-react'
 import { auth, db, rd, rtdb } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
@@ -162,6 +162,10 @@ export default function WaiterPage() {
   // Connection status for resilience
   const [connectionLost, setConnectionLost] = useState(false)
 
+  // Manual data refresh (re-subscribes Firestore listeners)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+
   // Audio notification state - use lazy initialization
   const [audioEnabled, setAudioEnabledState] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -303,7 +307,7 @@ export default function WaiterPage() {
     return () => {
       unsubscribe()
     }
-  }, [profile, restaurantId])
+  }, [profile, restaurantId, refreshKey])
 
   // ─── Ratings listener ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -328,7 +332,7 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, profile, restaurantId])
+  }, [activeTab, profile, restaurantId, refreshKey])
 
   // ─── Done calls on demand ─────────────────────────────────────────────────
   useEffect(() => {
@@ -348,38 +352,31 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, profile, restaurantId])
+  }, [activeTab, profile, restaurantId, refreshKey])
 
-  // ─── Tables listener (also needed when the order modal opens) ─────────────
+  // ─── Tables listener (realtime; also needed when the order modal opens) ───
   useEffect(() => {
     if (!profile || profile.role !== 'waiter' || (activeTab !== 'tables' && !orderModal) || !restaurantId) return
 
-    let cancelled = false
-
-    async function loadTables() {
-      setTablesLoaded(false)
-      try {
-        logFirestoreRead('waiter/tables', restaurantId)
-        const snap = await getDocs(getRestaurantTablesQuery(restaurantId))
-        if (cancelled) return
+    logFirestoreRead('waiter/tables listener', restaurantId)
+    const unsubscribe = onSnapshot(
+      getRestaurantTablesQuery(restaurantId),
+      (snap) => {
         setTables(
           snap.docs
             .map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>))
             .sort((a, b) => a.number - b.number)
         )
-      } catch (err) {
-        console.error('Tables load error:', err)
-      } finally {
-        if (!cancelled) setTablesLoaded(true)
+        setTablesLoaded(true)
+      },
+      (err) => {
+        console.error('Tables listener error:', err)
+        setTablesLoaded(true)
       }
-    }
+    )
 
-    void loadTables()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeTab, orderModal, profile, restaurantId])
+    return () => unsubscribe()
+  }, [activeTab, orderModal, profile, restaurantId, refreshKey])
 
   // ─── Menu loader (once) ───────────────────────────────────────────────────
   useEffect(() => {
@@ -547,12 +544,37 @@ export default function WaiterPage() {
           status: 'aktif', sessionId: newSessionId, openedAt: serverTimestamp(), lastPaymentCompletedAt: null, lastPaymentWaiterName: null, updatedAt: serverTimestamp(),
         })
       })
+      // Optimistic update: show the table as active immediately; the realtime
+      // listener re-syncs with server data right after.
+      setTables((current) =>
+        current.map((t) =>
+          t.id === table.id
+            ? {
+                ...t,
+                status: 'aktif' as TableStatus,
+                sessionId: newSessionId,
+                openedAt: Date.now(),
+                updatedAt: Date.now(),
+                lastPaymentCompletedAt: null,
+                lastPaymentWaiterName: null,
+              }
+            : t
+        )
+      )
       setTablesMsg(`Masa ${table.number} açıldı.`)
     } catch (err) {
       setTablesMsg(err instanceof Error ? err.message : 'Hata oluştu.')
     } finally {
       setTablesBusy(null)
     }
+  }
+
+  function handleManualRefresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    // Bumping the key re-subscribes calls/ratings/tables listeners → fresh data
+    setRefreshKey((key) => key + 1)
+    window.setTimeout(() => setRefreshing(false), 1000)
   }
 
   async function toggleMasterAudio() {
@@ -631,7 +653,14 @@ export default function WaiterPage() {
             status: 'aktif', sessionId: newSessionId, openedAt: serverTimestamp(), lastPaymentCompletedAt: null, lastPaymentWaiterName: null, updatedAt: serverTimestamp(),
           })
         })
-        // Refresh table data and proceed
+        // Optimistic update for the tables grid, then proceed
+        setTables((current) =>
+          current.map((t) =>
+            t.id === table.id
+              ? { ...t, status: 'aktif' as TableStatus, sessionId: newSessionId, openedAt: Date.now(), updatedAt: Date.now() }
+              : t
+          )
+        )
         setSelectedOrderTable({ ...table, status: 'aktif', sessionId: newSessionId })
         setOrderStep('products')
       } catch (err) {
@@ -779,6 +808,16 @@ export default function WaiterPage() {
               </p>
             </div>
             <div className="mt-1 flex shrink-0 items-center gap-2">
+              <button
+                onClick={handleManualRefresh}
+                disabled={refreshing}
+                className="inline-flex items-center justify-center rounded-xl px-3 py-2 disabled:opacity-60"
+                style={{ background: 'rgba(255,255,255,0.14)', color: PRIMARY_FOREGROUND }}
+                aria-label="Yenile"
+                title="Yenile"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              </button>
               <button
                 onClick={() => { void toggleMasterAudio() }}
                 className="inline-flex items-center justify-center rounded-xl px-3 py-2"

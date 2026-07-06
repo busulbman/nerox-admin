@@ -40,7 +40,7 @@ export default function TrialWelcomeCard({ restaurant, restaurantId }: TrialWelc
   useEffect(() => {
     if (!restaurantId || !restaurant) return
 
-    const isTrial = restaurant.plan === 'trial'
+    const isTrial = restaurant.billingPeriod === 'trial' || restaurant.paymentStatus === 'trial'
     const alreadyDismissed = hasTrialWelcomeBeenDismissed(restaurantId)
 
     if (isTrial && !alreadyDismissed) {
@@ -58,7 +58,8 @@ export default function TrialWelcomeCard({ restaurant, restaurantId }: TrialWelc
     setTimeout(() => setIsDismissed(true), 300)
   }
 
-  if (isDismissed || !restaurant || restaurant.plan !== 'trial') return null
+  const isTrial = restaurant?.billingPeriod === 'trial' || restaurant?.paymentStatus === 'trial'
+  if (isDismissed || !restaurant || !isTrial) return null
 
   const remainingDays = calculateRemainingDays(restaurant.trialEndsAt)
 

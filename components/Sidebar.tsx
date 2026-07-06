@@ -15,19 +15,31 @@ import {
   Gift,
   LogOut,
   X,
+  ChefHat,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import ViewMenuButton from '@/components/dashboard/ViewMenuButton'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { auth } from '@/lib/firebase'
 import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl, getContrastColor } from '@/lib/restaurant-settings'
+import { useFeatures } from '@/lib/use-features'
+import type { RestaurantFeatures } from '@/lib/types'
 
-const NAV = [
+type NavItem = {
+  href: string
+  label: string
+  Icon: typeof LayoutDashboard
+  onboardingId: string | null
+  featureKey?: keyof RestaurantFeatures
+}
+
+const NAV: NavItem[] = [
   { href: '/dashboard',          label: 'Genel Bakış',   Icon: LayoutDashboard, onboardingId: 'dashboard' },
   { href: '/dashboard/menu',     label: 'Menü',          Icon: UtensilsCrossed, onboardingId: 'menu' },
   { href: '/dashboard/calls',    label: 'Çağrılar',      Icon: Bell,            onboardingId: 'calls' },
+  { href: '/dashboard/kitchen',  label: 'Mutfak',        Icon: ChefHat,         onboardingId: null, featureKey: 'kitchen' },
   { href: '/dashboard/tables',   label: 'Masalar / QR',  Icon: QrCode,          onboardingId: 'tables' },
-  { href: '/dashboard/loyalty',  label: 'Kampanyalar',   Icon: Gift,            onboardingId: 'campaigns' },
+  { href: '/dashboard/loyalty',  label: 'Kampanyalar',   Icon: Gift,            onboardingId: 'campaigns', featureKey: 'loyalty' },
   { href: '/dashboard/ratings',  label: 'Yorumlar',      Icon: Star,            onboardingId: null },
   { href: '/dashboard/waiters',  label: 'Garsonlar',     Icon: Users,           onboardingId: 'waiters' },
   { href: '/dashboard/settings', label: 'Genel Ayarlar', Icon: Settings,        onboardingId: 'settings' },
@@ -35,21 +47,35 @@ const NAV = [
 
 interface SidebarProps {
   isOpen?: boolean
+  isCollapsed?: boolean
   onClose?: () => void
 }
 
-export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+const ACTIVE_ITEM_STYLE = {
+  background: '#7c3aed',
+  color: '#ffffff',
+  fontWeight: 600,
+  boxShadow: '0 12px 24px rgba(124, 58, 237, 0.22)',
+} as const
+
+export default function Sidebar({ isOpen = false, isCollapsed = false, onClose }: SidebarProps) {
   const { profile } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
-  const { settings, primaryColor } = useRestaurantSettingsContext()
+  const { settings, primaryColor, restaurant } = useRestaurantSettingsContext()
+  const features = useFeatures(restaurant)
 
   const restaurantId = profile?.restaurantId || ''
   const businessName = resolveRestaurantBusinessName(settings)
   const logoUrl = resolveRestaurantLogoUrl(settings)
   const textColor = getContrastColor(primaryColor)
-  const activeItemBg = textColor === '#ffffff' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'
   const panelTitle = `${businessName} Yönetim Paneli`
+  const businessInitial = businessName.trim().charAt(0).toUpperCase() || 'N'
+
+  const visibleNav = NAV.filter((item) => {
+    if (!item.featureKey) return true
+    return features[item.featureKey]
+  })
 
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined' || window.innerWidth >= 768) {
@@ -88,9 +114,10 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
       <aside
         className={[
-          'fixed md:static inset-y-0 left-0 z-50',
-          'w-[min(85vw,18rem)] md:w-64 shrink-0 flex flex-col min-h-[100dvh] md:min-h-screen overflow-y-auto overscroll-contain',
-          'transform transition-transform duration-300 ease-in-out',
+          'fixed inset-y-0 left-0 z-50 flex min-h-[100dvh] shrink-0 flex-col overflow-x-visible overflow-y-auto overscroll-contain md:static md:min-h-screen',
+          'w-[min(85vw,18rem)]',
+          isCollapsed ? 'md:w-[72px]' : 'md:w-[280px]',
+          'transform transition-[width,transform] duration-300 ease-in-out',
           isOpen ? 'translate-x-0' : '-translate-x-full',
           'md:translate-x-0',
         ].join(' ')}
@@ -108,43 +135,76 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <div className="hidden md:block px-6 py-5 border-b" style={{ borderColor: `${textColor}20` }}>
-          <div className="flex items-center gap-3">
-            {logoUrl && (
+        <div
+          className={[
+            'hidden border-b py-5 transition-[padding] duration-300 ease-in-out md:flex',
+            isCollapsed ? 'justify-center px-3' : 'px-5',
+          ].join(' ')}
+          style={{ borderColor: `${textColor}20` }}
+        >
+          <div className={['flex items-center', isCollapsed ? 'justify-center' : 'gap-3'].join(' ')}>
+            {logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={logoUrl}
                 alt={businessName}
                 className="h-10 w-10 rounded-xl object-cover"
                 style={{ border: `1px solid ${textColor}20` }}
+                title={isCollapsed ? panelTitle : undefined}
               />
+            ) : (
+              <div
+                className="flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold"
+                style={{
+                  color: textColor,
+                  background: textColor === '#ffffff' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)',
+                  border: `1px solid ${textColor}20`,
+                }}
+                title={isCollapsed ? panelTitle : undefined}
+              >
+                {businessInitial}
+              </div>
             )}
-            <div className="min-w-0">
+
+            <div className={isCollapsed ? 'hidden' : 'min-w-0'}>
               <p className="truncate font-bold text-lg" style={{ color: textColor }}>{panelTitle}</p>
               <p className="text-xs mt-0.5" style={{ color: `${textColor}80` }}>Yönetim</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map((item) => {
-            const active = pathname === item.href
+        <nav className={['flex-1 space-y-1 px-3 py-4', isCollapsed ? 'md:px-2' : ''].join(' ')}>
+          {visibleNav.map((item) => {
+            const active = item.href === '/dashboard'
+              ? pathname === item.href
+              : pathname === item.href || pathname.startsWith(`${item.href}/`)
+
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                data-onboarding={item.onboardingId || undefined}
-                className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-colors"
-                style={
-                  active
-                    ? { background: activeItemBg, color: textColor, fontWeight: 600 }
-                    : { color: `${textColor}bf` }
-                }
-              >
-                <item.Icon size={18} />
-                {item.label}
-              </Link>
+              <div key={item.href} className="group relative">
+                <Link
+                  href={item.href}
+                  onClick={onClose}
+                  data-onboarding={item.onboardingId || undefined}
+                  className={[
+                    'flex items-center rounded-xl text-sm transition-all duration-300 ease-in-out',
+                    isCollapsed ? 'gap-3 px-4 py-2.5 md:justify-center md:px-0 md:py-3' : 'gap-3 px-4 py-2.5',
+                  ].join(' ')}
+                  style={active ? ACTIVE_ITEM_STYLE : { color: `${textColor}bf` }}
+                  title={isCollapsed ? item.label : undefined}
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                    <item.Icon size={18} />
+                  </span>
+                  <span className={isCollapsed ? 'md:hidden' : ''}>{item.label}</span>
+                </Link>
+
+                {isCollapsed && (
+                  <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-lg bg-[var(--text)] px-3 py-1.5 text-xs font-medium text-white shadow-lg md:block md:translate-x-1 md:opacity-0 md:transition-all md:duration-200 md:ease-out md:group-hover:translate-x-0 md:group-hover:opacity-100">
+                    {item.label}
+                    <div className="absolute left-0 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-[var(--text)]" />
+                  </div>
+                )}
+              </div>
             )
           })}
         </nav>
@@ -153,18 +213,34 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           restaurantId={restaurantId}
           slug={settings?.slug}
           textColor={textColor}
+          compact={isCollapsed}
           onNavigate={onClose}
         />
 
-        <div className="px-3 py-4 border-t" style={{ borderColor: `${textColor}20` }}>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-colors hover:opacity-80"
-            style={{ color: `${textColor}80` }}
-          >
-            <LogOut size={18} />
-            Çıkış Yap
-          </button>
+        <div className={['border-t px-3 py-4', isCollapsed ? 'md:px-2' : ''].join(' ')} style={{ borderColor: `${textColor}20` }}>
+          <div className="group relative">
+            <button
+              onClick={handleLogout}
+              className={[
+                'w-full rounded-xl text-sm transition-all duration-300 ease-in-out hover:opacity-80',
+                isCollapsed ? 'flex items-center gap-3 px-4 py-2.5 md:justify-center md:px-0 md:py-3' : 'flex items-center gap-3 px-4 py-2.5',
+              ].join(' ')}
+              style={{ color: `${textColor}80` }}
+              title={isCollapsed ? 'Çıkış Yap' : undefined}
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                <LogOut size={18} />
+              </span>
+              <span className={isCollapsed ? 'md:hidden' : ''}>Çıkış Yap</span>
+            </button>
+
+            {isCollapsed && (
+              <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-lg bg-[var(--text)] px-3 py-1.5 text-xs font-medium text-white shadow-lg md:block md:translate-x-1 md:opacity-0 md:transition-all md:duration-200 md:ease-out md:group-hover:translate-x-0 md:group-hover:opacity-100">
+                Çıkış Yap
+                <div className="absolute left-0 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-[var(--text)]" />
+              </div>
+            )}
+          </div>
         </div>
       </aside>
     </>

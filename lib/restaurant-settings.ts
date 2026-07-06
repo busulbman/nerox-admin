@@ -31,11 +31,15 @@ function toMillis(value: unknown): number | null {
 }
 
 function normalizeRestaurantStatus(value: unknown): RestaurantStatus {
-  return value === 'passive' ? 'passive' : 'active'
+  if (value === 'passive') return 'passive'
+  if (value === 'deleted') return 'deleted'
+  return 'active'
 }
 
 export function normalizeRestaurantPlan(value: unknown): RestaurantPlan {
-  return value === 'trial' ? 'trial' : 'paid'
+  if (value === 'pro') return 'pro'
+  if (value === 'premium') return 'premium'
+  return 'starter'
 }
 
 export function isValidRestaurantThemeColor(value: string) {
@@ -125,7 +129,7 @@ export function normalizeRestaurantDocument(value: unknown, id = ''): Restaurant
       logoUrl: '',
       primaryColor: '',
       status: 'active',
-      plan: 'paid',
+      plan: 'starter',
       trialStartedAt: null,
       trialEndsAt: null,
       subscriptionExpiresAt: null,

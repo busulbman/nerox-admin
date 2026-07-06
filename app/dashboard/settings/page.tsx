@@ -35,7 +35,7 @@ export default function SettingsPage() {
 
   const { settings, loading: settingsLoading } = useRestaurantSettings(restaurantId)
 
-  const isTrial = restaurant?.plan === 'trial'
+  const isTrial = restaurant?.billingPeriod === 'trial' || restaurant?.paymentStatus === 'trial'
   const trialEndsAt = restaurant?.trialEndsAt
   const remainingDays = calculateRemainingTrialDays(trialEndsAt)
   const isTrialExpired = isTrial && remainingDays <= 0

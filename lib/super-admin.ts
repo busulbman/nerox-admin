@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server'
-import type { RestaurantPlan, UserProfile, RestaurantStatus } from '@/lib/types'
+import type { RestaurantPlan, UserProfile, RestaurantStatus, BillingPeriod, PaymentStatus, RestaurantFeatures } from '@/lib/types'
+import { DEFAULT_FEATURES } from '@/lib/types'
 import {
   DEFAULT_PRIMARY_COLOR,
   generateSlug,
@@ -27,15 +28,28 @@ export type SuperAdminRestaurantSummary = {
   city: string
   district: string
   plan: RestaurantPlan
+  billingPeriod: BillingPeriod
+  paymentStatus: PaymentStatus
   status: RestaurantStatus
+  trialStartedAt: number | null
   trialEndsAt: number | null
-  remainingDays: number | null
+  subscriptionStartedAt: number | null
   subscriptionExpiresAt: number | null
+  lifetimeAccess: boolean
+  remainingDays: number | null
   isExpired: boolean
+  lastPaymentAmount: number | null
+  lastPaymentDate: number | null
+  notes: string
+  deletedAt: number | null
+  deletedBy: string | null
   productCount: number
   tableCount: number
   waiterCount: number
   menuLink: string
+  adminUid: string | null
+  pendingEmailChange: string | null
+  features: RestaurantFeatures
 }
 
 export class SuperAdminApiError extends Error {
@@ -222,6 +236,23 @@ export async function getUniqueRestaurantSlug(businessName: string, currentResta
   }
 }
 
+function normalizeFeatures(raw: unknown, plan: RestaurantPlan): RestaurantFeatures {
+  const defaults = DEFAULT_FEATURES[plan]
+  if (!raw || typeof raw !== 'object') {
+    return { ...defaults }
+  }
+  const obj = raw as Record<string, unknown>
+  return {
+    qrMenu: typeof obj.qrMenu === 'boolean' ? obj.qrMenu : defaults.qrMenu,
+    waiterCall: typeof obj.waiterCall === 'boolean' ? obj.waiterCall : defaults.waiterCall,
+    manualOrders: typeof obj.manualOrders === 'boolean' ? obj.manualOrders : defaults.manualOrders,
+    loyalty: typeof obj.loyalty === 'boolean' ? obj.loyalty : defaults.loyalty,
+    multiLanguage: typeof obj.multiLanguage === 'boolean' ? obj.multiLanguage : defaults.multiLanguage,
+    analytics: typeof obj.analytics === 'boolean' ? obj.analytics : defaults.analytics,
+    kitchen: typeof obj.kitchen === 'boolean' ? obj.kitchen : defaults.kitchen,
+  }
+}
+
 export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSummary[]> {
   const adminDb = await getAdminDb()
   const restaurantsSnap = await adminDb.collection('restaurants').get()
@@ -249,8 +280,21 @@ export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSumm
       const adminProfile = !adminUserSnap.empty
         ? ({ uid: adminUserSnap.docs[0].id, ...adminUserSnap.docs[0].data() } as UserProfile)
         : null
-      const remainingDays = getRestaurantRemainingDays(restaurant)
-      const isExpired = remainingDays === 0 && typeof restaurant.subscriptionExpiresAt === 'number'
+
+      const rawData = restaurantDoc.data() as Record<string, unknown>
+      const lifetimeAccess = rawData.lifetimeAccess === true
+      const remainingDays = lifetimeAccess ? null : getRestaurantRemainingDays(restaurant)
+      const isExpired = !lifetimeAccess && remainingDays === 0 && typeof restaurant.subscriptionExpiresAt === 'number'
+
+      const adminData = adminProfile as unknown as Record<string, unknown> | null
+      const pendingEmailChange = adminData && typeof adminData.pendingEmailChange === 'string'
+        ? adminData.pendingEmailChange
+        : null
+
+      const plan = (['starter', 'pro', 'premium'].includes(rawData.plan as string) ? rawData.plan : 'starter') as RestaurantPlan
+      const billingPeriod = (['trial', 'monthly', 'six_months', 'yearly', 'lifetime'].includes(rawData.billingPeriod as string) ? rawData.billingPeriod : 'trial') as BillingPeriod
+      const paymentStatus = (['trial', 'paid', 'unpaid', 'expired'].includes(rawData.paymentStatus as string) ? rawData.paymentStatus : 'trial') as PaymentStatus
+      const status = (['active', 'passive', 'deleted'].includes(rawData.status as string) ? rawData.status : 'active') as RestaurantStatus
 
       return {
         id: restaurantDoc.id,
@@ -262,16 +306,29 @@ export async function listRestaurantsSummary(): Promise<SuperAdminRestaurantSumm
         businessType: restaurant.businessType || '',
         city: restaurant.city || '',
         district: restaurant.district || '',
-        plan: restaurant.plan === 'trial' ? 'trial' : 'paid',
-        status: restaurant.status === 'passive' ? 'passive' : 'active',
+        plan,
+        billingPeriod,
+        paymentStatus,
+        status,
+        trialStartedAt: toMillis(rawData.trialStartedAt),
         trialEndsAt: toMillis(restaurant.trialEndsAt),
-        remainingDays,
+        subscriptionStartedAt: toMillis(rawData.subscriptionStartedAt),
         subscriptionExpiresAt: toMillis(restaurant.subscriptionExpiresAt),
+        lifetimeAccess,
+        remainingDays,
         isExpired,
+        lastPaymentAmount: typeof rawData.lastPaymentAmount === 'number' ? rawData.lastPaymentAmount : null,
+        lastPaymentDate: toMillis(rawData.lastPaymentDate),
+        notes: typeof rawData.notes === 'string' ? rawData.notes : '',
+        deletedAt: toMillis(rawData.deletedAt),
+        deletedBy: typeof rawData.deletedBy === 'string' ? rawData.deletedBy : null,
         productCount: Number(productCountSnap.data().count ?? 0),
         tableCount: Number(tableCountSnap.data().count ?? 0),
         waiterCount: Number(waiterCountSnap.data().count ?? 0),
         menuLink: `/menu/${menuSlug}/1`,
+        adminUid: adminProfile?.uid || null,
+        pendingEmailChange,
+        features: normalizeFeatures(rawData.features, plan),
       } satisfies SuperAdminRestaurantSummary
     }),
   )
@@ -348,13 +405,17 @@ export async function extendRestaurantSubscription(restaurantId: string, preset:
     updatedAt: FieldValue.serverTimestamp(),
   }
 
-  if (preset === '7d' && restaurant.plan === 'trial') {
+  const rawData = restaurantSnap.data() as Record<string, unknown>
+  const isTrial = rawData.billingPeriod === 'trial' || rawData.paymentStatus === 'trial'
+
+  if (preset === '7d' && isTrial) {
     const trialBase = Math.max(now, restaurant.trialEndsAt ?? restaurant.subscriptionExpiresAt ?? 0)
     const nextTrialEndsAt = addSubscriptionExtension(trialBase, preset)
     updates.trialEndsAt = Timestamp.fromMillis(nextTrialEndsAt)
     updates.subscriptionExpiresAt = Timestamp.fromMillis(Math.max(nextSubscriptionExpiresAt, nextTrialEndsAt))
   } else if (preset !== '7d') {
-    updates.plan = 'paid' as const
+    updates.paymentStatus = 'paid'
+    updates.billingPeriod = preset === '1m' ? 'monthly' : preset === '3m' ? 'six_months' : 'yearly'
   }
 
   await restaurantRef.set(updates, { merge: true })
@@ -362,7 +423,6 @@ export async function extendRestaurantSubscription(restaurantId: string, preset:
   return {
     restaurantId: normalizedRestaurantId,
     status: 'active' as const,
-    plan: preset === '7d' && restaurant.plan === 'trial' ? 'trial' as const : (updates.plan === 'paid' ? 'paid' as const : restaurant.plan),
     subscriptionExpiresAt: toMillis(updates.subscriptionExpiresAt),
     trialEndsAt: toMillis(updates.trialEndsAt),
   }
@@ -443,5 +503,207 @@ export async function buildRestaurantSeedData(input: {
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     },
+  }
+}
+
+export type SubscriptionAction =
+  | 'set_trial'
+  | 'end_trial'
+  | 'set_monthly'
+  | 'set_six_months'
+  | 'set_yearly'
+  | 'set_lifetime'
+  | 'set_plan'
+  | 'set_expiry'
+  | 'soft_delete'
+
+export async function updateRestaurantSubscription(
+  restaurantId: string,
+  action: SubscriptionAction,
+  options?: {
+    plan?: RestaurantPlan
+    expiryDate?: string
+    deletedBy?: string
+  }
+) {
+  const adminDb = await getAdminDb()
+  const FieldValue = await getFieldValue()
+  const Timestamp = await getTimestamp()
+  const normalizedId = parseRequiredString(restaurantId, 'İşletme')
+  const restaurantRef = adminDb.collection('restaurants').doc(normalizedId)
+  const restaurantSnap = await restaurantRef.get()
+
+  if (!restaurantSnap.exists) {
+    throw new SuperAdminApiError('İşletme bulunamadı.', 404)
+  }
+
+  const now = Date.now()
+  const updates: Record<string, unknown> = {
+    updatedAt: FieldValue.serverTimestamp(),
+  }
+
+  switch (action) {
+    case 'set_trial': {
+      const trialEnd = now + 7 * DAY_IN_MS
+      updates.billingPeriod = 'trial'
+      updates.paymentStatus = 'trial'
+      updates.trialStartedAt = Timestamp.fromMillis(now)
+      updates.trialEndsAt = Timestamp.fromMillis(trialEnd)
+      updates.subscriptionExpiresAt = Timestamp.fromMillis(trialEnd)
+      updates.lifetimeAccess = false
+      updates.status = 'active'
+      break
+    }
+
+    case 'end_trial': {
+      updates.paymentStatus = 'unpaid'
+      updates.status = 'passive'
+      break
+    }
+
+    case 'set_monthly': {
+      const monthEnd = new Date(now)
+      monthEnd.setMonth(monthEnd.getMonth() + 1)
+      updates.billingPeriod = 'monthly'
+      updates.paymentStatus = 'paid'
+      updates.subscriptionStartedAt = Timestamp.fromMillis(now)
+      updates.subscriptionExpiresAt = Timestamp.fromMillis(monthEnd.getTime())
+      updates.lifetimeAccess = false
+      updates.status = 'active'
+      break
+    }
+
+    case 'set_six_months': {
+      const sixMonthEnd = new Date(now)
+      sixMonthEnd.setMonth(sixMonthEnd.getMonth() + 6)
+      updates.billingPeriod = 'six_months'
+      updates.paymentStatus = 'paid'
+      updates.subscriptionStartedAt = Timestamp.fromMillis(now)
+      updates.subscriptionExpiresAt = Timestamp.fromMillis(sixMonthEnd.getTime())
+      updates.lifetimeAccess = false
+      updates.status = 'active'
+      break
+    }
+
+    case 'set_yearly': {
+      const yearEnd = new Date(now)
+      yearEnd.setFullYear(yearEnd.getFullYear() + 1)
+      updates.billingPeriod = 'yearly'
+      updates.paymentStatus = 'paid'
+      updates.subscriptionStartedAt = Timestamp.fromMillis(now)
+      updates.subscriptionExpiresAt = Timestamp.fromMillis(yearEnd.getTime())
+      updates.lifetimeAccess = false
+      updates.status = 'active'
+      break
+    }
+
+    case 'set_lifetime': {
+      updates.billingPeriod = 'lifetime'
+      updates.paymentStatus = 'paid'
+      updates.lifetimeAccess = true
+      updates.subscriptionExpiresAt = null
+      updates.status = 'active'
+      break
+    }
+
+    case 'set_plan': {
+      if (options?.plan && ['starter', 'pro', 'premium'].includes(options.plan)) {
+        updates.plan = options.plan
+      } else {
+        throw new SuperAdminApiError('Geçerli bir plan seçin.')
+      }
+      break
+    }
+
+    case 'set_expiry': {
+      if (!options?.expiryDate) {
+        throw new SuperAdminApiError('Bitiş tarihi gerekli.')
+      }
+      const parsed = parseExpiryDate(options.expiryDate)
+      updates.subscriptionExpiresAt = parsed
+      updates.lifetimeAccess = false
+      break
+    }
+
+    case 'soft_delete': {
+      updates.status = 'deleted'
+      updates.deletedAt = Timestamp.fromMillis(now)
+      updates.deletedBy = options?.deletedBy || null
+      break
+    }
+  }
+
+  await restaurantRef.set(updates, { merge: true })
+
+  return {
+    restaurantId: normalizedId,
+    action,
+    updates: Object.keys(updates),
+  }
+}
+
+function parseExpiryDate(dateStr: string): FirebaseFirestore.Timestamp {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    throw new SuperAdminApiError('Geçersiz tarih formatı. YYYY-MM-DD kullanın.')
+  }
+
+  const [, y, m, d] = match
+  const date = new Date(Date.UTC(parseInt(y), parseInt(m) - 1, parseInt(d), 23, 59, 59, 999))
+
+  if (isNaN(date.getTime())) {
+    throw new SuperAdminApiError('Geçersiz tarih.')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Timestamp } = require('firebase-admin/firestore')
+  return Timestamp.fromDate(date)
+}
+
+export async function updateRestaurantFeatures(
+  restaurantId: string,
+  features: Partial<RestaurantFeatures>,
+  plan?: RestaurantPlan
+) {
+  const adminDb = await getAdminDb()
+  const FieldValue = await getFieldValue()
+  const normalizedId = parseRequiredString(restaurantId, 'İşletme')
+  const restaurantRef = adminDb.collection('restaurants').doc(normalizedId)
+  const restaurantSnap = await restaurantRef.get()
+
+  if (!restaurantSnap.exists) {
+    throw new SuperAdminApiError('İşletme bulunamadı.', 404)
+  }
+
+  const rawData = restaurantSnap.data() as Record<string, unknown>
+  const currentPlan = (['starter', 'pro', 'premium'].includes(rawData.plan as string) ? rawData.plan : 'starter') as RestaurantPlan
+  const targetPlan = plan || currentPlan
+  const defaults = DEFAULT_FEATURES[targetPlan]
+
+  const newFeatures: RestaurantFeatures = {
+    qrMenu: typeof features.qrMenu === 'boolean' ? features.qrMenu : defaults.qrMenu,
+    waiterCall: typeof features.waiterCall === 'boolean' ? features.waiterCall : defaults.waiterCall,
+    manualOrders: typeof features.manualOrders === 'boolean' ? features.manualOrders : defaults.manualOrders,
+    loyalty: typeof features.loyalty === 'boolean' ? features.loyalty : defaults.loyalty,
+    multiLanguage: typeof features.multiLanguage === 'boolean' ? features.multiLanguage : defaults.multiLanguage,
+    analytics: typeof features.analytics === 'boolean' ? features.analytics : defaults.analytics,
+    kitchen: typeof features.kitchen === 'boolean' ? features.kitchen : defaults.kitchen,
+  }
+
+  const updates: Record<string, unknown> = {
+    features: newFeatures,
+    updatedAt: FieldValue.serverTimestamp(),
+  }
+
+  if (plan && plan !== currentPlan) {
+    updates.plan = plan
+  }
+
+  await restaurantRef.set(updates, { merge: true })
+
+  return {
+    restaurantId: normalizedId,
+    plan: targetPlan,
+    features: newFeatures,
   }
 }

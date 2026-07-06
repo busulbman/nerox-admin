@@ -73,8 +73,10 @@ service cloud.firestore {
         && request.resource.data.status == 'accepted'
         && request.resource.data.waiterId == request.auth.uid
         && request.resource.data.waiterName is string
+        && isOptionalPhotoUrl(request.resource.data.waiterPhotoUrl)
+        && isOptionalWaiterAverageRating(request.resource.data.waiterAverageRating)
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['durum', 'status', 'waiterId', 'waiterName', 'acceptedAt']);
+            .hasOnly(['durum', 'status', 'waiterId', 'waiterName', 'waiterPhotoUrl', 'waiterAverageRating', 'acceptedAt']);
     }
 
     function waiterCanCompleteOwnCall(rid) {
@@ -87,6 +89,14 @@ service cloud.firestore {
             .hasOnly(['durum', 'status', 'completedAt', 'resolvedAt', 'completedById', 'completedByName', 'completedByRole']);
     }
 
+    function waiterCanDeliverReadyOrder(rid) {
+      return isWaiter(rid)
+        && resource.data.kitchenStatus == 'ready'
+        && request.resource.data.kitchenStatus == 'delivered'
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['kitchenStatus', 'deliveredAt', 'kitchenUpdatedById', 'kitchenUpdatedByName']);
+    }
+
     function waiterCanCreateOrder(rid) {
       return isWaiter(rid)
         && request.resource.data.restaurantId == rid
@@ -95,6 +105,8 @@ service cloud.firestore {
         && request.resource.data.status == 'accepted'
         && request.resource.data.waiterId == request.auth.uid
         && request.resource.data.waiterName is string
+        && isOptionalPhotoUrl(request.resource.data.waiterPhotoUrl)
+        && isOptionalWaiterAverageRating(request.resource.data.waiterAverageRating)
         && request.resource.data.createdByRole == 'waiter'
         && request.resource.data.createdById == request.auth.uid
         && request.resource.data.items is list
@@ -104,6 +116,18 @@ service cloud.firestore {
 
     function isNonNegativeNumber(value) {
       return (value is int || value is float) && value >= 0;
+    }
+
+    function isOptionalPhotoUrl(value) {
+      return value == null || value is string;
+    }
+
+    function isOptionalWaiterAverageRating(value) {
+      return value == null || (
+        (value is int || value is float)
+        && value >= 0
+        && value <= 5
+      );
     }
 
     function publicCallTargetsLiveTableSession(rid) {
@@ -126,6 +150,8 @@ service cloud.firestore {
         && request.resource.data.status == 'open'
         && request.resource.data.waiterId == null
         && request.resource.data.waiterName == null
+        && request.resource.data.waiterPhotoUrl == null
+        && request.resource.data.waiterAverageRating == null
         && request.resource.data.note is string;
     }
 
@@ -142,12 +168,15 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll([
           'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
           'durum', 'status', 'customerName', 'createdAt', 'waiterId',
-          'waiterName', 'note', 'items', 'totalPrice', 'groupedByCustomer'
+          'waiterName', 'waiterPhotoUrl', 'waiterAverageRating', 'note',
+          'items', 'totalPrice', 'groupedByCustomer'
         ])
         && request.resource.data.keys().hasOnly([
           'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
           'durum', 'status', 'customerName', 'createdAt', 'waiterId',
-          'waiterName', 'note', 'items', 'totalPrice', 'groupedByCustomer'
+          'waiterName', 'waiterPhotoUrl', 'waiterAverageRating', 'note',
+          'items', 'totalPrice', 'groupedByCustomer', 'customerId',
+          'customerPhone', 'loyaltyPreview'
         ]);
     }
 
@@ -158,12 +187,12 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll([
           'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
           'durum', 'status', 'customerName', 'createdAt', 'waiterId',
-          'waiterName', 'note'
+          'waiterName', 'waiterPhotoUrl', 'waiterAverageRating', 'note'
         ])
         && request.resource.data.keys().hasOnly([
           'tableId', 'tableNumber', 'sessionId', 'restaurantId', 'tip',
           'durum', 'status', 'customerName', 'createdAt', 'waiterId',
-          'waiterName', 'note'
+          'waiterName', 'waiterPhotoUrl', 'waiterAverageRating', 'note'
         ]);
     }
 
@@ -214,6 +243,18 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['isOnline', 'lastSeen']);
 
+      // Waiters can update only their own display profile
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && role() == 'waiter'
+        && resource.data.role == 'waiter'
+        && resource.data.restaurantId == userRestaurantId()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && isOptionalPhotoUrl(request.resource.data.photoUrl)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'photoUrl', 'updatedAt']);
+
       // Allow waiter to increment only their own completed call counter
       allow update: if signedIn()
         && request.auth.uid == uid
@@ -221,9 +262,16 @@ service cloud.firestore {
         && resource.data.role == 'waiter'
         && resource.data.restaurantId == userRestaurantId()
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['totalCalls'])
+            .hasOnly(['totalCalls', 'completedCalls'])
         && request.resource.data.totalCalls is int
-        && request.resource.data.totalCalls == ((resource.data.totalCalls is int ? resource.data.totalCalls : 0) + 1);
+        && request.resource.data.totalCalls == ((resource.data.totalCalls is int ? resource.data.totalCalls : 0) + 1)
+        && (
+          !('completedCalls' in request.resource.data)
+          || (
+            request.resource.data.completedCalls is int
+            && request.resource.data.completedCalls == ((resource.data.completedCalls is int ? resource.data.completedCalls : 0) + 1)
+          )
+        );
     }
 
     // ─── Restaurant data ────────────────────────────────────────────────────────
@@ -351,7 +399,7 @@ service cloud.firestore {
 
         // Admin can manage all calls, waiters only their own accept/complete flow
         allow create, update, delete: if isAdmin(rid);
-        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid);
+        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid) || waiterCanDeliverReadyOrder(rid);
 
         // Waiter can create manual orders
         allow create: if waiterCanCreateOrder(rid);
@@ -369,6 +417,24 @@ service cloud.firestore {
           && (settingId == 'menu' || settingId == 'general')
         );
         allow write: if isAdmin(rid);
+      }
+
+      // ── Audit Logs ────────────────────────────────────────────────────────────
+
+      match /auditLogs/{logId} {
+        // Only admin can read audit logs
+        allow read: if isAdmin(rid);
+
+        // Only authenticated staff can create logs (no public write)
+        allow create: if isStaff(rid)
+          && request.resource.data.actorId is string
+          && request.resource.data.actorName is string
+          && request.resource.data.actorRole in ['admin', 'waiter', 'super_admin']
+          && request.resource.data.action is string
+          && request.resource.data.targetPath is string;
+
+        // Audit logs cannot be updated or deleted
+        allow update, delete: if false;
       }
 
       // ── Ratings ───────────────────────────────────────────────────────────────

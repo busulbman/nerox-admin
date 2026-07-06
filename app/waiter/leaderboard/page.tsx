@@ -9,6 +9,7 @@ import { logFirestoreRead } from "@/lib/firestore-debug";
 import { getRestaurantActiveWaitersQuery } from "@/lib/firestore-queries";
 import { auth, rtdb } from "@/lib/firebase";
 import { useAuth } from "@/components/AuthProvider";
+import UserAvatar from "@/components/UserAvatar";
 import { useRestaurantSettings } from "@/hooks/useRestaurantSettings";
 import { resolveRestaurantBusinessName } from "@/lib/restaurant-settings";
 import { buildThemePalette, buildThemeStyleVars } from "@/lib/ui-theme";
@@ -99,7 +100,7 @@ export default function LeaderboardPage() {
         list.sort((a, b) => {
           const callDiff = (b.totalCalls ?? 0) - (a.totalCalls ?? 0);
           if (callDiff !== 0) return callDiff;
-          return (b.avgRating ?? 0) - (a.avgRating ?? 0);
+          return ((b.averageRating ?? b.avgRating) ?? 0) - ((a.averageRating ?? a.avgRating) ?? 0);
         });
         setWaiters(list);
       } catch (error) {
@@ -244,15 +245,15 @@ export default function LeaderboardPage() {
                     </span>
                   </div>
 
-                  <div
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+                  <UserAvatar
+                    name={waiter.name}
+                    photoUrl={waiter.photoUrl}
+                    className="h-9 w-9"
                     style={{
                       background: isMe ? "rgba(255,255,255,0.16)" : surfaceMuted,
-                      color: isMe ? primaryForeground : muted,
                     }}
-                  >
-                    {waiter.name.charAt(0).toUpperCase()}
-                  </div>
+                    fallbackStyle={{ color: isMe ? primaryForeground : muted }}
+                  />
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -277,7 +278,7 @@ export default function LeaderboardPage() {
                         className="text-xs"
                         style={{ color: isMe ? "rgba(255,255,255,0.7)" : muted }}
                       >
-                        {(waiter.avgRating ?? 0) > 0 ? `${waiter.avgRating!.toFixed(1)} ★` : "—"}
+                        {((waiter.averageRating ?? waiter.avgRating) ?? 0) > 0 ? `${((waiter.averageRating ?? waiter.avgRating) as number).toFixed(1)} ★` : "—"}
                         {!online && presence[waiter.uid]?.lastSeen
                           ? ` · ${formatLastSeen(presence[waiter.uid].lastSeen)}`
                           : ""}

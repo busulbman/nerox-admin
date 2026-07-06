@@ -8,7 +8,11 @@ import {
   mapFirebaseAdminError,
   requireSuperAdmin,
   updateRestaurantStatus,
+  updateRestaurantSubscription,
+  updateRestaurantFeatures,
+  type SubscriptionAction,
 } from '@/lib/super-admin'
+import type { RestaurantPlan, RestaurantFeatures } from '@/lib/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -106,14 +110,57 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
-    await requireSuperAdmin(request)
+    const adminUser = await requireSuperAdmin(request)
     const body = await request.json()
-    const action = body.action === 'extend-subscription' ? 'extend-subscription' : 'set-status'
+    const action = typeof body.action === 'string' ? body.action : ''
     const restaurantId = typeof body.restaurantId === 'string' ? body.restaurantId : ''
 
-    const result = action === 'extend-subscription'
-      ? await extendRestaurantSubscription(restaurantId, parseSubscriptionExtension(body.preset))
-      : await updateRestaurantStatus(restaurantId, body.status === 'passive' ? 'passive' : 'active')
+    let result
+
+    switch (action) {
+      case 'extend-subscription':
+        result = await extendRestaurantSubscription(restaurantId, parseSubscriptionExtension(body.preset))
+        break
+
+      case 'set-status':
+        result = await updateRestaurantStatus(restaurantId, body.status === 'passive' ? 'passive' : 'active')
+        break
+
+      case 'subscription': {
+        const subAction = body.subAction as SubscriptionAction
+        const validActions: SubscriptionAction[] = [
+          'set_trial', 'end_trial', 'set_monthly', 'set_six_months',
+          'set_yearly', 'set_lifetime', 'set_plan', 'set_expiry', 'soft_delete'
+        ]
+
+        if (!validActions.includes(subAction)) {
+          return NextResponse.json(
+            { error: 'Geçersiz işlem tipi.', code: 'INVALID_ACTION' },
+            { status: 400 }
+          )
+        }
+
+        result = await updateRestaurantSubscription(restaurantId, subAction, {
+          plan: body.plan as RestaurantPlan | undefined,
+          expiryDate: body.expiryDate as string | undefined,
+          deletedBy: adminUser.uid,
+        })
+        break
+      }
+
+      case 'update-features': {
+        const features = body.features as Partial<RestaurantFeatures> | undefined
+        const plan = body.plan as RestaurantPlan | undefined
+        result = await updateRestaurantFeatures(restaurantId, features || {}, plan)
+        break
+      }
+
+      default:
+        return NextResponse.json(
+          { error: 'Bilinmeyen işlem.', code: 'UNKNOWN_ACTION' },
+          { status: 400 }
+        )
+    }
 
     return NextResponse.json(result)
   } catch (error) {

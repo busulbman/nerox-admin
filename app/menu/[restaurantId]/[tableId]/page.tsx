@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
   collection,
@@ -37,6 +37,7 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import UserAvatar from '@/components/UserAvatar'
 import LoadingScreen from '@/components/LoadingScreen'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -100,6 +101,15 @@ type RatingForm = { serviceRating: number; waiterRating: number; comment: string
 type OnboardingStep = 'language' | 'name' | 'done'
 type LoyaltyCustomerState = { id: string; name: string; phone: string }
 type LoyaltyRegisterForm = { name: string; phone: string; email: string }
+type WaiterAssistNotice = {
+  callId: string
+  tableId: string
+  sessionId: string
+  tip: CallTip
+  waiterName: string
+  waiterPhotoUrl?: string | null
+  waiterAverageRating?: number | null
+}
 type ProductMeta = {
   imageUrl: string
   fallbackEmoji: string
@@ -338,6 +348,7 @@ export default function MenuPage() {
   const [paymentCalls, setPaymentCalls] = useState<WaiterCall[]>([])
   const [ratedCallIds, setRatedCallIds] = useState<Record<string, true>>({})
   const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [waiterAssistNotice, setWaiterAssistNotice] = useState<WaiterAssistNotice | null>(null)
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [detailQuantity, setDetailQuantity] = useState(1)
@@ -389,6 +400,7 @@ export default function MenuPage() {
   const [wifiCopied, setWifiCopied] = useState(false)
   const [languageModal, setLanguageModal] = useState(false)
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null)
+  const previousSessionCallStates = useRef<Map<string, WaiterCall['durum']>>(new Map())
 
   useEffect(() => {
     let cancelled = false
@@ -797,6 +809,7 @@ export default function MenuPage() {
   // Subscribe to session calls
   useEffect(() => {
     if (!restaurantId || !sessionId || !tableDocId) return
+    previousSessionCallStates.current = new Map()
     logFirestoreRead('menu/session calls listener', { restaurantId, tableId: tableDocId, sessionId })
     const sessionCallsQuery = query(
       collection(db, 'restaurants', restaurantId, 'calls'),
@@ -811,15 +824,54 @@ export default function MenuPage() {
           .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
           .filter((call) => call.tableId === tableDocId)
           .sort((a, b) => b.createdAt - a.createdAt)
+        const nextStates = new Map<string, WaiterCall['durum']>()
+        let nextNotice: WaiterAssistNotice | null = null
+
+        for (const call of allSessionCalls) {
+          nextStates.set(call.id, call.durum)
+          const previousStatus = previousSessionCallStates.current.get(call.id)
+          const waiterName = call.waiterName?.trim()
+
+          if (
+            !nextNotice &&
+            previousStatus === 'bekliyor' &&
+            call.durum === 'kabul edildi' &&
+            waiterName
+          ) {
+            nextNotice = {
+              callId: call.id,
+              tableId: call.tableId,
+              sessionId: call.sessionId,
+              tip: call.tip,
+              waiterName,
+              waiterPhotoUrl: call.waiterPhotoUrl ?? null,
+              waiterAverageRating: call.waiterAverageRating ?? null,
+            }
+          }
+        }
+
+        previousSessionCallStates.current = nextStates
         setSessionCalls(allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi'))
         setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
+        if (nextNotice) setWaiterAssistNotice(nextNotice)
       },
       (error) => {
         console.error('[MENU] Session calls listener error:', error.code, error.message)
       }
     )
-    return () => unsubscribe()
+    return () => {
+      previousSessionCallStates.current = new Map()
+      unsubscribe()
+    }
   }, [restaurantId, sessionId, tableDocId])
+
+  useEffect(() => {
+    if (!waiterAssistNotice) return
+    const timeoutId = window.setTimeout(() => {
+      setWaiterAssistNotice((current) => current?.callId === waiterAssistNotice.callId ? null : current)
+    }, 4500)
+    return () => window.clearTimeout(timeoutId)
+  }, [waiterAssistNotice])
 
   const completedPaymentCall = paymentCalls.find((call) => call.tip === 'hesap' && call.durum === 'tamamlandı' && call.sessionId === sessionId) ?? null
   const activeRatingCall = (ratingTargetCallId ? paymentCalls.find((call) => call.id === ratingTargetCallId) ?? null : null) ?? completedPaymentCall
@@ -1138,6 +1190,8 @@ export default function MenuPage() {
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,
+        waiterPhotoUrl: null,
+        waiterAverageRating: null,
         note: '',
         items: cartItems,
         totalPrice,
@@ -1243,6 +1297,8 @@ export default function MenuPage() {
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,
+        waiterPhotoUrl: null,
+        waiterAverageRating: null,
         customerName: activeCustomerName,
         note: note.trim() || '',
       })
@@ -1266,6 +1322,8 @@ export default function MenuPage() {
         status: 'open',
         waiterId: undefined,
         waiterName: undefined,
+        waiterPhotoUrl: null,
+        waiterAverageRating: null,
         customerName: activeCustomerName,
         note: note.trim() || '',
         createdAt: Date.now(),
@@ -1438,6 +1496,20 @@ export default function MenuPage() {
   const modalSendDisabled = !selectedTip || sending || !!derivedAccessMessage || !!selectedTipLockMessage
   const primaryActionDisabled =
     accessState === 'checking' || accessState === 'missing' || accessState === 'error' || !!derivedAccessMessage || (cartCount > 0 ? orderSending : sending)
+  const visibleWaiterAssistNotice =
+    waiterAssistNotice &&
+    waiterAssistNotice.tableId === tableDocId &&
+    waiterAssistNotice.sessionId === sessionId
+      ? waiterAssistNotice
+      : null
+  const waiterAssistMessage =
+    visibleWaiterAssistNotice
+      ? visibleWaiterAssistNotice.tip === 'sipariş'
+        ? t(language, 'waiterAssistOrderMessage', { waiterName: visibleWaiterAssistNotice.waiterName })
+        : visibleWaiterAssistNotice.tip === 'hesap'
+          ? t(language, 'waiterAssistBillMessage', { waiterName: visibleWaiterAssistNotice.waiterName })
+          : t(language, 'waiterAssistHelpMessage', { waiterName: visibleWaiterAssistNotice.waiterName })
+      : null
 
   const isRtl = SUPPORTED_LANGUAGES.find((l) => l.code === language)?.dir === 'rtl'
 
@@ -1741,6 +1813,21 @@ export default function MenuPage() {
 
         <div className="fixed bottom-0 inset-x-0 z-20 px-4 pb-5 pt-3" style={{ background: `linear-gradient(to top, ${menuSurfaceMuted} 70%, transparent)` }}>
           <div className="max-w-2xl mx-auto">
+            {visibleWaiterAssistNotice && waiterAssistMessage && (
+              <div className="mb-3 flex justify-end">
+                <WaiterAssistToast
+                  notice={visibleWaiterAssistNotice}
+                  title={t(language, 'waiterAssistTitle')}
+                  message={waiterAssistMessage}
+                  primaryColor={menuPrimaryColor}
+                  textColor={menuTextColor}
+                  mutedColor={menuMutedColor}
+                  borderColor={menuBorderColor}
+                  surfaceColor={menuSurfaceMuted}
+                  onClose={() => setWaiterAssistNotice(null)}
+                />
+              </div>
+            )}
             {infoMessage && (
               <div className="mb-3 rounded-[20px] bg-white px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.08)] border border-black/5">
                 <p className="text-[13px] leading-5" style={{ color: menuTextColor }}>{infoMessage}</p>
@@ -2361,6 +2448,77 @@ export default function MenuPage() {
         )}
       </div>
     </>
+  )
+}
+
+function WaiterAssistToast({
+  notice,
+  title,
+  message,
+  primaryColor,
+  textColor,
+  mutedColor,
+  borderColor,
+  surfaceColor,
+  onClose,
+}: {
+  notice: WaiterAssistNotice
+  title: string
+  message: string
+  primaryColor: string
+  textColor: string
+  mutedColor: string
+  borderColor: string
+  surfaceColor: string
+  onClose: () => void
+}) {
+  const hasRating = typeof notice.waiterAverageRating === 'number' && Number.isFinite(notice.waiterAverageRating)
+
+  return (
+    <div
+      className="w-full max-w-sm rounded-[24px] border bg-white p-4 shadow-[0_14px_36px_rgba(15,23,42,0.14)]"
+      style={{ borderColor, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(10px)' }}
+    >
+      <div className="flex items-start gap-3">
+        <UserAvatar
+          name={notice.waiterName}
+          photoUrl={notice.waiterPhotoUrl ?? null}
+          className="h-[52px] w-[52px] shrink-0 border-2"
+          style={{ borderColor: surfaceColor, background: surfaceColor }}
+          fallbackStyle={{ color: textColor }}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: primaryColor }}>
+                {title}
+              </p>
+              <p className="mt-1 truncate text-sm font-bold" style={{ color: textColor }}>
+                {notice.waiterName}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border"
+              style={{ borderColor, color: mutedColor }}
+              aria-label={t(DEFAULT_LANGUAGE, 'close')}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          {hasRating && (
+            <div className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: withAlpha(primaryColor, 0.12), color: primaryColor }}>
+              <span>★</span>
+              <span>{notice.waiterAverageRating?.toFixed(1)}</span>
+            </div>
+          )}
+          <p className="mt-2 text-sm leading-6" style={{ color: mutedColor }}>
+            {message}
+          </p>
+        </div>
+      </div>
+    </div>
   )
 }
 

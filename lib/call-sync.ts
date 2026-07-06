@@ -80,6 +80,7 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
   if (creditedWaiterId) {
     batch.update(doc(db, 'users', creditedWaiterId), {
       totalCalls: increment(1),
+      completedCalls: increment(1),
     })
   }
 

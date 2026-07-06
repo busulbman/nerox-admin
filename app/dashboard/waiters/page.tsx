@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { deleteDoc, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
+import { deleteDoc, doc, getDocs, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import { ref as dbRef, onValue } from 'firebase/database'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { getCallCompletedAt, normalizeRating, normalizeWaiterCall } from '@/lib/firestore-models'
@@ -12,6 +12,9 @@ import {
 } from '@/lib/firestore-queries'
 import { auth, createFirebaseUser, db, ensureRealtimeDatabaseAuth, rtdb } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
+import ProfilePhotoPicker from '@/components/ProfilePhotoPicker'
+import UserAvatar from '@/components/UserAvatar'
+import { isImgBbConfigured, uploadImageToImgBB } from '@/lib/imgbb'
 import type { Rating, UserProfile, WaiterCall } from '@/lib/types'
 
 type PresenceData = {
@@ -24,7 +27,7 @@ const BROWN = 'var(--text)'
 const GOLD = 'var(--primary)'
 const PRIMARY_FOREGROUND = 'var(--primary-foreground)'
 
-type WaiterForm = { name: string; email: string; password: string }
+type WaiterForm = { name: string; email: string; password: string; photoUrl: string | null }
 type WaiterPerformance = {
   waiter: UserProfile
   rank: number
@@ -37,7 +40,7 @@ type WaiterPerformance = {
   recentComments: string[]
 }
 
-const EMPTY_FORM: WaiterForm = { name: '', email: '', password: '' }
+const EMPTY_FORM: WaiterForm = { name: '', email: '', password: '', photoUrl: null }
 const MEDALS = ['🥇', '🥈', '🥉'] as const
 
 function tsToMs(ts: unknown): number {
@@ -102,15 +105,19 @@ export default function WaitersPage() {
   const [form, setForm] = useState<WaiterForm>(EMPTY_FORM)
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
+  const [photoUploading, setPhotoUploading] = useState(false)
   const [showForm, setShowForm] = useState(false)
 
   const [editingWaiter, setEditingWaiter] = useState<UserProfile | null>(null)
   const [editName, setEditName] = useState('')
   const [editEmail, setEditEmail] = useState('')
+  const [editPhotoUrl, setEditPhotoUrl] = useState<string | null>(null)
   const [editSaving, setEditSaving] = useState(false)
+  const [editPhotoUploading, setEditPhotoUploading] = useState(false)
   const [editError, setEditError] = useState('')
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const photoUploadEnabled = isImgBbConfigured()
 
   const loadWaiters = useCallback(async () => {
     logFirestoreRead('dashboard/waiters', restaurantId)
@@ -212,6 +219,48 @@ export default function WaitersPage() {
     }
   }, [profile, restaurantId, user])
 
+  async function handleAddPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setPhotoUploading(true)
+    setAddError('')
+
+    try {
+      const result = await uploadImageToImgBB(file)
+      if (!result.success) {
+        setAddError(result.error)
+        return
+      }
+
+      setForm((current) => ({ ...current, photoUrl: result.url }))
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  async function handleEditPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setEditPhotoUploading(true)
+    setEditError('')
+
+    try {
+      const result = await uploadImageToImgBB(file)
+      if (!result.success) {
+        setEditError(result.error)
+        return
+      }
+
+      setEditPhotoUrl(result.url)
+    } finally {
+      setEditPhotoUploading(false)
+    }
+  }
+
   async function handleAdd() {
     if (!form.name.trim() || !form.email.trim() || form.password.length < 6) {
       setAddError('İsim, geçerli e-posta ve en az 6 karakterli şifre gerekli.')
@@ -229,11 +278,15 @@ export default function WaitersPage() {
         email: form.email.trim(),
         role: 'waiter',
         name: form.name.trim(),
+        photoUrl: form.photoUrl ?? null,
         restaurantId,
         active: true,
         avgRating: 0,
+        averageRating: null,
         totalCalls: 0,
+        completedCalls: 0,
         isOnline: false,
+        updatedAt: serverTimestamp(),
       })
       setForm(EMPTY_FORM)
       setShowForm(false)
@@ -249,7 +302,10 @@ export default function WaitersPage() {
   async function toggleActive(waiter: UserProfile) {
     try {
       logFirestoreWrite('dashboard/toggle waiter active', waiter.uid)
-      await updateDoc(doc(db, 'users', waiter.uid), { active: !waiter.active })
+      await updateDoc(doc(db, 'users', waiter.uid), {
+        active: !waiter.active,
+        updatedAt: serverTimestamp(),
+      })
       await loadWaiters()
     } catch (err) {
       console.error('Durum güncelleme hatası:', err)
@@ -260,6 +316,7 @@ export default function WaitersPage() {
     setEditingWaiter(waiter)
     setEditName(waiter.name)
     setEditEmail(waiter.email)
+    setEditPhotoUrl(waiter.photoUrl ?? null)
     setEditError('')
   }
 
@@ -278,6 +335,8 @@ export default function WaitersPage() {
       await updateDoc(doc(db, 'users', editingWaiter.uid), {
         name: editName.trim(),
         email: editEmail.trim(),
+        photoUrl: editPhotoUrl ?? null,
+        updatedAt: serverTimestamp(),
       })
       await loadWaiters()
       setEditingWaiter(null)
@@ -325,10 +384,13 @@ export default function WaitersPage() {
       return {
         waiter,
         rank: 0,
-        avgWaiterRating: averageNumber(waiterRatings.map((rating) => rating.waiterRating)),
+        avgWaiterRating: averageNumber(waiterRatings.map((rating) => rating.waiterRating))
+          ?? waiter.averageRating
+          ?? waiter.avgRating
+          ?? null,
         totalRatings: waiterRatings.length,
         todayCompletedCalls: todayCompletedCalls.length,
-        totalCompletedCalls: waiter.totalCalls ?? completedCalls.length,
+        totalCompletedCalls: waiter.completedCalls ?? waiter.totalCalls ?? completedCalls.length,
         avgResponseMs: averageNumber(responseTimes),
         latestComment: recentComments[0] ?? null,
         recentComments,
@@ -404,6 +466,17 @@ export default function WaitersPage() {
               Firebase Auth kullanıcısı oluşturulur ve role = &quot;waiter&quot; atanır.
             </p>
             <div className="space-y-3">
+              <ProfilePhotoPicker
+                name={form.name || 'Yeni Garson'}
+                photoUrl={form.photoUrl}
+                label="Profil fotoğrafı"
+                helperText="Garson listesi, sıralama ve müşteri kartında gösterilir."
+                disabledText={!photoUploadEnabled ? 'ImgBB API anahtarı olmadığı için yükleme kapalı.' : undefined}
+                uploading={photoUploading}
+                disabled={!photoUploadEnabled}
+                onFileChange={handleAddPhotoChange}
+                onClear={() => setForm((current) => ({ ...current, photoUrl: null }))}
+              />
               <input className={inputCls} placeholder="Ad Soyad *" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
               <input type="email" className={inputCls} placeholder="E-posta *" value={form.email} onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))} />
               <input type="password" className={inputCls} placeholder="Şifre (min. 6 karakter) *" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
@@ -411,11 +484,11 @@ export default function WaitersPage() {
             {addError && <p className="text-red-500 text-sm mt-3">{addError}</p>}
             <button
               onClick={handleAdd}
-              disabled={adding}
+              disabled={adding || photoUploading}
               className="mt-4 font-semibold px-5 py-2.5 rounded-xl text-sm disabled:opacity-50"
               style={{ background: GOLD, color: PRIMARY_FOREGROUND }}
             >
-              {adding ? 'Oluşturuluyor...' : 'Garson Oluştur'}
+              {adding ? 'Oluşturuluyor...' : photoUploading ? 'Fotoğraf Yükleniyor...' : 'Garson Oluştur'}
             </button>
           </div>
         )}
@@ -456,6 +529,13 @@ export default function WaitersPage() {
                           >
                             #{entry.rank}
                           </span>
+                          <UserAvatar
+                            name={entry.waiter.name}
+                            photoUrl={entry.waiter.photoUrl}
+                            className="h-14 w-14 border-2"
+                            style={{ borderColor: 'var(--border-soft)', background: '#fff' }}
+                            fallbackStyle={{ color: BROWN, background: 'var(--surface-muted)' }}
+                          />
                           <div>
                             <p className="text-xs uppercase tracking-[0.24em] text-gray-400">Sıra #{entry.rank}</p>
                             <h3 className="text-xl font-bold mt-1" style={{ color: BROWN }}>{entry.waiter.name}</h3>
@@ -522,12 +602,13 @@ export default function WaitersPage() {
                       <div className="xl:hidden space-y-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex items-center gap-3 min-w-0">
-                            <div
-                              className="w-11 h-11 rounded-2xl flex items-center justify-center text-white font-bold shrink-0"
-                              style={{ background: entry.waiter.active ? GOLD : '#9ca3af', color: entry.waiter.active ? PRIMARY_FOREGROUND : '#fff' }}
-                            >
-                              {entry.waiter.name.charAt(0).toUpperCase()}
-                            </div>
+                            <UserAvatar
+                              name={entry.waiter.name}
+                              photoUrl={entry.waiter.photoUrl}
+                              className="h-11 w-11"
+                              style={{ background: entry.waiter.active ? GOLD : '#9ca3af' }}
+                              fallbackStyle={{ color: entry.waiter.active ? PRIMARY_FOREGROUND : '#fff' }}
+                            />
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-bold px-2.5 py-1 rounded-full" style={{ background: 'var(--surface-muted)', color: BROWN }}>
@@ -601,12 +682,13 @@ export default function WaitersPage() {
                         </div>
 
                         <div className="flex items-center gap-3 min-w-0">
-                          <div
-                            className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-bold shrink-0"
-                            style={{ background: entry.waiter.active ? GOLD : '#9ca3af', color: entry.waiter.active ? PRIMARY_FOREGROUND : '#fff' }}
-                          >
-                            {entry.waiter.name.charAt(0).toUpperCase()}
-                          </div>
+                          <UserAvatar
+                            name={entry.waiter.name}
+                            photoUrl={entry.waiter.photoUrl}
+                            className="h-10 w-10"
+                            style={{ background: entry.waiter.active ? GOLD : '#9ca3af' }}
+                            fallbackStyle={{ color: entry.waiter.active ? PRIMARY_FOREGROUND : '#fff' }}
+                          />
                           <div className="min-w-0">
                             <p className="font-semibold truncate" style={{ color: BROWN }}>{entry.waiter.name}</p>
                             <p className="text-xs text-gray-400 mt-1">
@@ -668,6 +750,17 @@ export default function WaitersPage() {
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
             <h2 className="font-bold text-lg mb-4" style={{ color: BROWN }}>Garson Düzenle</h2>
             <div className="space-y-3">
+              <ProfilePhotoPicker
+                name={editName || editingWaiter.name}
+                photoUrl={editPhotoUrl}
+                label="Profil fotoğrafı"
+                helperText="Değişiklik müşteri kartına ve garson listesine yansır."
+                disabledText={!photoUploadEnabled ? 'ImgBB API anahtarı olmadığı için yükleme kapalı.' : undefined}
+                uploading={editPhotoUploading}
+                disabled={!photoUploadEnabled}
+                onFileChange={handleEditPhotoChange}
+                onClear={() => setEditPhotoUrl(null)}
+              />
               <div>
                 <label className="block text-xs font-semibold mb-1 text-gray-500">Ad Soyad</label>
                 <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} />
@@ -691,11 +784,11 @@ export default function WaitersPage() {
               </button>
               <button
                 onClick={handleEditSave}
-                disabled={editSaving}
+                disabled={editSaving || editPhotoUploading}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
                 style={{ background: GOLD, color: PRIMARY_FOREGROUND }}
               >
-                {editSaving ? 'Kaydediliyor...' : 'Kaydet'}
+                {editSaving ? 'Kaydediliyor...' : editPhotoUploading ? 'Fotoğraf Yükleniyor...' : 'Kaydet'}
               </button>
             </div>
           </div>

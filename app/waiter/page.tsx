@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   addDoc, collection, doc, getDocs, onSnapshot,
-  runTransaction, serverTimestamp, writeBatch,
+  runTransaction, serverTimestamp, updateDoc, writeBatch,
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
@@ -13,6 +13,8 @@ import { auth, db, rd, rtdb } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
 import CallCard from '@/components/waiter/CallCard'
+import ProfilePhotoPicker from '@/components/ProfilePhotoPicker'
+import UserAvatar from '@/components/UserAvatar'
 import {
   getRestaurantOpenCallsQuery,
   getMenuCategoriesQuery,
@@ -39,6 +41,7 @@ import {
   DEFAULT_PRIMARY_COLOR,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
+import { isImgBbConfigured, uploadImageToImgBB } from '@/lib/imgbb'
 import LoadingScreen from '@/components/LoadingScreen'
 import { buildThemePalette, buildThemeStyleVars } from '@/lib/ui-theme'
 
@@ -72,9 +75,20 @@ function getTodayStartTs() {
   const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime()
 }
 
-function average(values: number[]): string {
-  if (values.length === 0) return '—'
-  return (values.reduce((s, v) => s + v, 0) / values.length).toFixed(1)
+function averageNumber(values: number[]): number | null {
+  if (values.length === 0) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function resolveStoredAverageRating(profile: { averageRating?: number | null; avgRating?: number } | null) {
+  if (!profile) return null
+  if (typeof profile.averageRating === 'number' && Number.isFinite(profile.averageRating)) {
+    return profile.averageRating
+  }
+  if (typeof profile.avgRating === 'number' && Number.isFinite(profile.avgRating)) {
+    return profile.avgRating
+  }
+  return null
 }
 
 function formatDate(ts: number): string {
@@ -128,6 +142,11 @@ export default function WaiterPage() {
   const [tablesLoaded, setTablesLoaded] = useState(false)
   const [tablesBusy,   setTablesBusy]   = useState<string | null>(null)
   const [tablesMsg,    setTablesMsg]    = useState('')
+  const [profileDraftName, setProfileDraftName] = useState<string | null>(null)
+  const [profileDraftPhotoUrl, setProfileDraftPhotoUrl] = useState<string | null | undefined>(undefined)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profilePhotoUploading, setProfilePhotoUploading] = useState(false)
+  const [profileFeedback, setProfileFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
   // Connection status for resilience
   const [connectionLost, setConnectionLost] = useState(false)
@@ -152,6 +171,7 @@ export default function WaiterPage() {
 
   const prevPendingIds    = useRef<Set<string>>(new Set())
   const callsInitialized  = useRef(false)
+  const profilePhotoUploadEnabled = isImgBbConfigured()
 
   // ─── Notification permission ──────────────────────────────────────────────
   useEffect(() => {
@@ -281,7 +301,7 @@ export default function WaiterPage() {
 
   // ─── Done calls on demand ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || openSection !== 'done' || !restaurantId) return
+    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || !restaurantId) return
 
     const currentProfile = profile
     let cancelled = false
@@ -297,7 +317,7 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, openSection, profile, restaurantId])
+  }, [activeTab, profile, restaurantId])
 
   // ─── Tables listener ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -364,6 +384,7 @@ export default function WaiterPage() {
     setCallBusyId(call.id)
     setCallError('')
     try {
+      const waiterAverageRatingSnapshot = resolveStoredAverageRating(profile)
       logFirestoreWrite('waiter/accept call', { restaurantId, callId: call.id })
 
       const batch = writeBatch(db)
@@ -374,6 +395,8 @@ export default function WaiterPage() {
         status: 'accepted',
         waiterId: profile.uid,
         waiterName: profile.name,
+        waiterPhotoUrl: profile.photoUrl ?? null,
+        waiterAverageRating: waiterAverageRatingSnapshot,
         acceptedAt: serverTimestamp(),
       })
 
@@ -416,6 +439,59 @@ export default function WaiterPage() {
       setCallError(err instanceof Error ? err.message : 'Çağrı tamamlanamadı.')
     } finally {
       setCallBusyId(null)
+    }
+  }
+
+  async function handleProfilePhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setProfilePhotoUploading(true)
+    setProfileFeedback(null)
+
+    try {
+      const result = await uploadImageToImgBB(file)
+      if (!result.success) {
+        setProfileFeedback({ tone: 'error', text: result.error })
+        return
+      }
+
+      setProfileDraftPhotoUrl(result.url)
+    } finally {
+      setProfilePhotoUploading(false)
+    }
+  }
+
+  async function saveProfile() {
+    if (!profile) return
+
+    const nextName = (profileDraftName ?? profile.name).trim()
+    const nextPhotoUrl = profileDraftPhotoUrl !== undefined ? profileDraftPhotoUrl : (profile.photoUrl ?? null)
+
+    if (!nextName) {
+      setProfileFeedback({ tone: 'error', text: 'Ad alanı boş bırakılamaz.' })
+      return
+    }
+
+    setProfileSaving(true)
+    setProfileFeedback(null)
+
+    try {
+      logFirestoreWrite('waiter/update profile', profile.uid)
+      await updateDoc(doc(db, 'users', profile.uid), {
+        name: nextName,
+        photoUrl: nextPhotoUrl ?? null,
+        updatedAt: serverTimestamp(),
+      })
+      setProfileDraftName(null)
+      setProfileDraftPhotoUrl(undefined)
+      setProfileFeedback({ tone: 'success', text: 'Profiliniz güncellendi.' })
+    } catch (error) {
+      console.error('Waiter profile update error:', error)
+      setProfileFeedback({ tone: 'error', text: 'Profil güncellenemedi. Lütfen tekrar deneyin.' })
+    } finally {
+      setProfileSaving(false)
     }
   }
 
@@ -533,6 +609,7 @@ export default function WaiterPage() {
 
     setOrderSending(true)
     try {
+      const waiterAverageRatingSnapshot = resolveStoredAverageRating(profile)
       const items = orderCart.map((item) => ({
         productId: item.productId,
         name: item.name,
@@ -559,6 +636,8 @@ export default function WaiterPage() {
         customerName: 'Garson Siparişi',
         waiterId: profile.uid,
         waiterName: profile.name,
+        waiterPhotoUrl: profile.photoUrl ?? null,
+        waiterAverageRating: waiterAverageRatingSnapshot,
         createdByRole: 'waiter',
         createdById: profile.uid,
         createdByName: profile.name,
@@ -602,7 +681,12 @@ export default function WaiterPage() {
   const tipLabel: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
   const todayTs = getTodayStartTs()
   const todayRatingsCount  = myRatings.filter((r) => r.createdAt >= todayTs).length
-  const avgWaiterRating    = average(myRatings.map((r) => r.waiterRating))
+  const storedAverageRating = resolveStoredAverageRating(profile)
+  const avgWaiterRatingValue = averageNumber(myRatings.map((r) => r.waiterRating)) ?? storedAverageRating
+  const avgWaiterRatingLabel = avgWaiterRatingValue === null ? '—' : `${avgWaiterRatingValue.toFixed(1)} ★`
+  const displayedProfileName = profileDraftName ?? profile.name
+  const displayedProfilePhotoUrl = profileDraftPhotoUrl !== undefined ? profileDraftPhotoUrl : (profile.photoUrl ?? null)
+  const totalCompletedCalls = profile.completedCalls ?? profile.totalCalls ?? done.length
   const isCurrentMenuLoaded = loadedMenuRestaurantId === restaurantId
   const menuCategories = isCurrentMenuLoaded ? categories : []
   const menuProducts = isCurrentMenuLoaded ? products : []
@@ -732,6 +816,100 @@ export default function WaiterPage() {
 
       {/* ── Tab content ── */}
       <div className="mx-auto max-w-lg px-4 py-5">
+        <section className="theme-card rounded-[28px] p-5 mb-6">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-4">
+              <UserAvatar
+                name={displayedProfileName}
+                photoUrl={displayedProfilePhotoUrl}
+                className="border-2"
+                style={{ width: '4.5rem', height: '4.5rem', borderColor: BORDER_SOFT, background: SURFACE_MUTED }}
+                fallbackStyle={{ color: TEXT }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Profil</p>
+                <p className="mt-1 truncate text-xl font-bold" style={{ color: TEXT }}>{displayedProfileName}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-semibold"
+                    style={{
+                      background: profile.active === false ? '#f3f4f6' : 'var(--success-soft)',
+                      color: profile.active === false ? '#6b7280' : 'var(--success)',
+                    }}
+                  >
+                    {profile.active === false ? 'Pasif' : 'Aktif'}
+                  </span>
+                  <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: SURFACE_MUTED, color: TEXT }}>
+                    {avgWaiterRatingLabel}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MiniStatCard label="Bugün Tamamlanan" value={String(done.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+              <MiniStatCard label="Toplam Tamamlanan" value={String(totalCompletedCalls)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+              <MiniStatCard label="Ort. Puan" value={avgWaiterRatingLabel} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+              <MiniStatCard label="Durum" value={profile.active === false ? 'Pasif' : 'Aktif'} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+            </div>
+
+            <ProfilePhotoPicker
+              name={displayedProfileName}
+              photoUrl={displayedProfilePhotoUrl}
+              label="Profil fotoğrafı"
+              helperText="Müşteri kartında ve garson listesinde görünür."
+              disabledText={!profilePhotoUploadEnabled ? 'ImgBB API anahtarı olmadığı için yükleme kapalı.' : undefined}
+              uploading={profilePhotoUploading}
+              disabled={!profilePhotoUploadEnabled}
+              onFileChange={handleProfilePhotoChange}
+              onClear={() => setProfileDraftPhotoUrl(null)}
+            />
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-500">Ad Soyad</label>
+              <input
+                className="theme-input rounded-lg text-sm"
+                value={displayedProfileName}
+                onChange={(event) => setProfileDraftName(event.target.value)}
+              />
+            </div>
+
+            {profileFeedback && (
+              <div
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{
+                  background: profileFeedback.tone === 'success' ? 'var(--success-soft)' : '#fff7ed',
+                  color: profileFeedback.tone === 'success' ? 'var(--success)' : '#c2410c',
+                  border: `1px solid ${profileFeedback.tone === 'success' ? 'rgba(16,185,129,0.24)' : '#fdba74'}`,
+                }}
+              >
+                {profileFeedback.text}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  setProfileDraftName(null)
+                  setProfileDraftPhotoUrl(undefined)
+                  setProfileFeedback(null)
+                }}
+                className="rounded-xl px-4 py-2.5 text-sm font-medium"
+                style={{ background: SURFACE_MUTED, color: TEXT }}
+              >
+                Sıfırla
+              </button>
+              <button
+                onClick={saveProfile}
+                disabled={profileSaving || profilePhotoUploading || !displayedProfileName.trim()}
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+                style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
+              >
+                {profileSaving ? 'Kaydediliyor...' : profilePhotoUploading ? 'Fotoğraf Yükleniyor...' : 'Profili Kaydet'}
+              </button>
+            </div>
+          </div>
+        </section>
 
         {/* ÇAĞRILAR TAB */}
         {activeTab === 'calls' && (
@@ -741,7 +919,7 @@ export default function WaiterPage() {
               <SectionHeader label="Puanlarım" count={myRatings.length} badge={myRatings.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
               <div className="theme-card rounded-2xl p-5">
                 <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <MiniStatCard label="Ortalama" value={avgWaiterRating === '—' ? '—' : `${avgWaiterRating} ★`} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+                  <MiniStatCard label="Ortalama" value={avgWaiterRatingLabel} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
                   <MiniStatCard label="Toplam"   value={String(myRatings.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
                   <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
                 </div>

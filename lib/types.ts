@@ -3,14 +3,18 @@ export interface UserProfile {
   email: string
   role: 'admin' | 'waiter' | 'super_admin'
   name: string
+  photoUrl?: string | null
   phone?: string
   restaurantId?: string
   active: boolean
   avgRating?: number
+  averageRating?: number | null
   totalCalls?: number
+  completedCalls?: number
   totalRatings?: number
   isOnline?: boolean
   lastSeen?: number
+  updatedAt?: number | null
 }
 
 export interface Category {
@@ -129,8 +133,91 @@ export interface SharedCartItem {
   updatedAt: number
 }
 
-export type RestaurantStatus = 'active' | 'passive'
-export type RestaurantPlan = 'trial' | 'paid'
+export type RestaurantStatus = 'active' | 'passive' | 'deleted'
+export type RestaurantPlan = 'starter' | 'pro' | 'premium'
+export type BillingPeriod = 'trial' | 'monthly' | 'six_months' | 'yearly' | 'lifetime'
+export type PaymentStatus = 'trial' | 'paid' | 'unpaid' | 'expired'
+
+export const PLAN_PRICES: Record<RestaurantPlan, number> = {
+  starter: 1990,
+  pro: 3990,
+  premium: 5990,
+}
+
+export const PLAN_LABELS: Record<RestaurantPlan, string> = {
+  starter: 'Starter Paket',
+  pro: 'Pro Paket',
+  premium: 'Premium Paket',
+}
+
+export const BILLING_PERIOD_LABELS: Record<BillingPeriod, string> = {
+  trial: '7 Gün Deneme',
+  monthly: 'Aylık',
+  six_months: '6 Aylık',
+  yearly: '12 Aylık',
+  lifetime: 'Ömür Boyu',
+}
+
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  trial: 'Deneme',
+  paid: 'Ödendi',
+  unpaid: 'Ödenmedi',
+  expired: 'Süresi Doldu',
+}
+
+export interface RestaurantFeatures {
+  qrMenu: boolean
+  waiterCall: boolean
+  manualOrders: boolean
+  loyalty: boolean
+  multiLanguage: boolean
+  analytics: boolean
+  kitchen: boolean
+}
+
+export const FEATURE_LABELS: Record<keyof RestaurantFeatures, string> = {
+  qrMenu: 'QR Menü',
+  waiterCall: 'Garson Çağırma',
+  manualOrders: 'Garson Manuel Sipariş',
+  loyalty: 'Kampanya ve Sadakat',
+  multiLanguage: 'Çoklu Dil Desteği',
+  analytics: 'Gelişmiş Raporlar',
+  kitchen: 'Mutfak Ekranı',
+}
+
+export const DEFAULT_FEATURES: Record<RestaurantPlan, RestaurantFeatures> = {
+  starter: {
+    qrMenu: true,
+    waiterCall: true,
+    manualOrders: false,
+    loyalty: false,
+    multiLanguage: false,
+    analytics: false,
+    kitchen: false,
+  },
+  pro: {
+    qrMenu: true,
+    waiterCall: true,
+    manualOrders: true,
+    loyalty: true,
+    multiLanguage: true,
+    analytics: true,
+    kitchen: false,
+  },
+  premium: {
+    qrMenu: true,
+    waiterCall: true,
+    manualOrders: true,
+    loyalty: true,
+    multiLanguage: true,
+    analytics: true,
+    kitchen: true,
+  },
+}
+
+export function getDefaultFeatures(plan: RestaurantPlan): RestaurantFeatures {
+  return { ...DEFAULT_FEATURES[plan] }
+}
 
 export interface Restaurant {
   id: string
@@ -140,9 +227,18 @@ export interface Restaurant {
   primaryColor?: string
   status?: RestaurantStatus
   plan?: RestaurantPlan
+  billingPeriod?: BillingPeriod
+  paymentStatus?: PaymentStatus
   trialStartedAt?: number | null
   trialEndsAt?: number | null
+  subscriptionStartedAt?: number | null
   subscriptionExpiresAt?: number | null
+  lifetimeAccess?: boolean
+  lastPaymentAmount?: number | null
+  lastPaymentDate?: number | null
+  notes?: string
+  deletedAt?: number | null
+  deletedBy?: string | null
   createdAt?: number | null
   updatedAt?: number | null
   phone?: string
@@ -154,6 +250,7 @@ export interface Restaurant {
   district?: string
   onboardingCompleted?: boolean
   adminEmail?: string
+  features?: RestaurantFeatures
 }
 
 export interface CartItem {
@@ -188,6 +285,8 @@ export interface WaiterCall {
   status?: 'open' | 'accepted' | 'completed'
   waiterId?: string
   waiterName?: string
+  waiterPhotoUrl?: string | null
+  waiterAverageRating?: number | null
   completedById?: string
   completedByName?: string
   completedByRole?: 'admin' | 'waiter'
@@ -203,6 +302,21 @@ export interface WaiterCall {
   items?: CartItem[]
   totalPrice?: number
   groupedByCustomer?: Record<string, CustomerGroup>
+  kitchenStatus?: KitchenStatus
+  preparingAt?: number
+  readyAt?: number
+  deliveredAt?: number
+  kitchenUpdatedById?: string
+  kitchenUpdatedByName?: string
+}
+
+export type KitchenStatus = 'pending' | 'preparing' | 'ready' | 'delivered'
+
+export const KITCHEN_STATUS_LABELS: Record<KitchenStatus, string> = {
+  pending: 'Bekliyor',
+  preparing: 'Hazırlanıyor',
+  ready: 'Hazır',
+  delivered: 'Teslim Edildi',
 }
 
 export type RatingStatus = 'approved' | 'suspicious'

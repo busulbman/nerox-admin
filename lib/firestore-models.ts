@@ -213,6 +213,18 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
     status: lifecycleStatus,
     waiterId: typeof data.waiterId === 'string' ? data.waiterId : undefined,
     waiterName: typeof data.waiterName === 'string' ? data.waiterName : undefined,
+    waiterPhotoUrl:
+      typeof data.waiterPhotoUrl === 'string'
+        ? data.waiterPhotoUrl
+        : data.waiterPhotoUrl === null
+          ? null
+          : undefined,
+    waiterAverageRating:
+      typeof data.waiterAverageRating === 'number' && Number.isFinite(data.waiterAverageRating)
+        ? data.waiterAverageRating
+        : data.waiterAverageRating === null
+          ? null
+          : undefined,
     completedById: typeof data.completedById === 'string' ? data.completedById : undefined,
     completedByName: typeof data.completedByName === 'string' ? data.completedByName : undefined,
     completedByRole,

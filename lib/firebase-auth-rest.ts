@@ -100,9 +100,9 @@ export async function createUser(email: string, password: string, displayName?: 
   }
 }
 
-async function updateUserProfile(uid: string, _displayName: string): Promise<void> {
+async function updateUserProfile(uid: string, displayName: string): Promise<void> {
   // Display name is stored in Firestore user doc, not in Auth profile
-  console.log('[firebase-auth-rest] displayName stored in Firestore for uid:', uid)
+  console.log('[firebase-auth-rest] displayName stored in Firestore for uid:', uid, displayName)
 }
 
 export async function deleteUser(uid: string): Promise<void> {

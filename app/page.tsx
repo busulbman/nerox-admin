@@ -11,17 +11,24 @@ import {
   Building2,
   CheckCircle2,
   ClipboardList,
+  Crown,
+  Globe,
+  Headphones,
   LayoutDashboard,
   MenuSquare,
   MessageSquareQuote,
+  Monitor,
   Palette,
   Phone,
+  PieChart,
   QrCode,
   Receipt,
   ShieldCheck,
   Sparkles,
+  Star,
   Store,
   UserRound,
+  Users,
 } from 'lucide-react'
 
 export const metadata: Metadata = {
@@ -111,6 +118,44 @@ const steps = [
   'İşletme sahibi yönetim panelinden menüyü ve personeli yönetir.',
 ] as const
 
+const WHATSAPP_TRIAL_URL = 'https://wa.me/905421320706?text=Merhaba%2C%20Nerox%20Restaurant%20i%C3%A7in%207%20g%C3%BCn%20%C3%BCcretsiz%20deneme%20hakk%C4%B1nda%20bilgi%20almak%20istiyorum.'
+
+const pricingPlans = [
+  {
+    name: 'Starter',
+    price: '1.990',
+    popular: false,
+    features: [
+      { text: 'QR Menü', icon: QrCode },
+      { text: 'Garson Çağırma', icon: BellRing },
+      { text: 'Masa Yönetimi', icon: ClipboardList },
+      { text: 'Yönetim Paneli', icon: LayoutDashboard },
+    ],
+  },
+  {
+    name: 'Pro',
+    price: '3.990',
+    popular: true,
+    features: [
+      { text: "Starter'daki her şey", icon: CheckCircle2 },
+      { text: 'Garson Manuel Sipariş', icon: Users },
+      { text: 'Kampanya ve Sadakat Sistemi', icon: Star },
+      { text: 'Çoklu Dil Desteği', icon: Globe },
+    ],
+  },
+  {
+    name: 'Premium',
+    price: '5.990',
+    popular: false,
+    features: [
+      { text: "Pro'daki her şey", icon: CheckCircle2, comingSoon: false },
+      { text: 'Mutfak Ekranı', icon: Monitor, comingSoon: true },
+      { text: 'Gelişmiş Raporlar', icon: PieChart, comingSoon: false },
+      { text: 'Öncelikli Destek', icon: Headphones, comingSoon: false },
+    ],
+  },
+] as const
+
 const hasBrandLogo = existsSync(join(process.cwd(), 'public', 'NeroxLogo.png'))
 const hasFounderPhoto = existsSync(join(process.cwd(), 'public', 'nurali.png'))
 
@@ -135,7 +180,7 @@ function InstagramIcon({ className }: { className?: string }) {
 
 export default function HomePage() {
   return (
-    <main className="relative overflow-x-clip bg-[#05010d] text-white">
+    <main className="relative max-w-full overflow-x-hidden bg-[#05010d] text-white">
       <style>{`
         @keyframes landing-fade-up {
           from {
@@ -185,7 +230,7 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] opacity-20" />
       </div>
 
-      <div className="relative mx-auto flex min-h-[100svh] w-full max-w-7xl flex-col px-5 pb-10 pt-4 sm:px-8 sm:pb-16 sm:pt-5 lg:min-h-screen lg:px-10">
+      <div className="relative mx-auto flex w-full max-w-7xl flex-col px-4 pb-8 pt-4 sm:px-8 sm:pb-16 sm:pt-5 lg:min-h-screen lg:px-10">
         <header
           className="landing-fade-up flex flex-wrap items-center justify-between gap-3 rounded-[1.75rem] border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-xl sm:rounded-full sm:px-5"
           style={{ animationDelay: '60ms' }}
@@ -225,7 +270,7 @@ export default function HomePage() {
           </div>
         </header>
 
-        <section className="grid gap-8 py-6 sm:gap-10 sm:py-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-12 lg:py-14">
+        <section className="py-6 sm:py-8 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-12 lg:py-14">
           <div className="max-w-3xl min-w-0">
             <div
               className="landing-fade-up inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/30 bg-[#11061f]/80 px-4 py-2 text-sm font-medium text-[#d8c3ff]"
@@ -300,12 +345,13 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* Hero visual card - hidden on mobile */}
           <div
-            className="landing-fade-up landing-float relative rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(23,10,42,0.94),rgba(9,4,18,0.98))] p-4 shadow-[0_30px_100px_rgba(10,4,24,0.55)] sm:p-6"
+            className="landing-fade-up landing-float relative hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(23,10,42,0.94),rgba(9,4,18,0.98))] p-4 shadow-[0_30px_100px_rgba(10,4,24,0.55)] lg:block lg:p-6"
             style={{ animationDelay: '320ms' }}
           >
-            <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-              <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.03] p-5">
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#b998ff]">Nerox Studio</p>
                   <h2 className="mt-2 text-2xl font-semibold text-white">Tek ekranda restoran operasyonu</h2>
@@ -315,7 +361,7 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="mt-5 grid grid-cols-2 gap-3">
                 {heroCards.map(({ title, description, icon: Icon }, index) => (
                   <article
                     key={title}
@@ -372,6 +418,81 @@ export default function HomePage() {
                 </div>
                 <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
                 <p className="mt-2 text-sm leading-7 text-white/65">{description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section id="pricing" className="py-4 sm:py-5 lg:py-7">
+          <div className="landing-fade-up text-center" style={{ animationDelay: '120ms' }}>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">Paketler</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
+              İşletmenize uygun paketi seçin
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-white/70">
+              İşletmenize uygun paketi seçin, 7 gün ücretsiz deneyin.
+            </p>
+          </div>
+
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {pricingPlans.map((plan, index) => (
+              <article
+                key={plan.name}
+                className={`landing-fade-up relative flex flex-col rounded-[1.75rem] border p-5 backdrop-blur-xl transition sm:p-6 ${
+                  plan.popular
+                    ? 'border-[#7c3aed]/50 bg-gradient-to-b from-[#7c3aed]/20 to-[#0d0618]/90 shadow-[0_0_60px_-15px_rgba(124,58,237,0.4)]'
+                    : 'border-white/10 bg-white/[0.04]'
+                }`}
+                style={{ animationDelay: `${180 + index * 70}ms` }}
+              >
+                {plan.popular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#7c3aed] px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                      <Crown className="h-3.5 w-3.5" />
+                      En Popüler
+                    </span>
+                  </div>
+                )}
+
+                <div className={`text-center ${plan.popular ? 'pt-2' : ''}`}>
+                  <h3 className={`text-xl font-semibold ${plan.popular ? 'text-[#d8c3ff]' : 'text-white'}`}>
+                    {plan.name}
+                  </h3>
+                  <div className="mt-3 flex items-baseline justify-center gap-1">
+                    <span className="text-4xl font-bold tracking-tight text-white">{plan.price}</span>
+                    <span className="text-sm text-white/60">TL / Ay</span>
+                  </div>
+                </div>
+
+                <ul className="mt-6 flex-1 space-y-3">
+                  {plan.features.map((feature) => (
+                    <li key={feature.text} className="flex items-center gap-3 text-sm text-white/75">
+                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${plan.popular ? 'bg-[#7c3aed]/30 text-[#d8c3ff]' : 'bg-white/10 text-white/60'}`}>
+                        <feature.icon className="h-4 w-4" />
+                      </div>
+                      <span className="flex items-center gap-2">
+                        {feature.text}
+                        {'comingSoon' in feature && feature.comingSoon && (
+                          <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-medium text-amber-300">Yakında</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                <a
+                  href={WHATSAPP_TRIAL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition ${
+                    plan.popular
+                      ? 'bg-[#7c3aed] text-white hover:bg-[#6d28d9]'
+                      : 'border border-white/12 bg-white/6 text-white hover:border-white/20 hover:bg-white/10'
+                  }`}
+                >
+                  7 Gün Ücretsiz Dene
+                  <ArrowRight className="h-4 w-4" />
+                </a>
               </article>
             ))}
           </div>

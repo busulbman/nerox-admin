@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
-import { Menu, Bell, LogOut } from 'lucide-react'
+import { Menu, Bell, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
@@ -19,6 +19,18 @@ import LoadingScreen from '@/components/LoadingScreen'
 import Sidebar from '@/components/Sidebar'
 
 const TIP_LABEL: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sidebar_collapsed'
+
+function getInitialSidebarState() {
+  if (typeof window === 'undefined') {
+    return { mobileOpen: false, collapsed: false }
+  }
+
+  return {
+    mobileOpen: false,
+    collapsed: window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true',
+  }
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
@@ -72,7 +84,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const hasExpiredAccess = accessBlockMessage === 'Aboneliğinizin süresi dolmuş.'
   const hasOnboardingCompletionOverride = hasRecentOnboardingCompletion(restaurantId)
 
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarState, setSidebarState] = useState(getInitialSidebarState)
 
   const prevCallIds = useRef<Set<string>>(new Set())
   const initialized = useRef(false)
@@ -132,7 +144,26 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
     router.replace('/login')
   }
 
+  function openMobileSidebar() {
+    setSidebarState((current) => ({ ...current, mobileOpen: true }))
+  }
+
+  function closeMobileSidebar() {
+    setSidebarState((current) => ({ ...current, mobileOpen: false }))
+  }
+
+  function toggleDesktopSidebar() {
+    setSidebarState((current) => {
+      const nextCollapsed = !current.collapsed
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, nextCollapsed ? 'true' : 'false')
+      }
+      return { ...current, collapsed: nextCollapsed }
+    })
+  }
+
   const themeVars = buildThemeStyleVars(primaryColor)
+  const DesktopSidebarToggleIcon = sidebarState.collapsed ? PanelLeftOpen : PanelLeftClose
 
   if (loading || (profile?.role === 'admin' && restaurantLoading)) {
     return <LoadingScreen variant="admin" />
@@ -145,14 +176,14 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <OnboardingProvider restaurantId={restaurantId} onOpenSidebar={() => setSidebarOpen(true)}>
+    <OnboardingProvider restaurantId={restaurantId} onOpenSidebar={openMobileSidebar}>
       <div className="theme-page flex min-h-screen overflow-x-hidden" style={themeVars}>
         <header
           className="md:hidden fixed top-0 left-0 right-0 z-30 flex h-14 items-center justify-between gap-2 px-4"
           style={{ background: 'var(--primary)' }}
         >
           <button
-            onClick={() => setSidebarOpen(true)}
+            onClick={openMobileSidebar}
             className="w-9 h-9 flex items-center justify-center rounded-lg"
             style={{ color: textColor, background: `${textColor}15` }}
             aria-label="Menüyü aç"
@@ -193,7 +224,11 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <Sidebar
+          isOpen={sidebarState.mobileOpen}
+          isCollapsed={sidebarState.collapsed}
+          onClose={closeMobileSidebar}
+        />
 
         <FloatingHelpButton />
         <TrialWelcomeCard restaurant={restaurant} restaurantId={restaurantId} />
@@ -201,9 +236,64 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         <main
           className={[
             'min-w-0 flex-1 overflow-x-hidden pt-14 md:pt-0',
-            sidebarOpen ? 'overflow-y-hidden md:overflow-y-auto' : 'overflow-y-auto',
+            sidebarState.mobileOpen ? 'overflow-y-hidden md:overflow-y-auto' : 'overflow-y-auto',
           ].join(' ')}
         >
+          <div
+            className="sticky top-0 z-20 hidden h-16 items-center justify-between gap-4 border-b px-6 backdrop-blur md:flex"
+            style={{ background: 'rgba(255,255,255,0.92)', borderColor: 'var(--border-soft)' }}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                onClick={toggleDesktopSidebar}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border transition-colors duration-300 ease-in-out hover:bg-[var(--surface-muted)]"
+                style={{ color: 'var(--text)', borderColor: 'var(--border-soft)' }}
+                aria-label={sidebarState.collapsed ? 'Paneli aç' : 'Paneli daralt'}
+                title={sidebarState.collapsed ? 'Paneli aç' : 'Paneli daralt'}
+              >
+                <DesktopSidebarToggleIcon size={18} />
+              </button>
+
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-[var(--text)]">{panelTitle}</p>
+                <p className="text-xs text-[var(--text-secondary)]">Yönetim paneli</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  onClick={() => router.push('/dashboard/calls')}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border transition-colors duration-300 ease-in-out hover:bg-[var(--surface-muted)]"
+                  style={{ color: 'var(--text)', borderColor: 'var(--border-soft)' }}
+                  aria-label="Çağrılar"
+                  title="Çağrılar"
+                >
+                  <Bell size={18} />
+                </button>
+                {pendingCount > 0 && (
+                  <span
+                    className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full text-[10px] font-bold text-white"
+                    style={{ background: '#ef4444' }}
+                  >
+                    {pendingCount > 9 ? '9+' : pendingCount}
+                  </span>
+                )}
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="flex h-10 items-center justify-center rounded-xl border px-3 text-sm font-medium transition-colors duration-300 ease-in-out hover:bg-[var(--surface-muted)]"
+                style={{ color: 'var(--text)', borderColor: 'var(--border-soft)' }}
+                aria-label="Çıkış"
+                title="Çıkış"
+              >
+                <LogOut size={16} />
+                <span className="ml-2">Çıkış</span>
+              </button>
+            </div>
+          </div>
+
           {connectionLost && (
             <div
               className="px-4 py-2 text-center text-sm"

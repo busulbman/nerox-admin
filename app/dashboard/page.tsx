@@ -91,7 +91,12 @@ const EMPTY_ANALYTICS: AnalyticsData = {
 }
 
 function getTrialBannerState(restaurant: Restaurant | null) {
-  if (!restaurant || restaurant.plan !== 'trial' || typeof restaurant.trialEndsAt !== 'number') {
+  if (!restaurant || typeof restaurant.trialEndsAt !== 'number') {
+    return null
+  }
+
+  const isTrial = restaurant.billingPeriod === 'trial' || restaurant.paymentStatus === 'trial'
+  if (!isTrial) {
     return null
   }
 

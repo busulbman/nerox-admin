@@ -1,4 +1,4 @@
-import { Check, Clock3 } from 'lucide-react'
+import { Check, ChefHat, Clock3 } from 'lucide-react'
 import { getCallTableLabel } from '@/lib/firestore-models'
 import CustomerRewards from '@/components/orders/CustomerRewards'
 import LoyaltyPreviewBadge from '@/components/orders/LoyaltyPreviewBadge'
@@ -57,6 +57,18 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
               style={{ background: meta.accent, color: '#fff' }}
             >
               Aktif
+            </span>
+          )}
+          {call.tip === 'sipariş' && call.kitchenStatus === 'ready' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-500 px-2 py-0.5 text-xs font-medium text-white">
+              <ChefHat className="h-3 w-3" />
+              Hazır
+            </span>
+          )}
+          {call.tip === 'sipariş' && call.kitchenStatus === 'preparing' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-0.5 text-xs font-medium text-white">
+              <ChefHat className="h-3 w-3" />
+              Hazırlanıyor
             </span>
           )}
         </div>

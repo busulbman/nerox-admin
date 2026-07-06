@@ -20,6 +20,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
+import { FeatureLockedPage } from '@/components/FeatureGate'
+import { useFeatures } from '@/lib/use-features'
 import { db } from '@/lib/firebase'
 import { normalizeLoyaltyCampaign } from '@/lib/firestore-models'
 import { getMenuProductsQuery, getRestaurantLoyaltyCampaignsQuery } from '@/lib/firestore-queries'
@@ -63,6 +66,8 @@ function formatDate(value: number | null) {
 export default function LoyaltyPage() {
   const { profile } = useAuth()
   const restaurantId = profile?.restaurantId || ''
+  const { restaurant } = useRestaurantSettingsContext()
+  const features = useFeatures(restaurant)
 
   const [products, setProducts] = useState<Product[]>([])
   const [campaigns, setCampaigns] = useState<LoyaltyCampaign[]>([])
@@ -72,6 +77,7 @@ export default function LoyaltyPage() {
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const loyaltyEnabled = features.loyalty
 
   useEffect(() => {
     if (!restaurantId) return
@@ -253,6 +259,10 @@ export default function LoyaltyPage() {
     : isEditing
       ? 'Kampanyayı Güncelle'
       : 'Kampanya Oluştur'
+
+  if (!loyaltyEnabled) {
+    return <FeatureLockedPage feature="loyalty" />
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from 'firebase/auth'
-import { Menu, Bell, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Menu, Bell, LogOut, PanelLeftClose, PanelLeftOpen, UtensilsCrossed } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { OpenCallsProvider, useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import { RestaurantSettingsProvider, useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
@@ -164,6 +164,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
   const themeVars = buildThemeStyleVars(primaryColor)
   const DesktopSidebarToggleIcon = sidebarState.collapsed ? PanelLeftOpen : PanelLeftClose
+  const menuHref = `/menu/${settings?.slug?.trim() || restaurantId}/1`
 
   if (loading || (profile?.role === 'admin' && restaurantLoading)) {
     return <LoadingScreen variant="admin" />
@@ -212,6 +213,18 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                 </span>
               )}
             </div>
+
+            <a
+              href={menuHref}
+              target="_blank"
+              rel="noreferrer"
+              className="w-9 h-9 flex items-center justify-center rounded-lg"
+              style={{ color: textColor, background: `${textColor}15` }}
+              aria-label="Menüyü Görüntüle"
+              title="Menüyü Görüntüle"
+            >
+              <UtensilsCrossed size={18} />
+            </a>
 
             <button
               onClick={handleLogout}
@@ -280,6 +293,19 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                   </span>
                 )}
               </div>
+
+              <a
+                href={menuHref}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-10 items-center justify-center rounded-xl border px-3 text-sm font-medium transition-colors duration-300 ease-in-out hover:bg-[var(--surface-muted)]"
+                style={{ color: 'var(--text)', borderColor: 'var(--border-soft)' }}
+                aria-label="Menüyü Görüntüle"
+                title="Menüyü Görüntüle"
+              >
+                <UtensilsCrossed size={16} />
+                <span className="ml-2 hidden lg:inline">Menüyü Görüntüle</span>
+              </a>
 
               <button
                 onClick={handleLogout}

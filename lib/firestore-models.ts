@@ -236,6 +236,7 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
     customerId: typeof data.customerId === 'string' ? data.customerId : undefined,
     customerPhone: typeof data.customerPhone === 'string' ? data.customerPhone : undefined,
     loyaltyPreview: normalizeLoyaltyPreview(data.loyaltyPreview),
+    loyaltyProcessed: data.loyaltyProcessed === true,
     note: typeof data.note === 'string' ? data.note : undefined,
     createdAt: toMillis(data.createdAt) ?? 0,
     acceptedAt: toMillis(data.acceptedAt) ?? undefined,

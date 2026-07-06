@@ -78,7 +78,26 @@ export interface LoyaltyReward {
   usedByName?: string
 }
 
-export type LoyaltyTransactionAction = 'earn' | 'redeem'
+export type LoyaltyTransactionAction = 'progress' | 'earn' | 'redeem'
+
+export interface LoyaltyProgress {
+  id: string
+  restaurantId: string
+  customerId: string
+  customerName: string
+  customerPhone: string
+  campaignId: string
+  campaignName: string
+  targetProductId: string
+  targetProductName: string
+  requiredQuantity: number
+  rewardProductId: string
+  rewardProductName: string
+  rewardQuantity: number
+  currentQuantity: number
+  totalEarnedRewards: number
+  updatedAt: number | null
+}
 
 export interface LoyaltyTransaction {
   id: string
@@ -294,6 +313,7 @@ export interface WaiterCall {
   customerId?: string
   customerPhone?: string
   loyaltyPreview?: LoyaltyPreview
+  loyaltyProcessed?: boolean
   note?: string
   createdAt: number
   acceptedAt?: number

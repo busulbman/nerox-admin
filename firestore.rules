@@ -110,6 +110,16 @@ service cloud.firestore {
             .hasOnly(['kitchenStatus', 'deliveredAt', 'kitchenUpdatedById', 'kitchenUpdatedByName']);
     }
 
+    function waiterCanMarkLoyaltyProcessed(rid) {
+      // Loyalty engine marks a completed order as processed (idempotency flag).
+      return isWaiter(rid)
+        && resource.data.durum == 'tamamlandı'
+        && request.resource.data.loyaltyProcessed == true
+        && request.resource.data.loyaltyRewardIds is list
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['loyaltyProcessed', 'loyaltyProcessedAt', 'loyaltyRewardIds']);
+    }
+
     function waiterCanCreateOrder(rid) {
       return isWaiter(rid)
         && request.resource.data.restaurantId == rid
@@ -415,7 +425,7 @@ service cloud.firestore {
 
         // Admin can manage all calls, waiters only their own accept/complete flow
         allow create, update, delete: if isAdmin(rid);
-        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid) || waiterCanDeliverReadyOrder(rid);
+        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid) || waiterCanDeliverReadyOrder(rid) || waiterCanMarkLoyaltyProcessed(rid);
 
         // Waiter can create manual orders
         allow create: if waiterCanCreateOrder(rid);
@@ -498,7 +508,9 @@ service cloud.firestore {
         // Waiter can read customers
         allow read: if isWaiter(rid);
 
-        // Public can create customer record when registering for loyalty
+        // Public can create customer record when registering for loyalty.
+        // Public reads go through the server API (admin SDK); no direct public
+        // read so customer records can't be enumerated by phone number.
         allow create: if restaurantAllowsPublicAccess(rid)
           && request.resource.data.name is string
           && request.resource.data.phone is string
@@ -507,17 +519,25 @@ service cloud.firestore {
           && request.resource.data.totalOrders == 0
           && request.resource.data.totalSpent == 0;
 
-        // Public can read own customer record by phone
-        allow read: if restaurantAllowsPublicAccess(rid);
-
         // ── Customer Rewards ──────────────────────────────────────────────────
 
         match /rewards/{rewardId} {
           // Rewards are tenant-scoped and staff-only; public ownership cannot be
-          // verified safely from an unauthenticated QR session.
+          // verified safely from an unauthenticated QR session. Customers see
+          // their rewards through the public loyalty status API.
           allow read: if isStaff(rid);
           allow create, update: if isStaff(rid);
           allow delete: if false;
+        }
+
+        // ── Customer Loyalty Progress ─────────────────────────────────────────
+
+        match /loyaltyProgress/{campaignId} {
+          // Written only by the loyalty engine running with a staff session.
+          // Public never reads or writes directly (server API handles reads).
+          allow read: if isStaff(rid);
+          allow create, update: if isStaff(rid);
+          allow delete: if isAdmin(rid);
         }
       }
 

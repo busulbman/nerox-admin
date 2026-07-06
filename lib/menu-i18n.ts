@@ -156,6 +156,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     demoTourStep6Text: 'Şimdi demo menüyü deneyebilirsiniz. İyi keşifler!',
     developerLabel: 'Geliştirici',
     contactLabel: 'İletişim',
+    loyaltyCampaignsTitle: 'Kampanyalar',
+    loyaltyYourProgress: 'İlerlemeniz',
+    loyaltyRemainingToReward: '{count} ürün sonra hediyeniz hazır',
+    loyaltyRewardReadyShort: '{count} {product} hediyeniz hazır',
+    loyaltyJoinCta: 'Kampanyaya Katıl',
   },
   en: {
     selectLanguage: 'Select language',
@@ -303,6 +308,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     demoTourStep6Text: 'You can now explore the demo menu. Enjoy!',
     developerLabel: 'Developer',
     contactLabel: 'Contact',
+    loyaltyCampaignsTitle: 'Campaigns',
+    loyaltyYourProgress: 'Your progress',
+    loyaltyRemainingToReward: '{count} more to earn your reward',
+    loyaltyRewardReadyShort: 'You have {count} {product} waiting',
+    loyaltyJoinCta: 'Join the campaign',
   },
   ru: {
     selectLanguage: 'Выберите язык',
@@ -450,6 +460,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     demoTourStep6Text: 'Теперь вы можете изучить демо-меню. Приятного знакомства!',
     developerLabel: 'Разработчик',
     contactLabel: 'Связаться',
+    loyaltyCampaignsTitle: 'Акции',
+    loyaltyYourProgress: 'Ваш прогресс',
+    loyaltyRemainingToReward: 'Ещё {count} до подарка',
+    loyaltyRewardReadyShort: 'Вас ждёт подарок: {count} {product}',
+    loyaltyJoinCta: 'Участвовать в акции',
   },
   ar: {
     selectLanguage: 'اختر اللغة',
@@ -597,6 +612,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     demoTourStep6Text: 'يمكنك الآن استكشاف القائمة التجريبية. استمتع!',
     developerLabel: 'المطوّر',
     contactLabel: 'تواصل',
+    loyaltyCampaignsTitle: 'الحملات',
+    loyaltyYourProgress: 'تقدمك',
+    loyaltyRemainingToReward: 'بقي {count} للحصول على هديتك',
+    loyaltyRewardReadyShort: 'لديك هدية جاهزة: {count} {product}',
+    loyaltyJoinCta: 'انضم إلى الحملة',
   },
 }
 

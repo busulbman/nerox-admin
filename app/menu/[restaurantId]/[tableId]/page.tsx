@@ -85,7 +85,6 @@ import {
 import type {
   Category,
   LoyaltyCampaign,
-  LoyaltyReward,
   MenuThemeSettings,
   Product,
   RestaurantGeneralSettings,
@@ -94,7 +93,7 @@ import type {
   WaiterCall,
 } from '@/lib/types'
 import { formatPriceWithConversion, getExchangeRates, type ExchangeRates } from '@/lib/currency'
-import { calculatePendingRewards, getCustomerAvailableRewards } from '@/lib/loyalty-rewards'
+import { calculatePendingRewards } from '@/lib/loyalty-rewards'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
 type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
@@ -103,6 +102,23 @@ type RatingForm = { serviceRating: number; waiterRating: number; comment: string
 type OnboardingStep = 'language' | 'name' | 'done'
 type LoyaltyCustomerState = { id: string; name: string; phone: string }
 type LoyaltyRegisterForm = { name: string; phone: string; email: string }
+type PublicLoyaltyReward = {
+  id: string
+  campaignId: string
+  campaignName: string
+  rewardProductName: string
+  rewardQuantity: number
+}
+type PublicLoyaltyProgress = {
+  campaignId: string
+  campaignName: string
+  targetProductName: string
+  requiredQuantity: number
+  rewardProductName: string
+  rewardQuantity: number
+  currentQuantity: number
+  totalEarnedRewards: number
+}
 type WaiterAssistNotice = {
   callId: string
   tableId: string
@@ -376,13 +392,16 @@ export default function MenuPage() {
   const [customerNameModal, setCustomerNameModal] = useState(false)
   const [customerNameInput, setCustomerNameInput] = useState('')
   const [activeLoyaltyCampaign, setActiveLoyaltyCampaign] = useState<LoyaltyCampaign | null>(null)
+  const [activeCampaigns, setActiveCampaigns] = useState<LoyaltyCampaign[]>([])
+  const [loyaltyProgressList, setLoyaltyProgressList] = useState<PublicLoyaltyProgress[]>([])
+  const [loyaltyRefreshKey, setLoyaltyRefreshKey] = useState(0)
   const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomerState | null>(null)
   const [loyaltyPromptOpen, setLoyaltyPromptOpen] = useState(false)
   const [loyaltyRegisterOpen, setLoyaltyRegisterOpen] = useState(false)
   const [loyaltyRegisterForm, setLoyaltyRegisterForm] = useState<LoyaltyRegisterForm>(EMPTY_LOYALTY_FORM)
   const [loyaltyRegistering, setLoyaltyRegistering] = useState(false)
   const [loyaltyRegisterMessage, setLoyaltyRegisterMessage] = useState<string | null>(null)
-  const [availableRewards, setAvailableRewards] = useState<LoyaltyReward[]>([])
+  const [availableRewards, setAvailableRewards] = useState<PublicLoyaltyReward[]>([])
   const [cartDrawer, setCartDrawer] = useState(false)
   const [orderSending, setOrderSending] = useState(false)
   const [orderSent, setOrderSent] = useState(false)
@@ -695,41 +714,36 @@ export default function MenuPage() {
   }, [restaurantId])
 
   useEffect(() => {
-    if (
-      onboardingStep !== 'done' ||
-      accessState !== 'ready' ||
-      !restaurantId ||
-      !sessionId ||
-      !tableDocId ||
-      loyaltyCustomer ||
-      customerNameModal
-    ) {
+    if (onboardingStep !== 'done' || accessState !== 'ready' || !restaurantId || !sessionId || !tableDocId) {
       return
     }
 
     const currentRestaurantId = restaurantId
     const currentTableDocId = tableDocId
     const currentSessionId = sessionId
+    const shouldOfferPrompt = !loyaltyCustomer && !customerNameModal
     let cancelled = false
 
-    async function loadActiveCampaign() {
+    async function loadActiveCampaigns() {
       try {
-        const campaignSnap = await getDocs(getRestaurantActiveLoyaltyCampaignsQuery(currentRestaurantId))
+        const campaignSnap = await getDocs(getRestaurantActiveLoyaltyCampaignsQuery(currentRestaurantId, 10))
         if (cancelled) return
 
         if (campaignSnap.empty) {
+          setActiveCampaigns([])
           setActiveLoyaltyCampaign(null)
           setLoyaltyPromptOpen(false)
           return
         }
 
-        const campaign = normalizeLoyaltyCampaign(
-          campaignSnap.docs[0].id,
-          campaignSnap.docs[0].data() as Record<string, unknown>,
+        const campaigns = campaignSnap.docs.map((docSnap) =>
+          normalizeLoyaltyCampaign(docSnap.id, docSnap.data() as Record<string, unknown>),
         )
 
-        setActiveLoyaltyCampaign(campaign)
+        setActiveCampaigns(campaigns)
+        setActiveLoyaltyCampaign(campaigns[0])
 
+        if (!shouldOfferPrompt) return
         if (hasLoyaltyPromptBeenHandled(currentRestaurantId, currentTableDocId, currentSessionId)) return
 
         setLoyaltyPromptOpen(true)
@@ -739,7 +753,7 @@ export default function MenuPage() {
       }
     }
 
-    void loadActiveCampaign()
+    void loadActiveCampaigns()
 
     return () => {
       cancelled = true
@@ -766,20 +780,37 @@ export default function MenuPage() {
     return () => { cancelled = true }
   }, [language])
 
-  // Load available rewards for loyalty customers
+  // Load loyalty progress + available rewards through the public status API
+  // (Firestore rules keep these collections closed to unauthenticated reads)
   useEffect(() => {
     if (!restaurantId || !loyaltyCustomer) return
+    const customerId = loyaltyCustomer.id
     let cancelled = false
-    getCustomerAvailableRewards(restaurantId, loyaltyCustomer.id)
-      .then((rewards) => {
-        if (!cancelled) setAvailableRewards(rewards)
-      })
-      .catch((error) => console.error('Load rewards error:', error))
+
+    async function loadLoyaltyStatus() {
+      try {
+        const response = await fetch(
+          `/api/public/loyalty/status?restaurantId=${encodeURIComponent(restaurantId)}&customerId=${encodeURIComponent(customerId)}`,
+          { cache: 'no-store' },
+        )
+        if (!response.ok) return
+        const payload = await response.json().catch(() => null)
+        if (cancelled || !payload) return
+        setAvailableRewards(Array.isArray(payload.rewards) ? payload.rewards : [])
+        setLoyaltyProgressList(Array.isArray(payload.progress) ? payload.progress : [])
+      } catch (error) {
+        console.error('Loyalty status load error:', error)
+      }
+    }
+
+    void loadLoyaltyStatus()
+
     return () => {
       cancelled = true
       setAvailableRewards([])
+      setLoyaltyProgressList([])
     }
-  }, [restaurantId, loyaltyCustomer?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [restaurantId, loyaltyCustomer?.id, loyaltyRefreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Calculate pending rewards based on cart items using useMemo
   const pendingRewardsComputed = useMemo(() => {
@@ -841,11 +872,21 @@ export default function MenuPage() {
           .sort((a, b) => b.createdAt - a.createdAt)
         const nextStates = new Map<string, WaiterCall['durum']>()
         let nextNotice: WaiterAssistNotice | null = null
+        let hasCompletedOrder = false
 
         for (const call of allSessionCalls) {
           nextStates.set(call.id, call.durum)
           const previousStatus = previousSessionCallStates.current.get(call.id)
           const waiterName = call.waiterName?.trim()
+
+          if (
+            call.tip === 'sipariş' &&
+            call.durum === 'tamamlandı' &&
+            previousStatus &&
+            previousStatus !== 'tamamlandı'
+          ) {
+            hasCompletedOrder = true
+          }
 
           if (
             !nextNotice &&
@@ -869,6 +910,11 @@ export default function MenuPage() {
         setSessionCalls(allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi'))
         setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
         if (nextNotice) setWaiterAssistNotice(nextNotice)
+        if (hasCompletedOrder) {
+          // Loyalty engine writes progress right after completion; small delay
+          // lets the transaction land before the status refetch.
+          window.setTimeout(() => setLoyaltyRefreshKey((key) => key + 1), 2500)
+        }
       },
       (error) => {
         console.error('[MENU] Session calls listener error:', error.code, error.message)
@@ -1769,6 +1815,99 @@ export default function MenuPage() {
         </header>
 
         <main className="max-w-2xl mx-auto overflow-x-hidden px-4 pt-5">
+          {/* Kampanyalar */}
+          {activeCampaigns.length > 0 && (
+            <section className="mb-6">
+              <div className="mb-3 flex items-center gap-2 px-1">
+                <Gift size={15} style={{ color: menuPrimaryColor }} />
+                <h2 className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: menuTextColor }}>
+                  {t(language, 'loyaltyCampaignsTitle')}
+                </h2>
+              </div>
+              <div className="space-y-3">
+                {activeCampaigns.map((campaign) => {
+                  const progressEntry = loyaltyProgressList.find((entry) => entry.campaignId === campaign.id) ?? null
+                  const campaignRewards = availableRewards.filter((reward) => reward.campaignId === campaign.id)
+                  const rewardCount = campaignRewards.reduce((sum, reward) => sum + reward.rewardQuantity, 0)
+                  const currentQuantity = progressEntry?.currentQuantity ?? 0
+                  const requiredQuantity = campaign.requiredQuantity
+                  const remainingQuantity = Math.max(0, requiredQuantity - currentQuantity)
+                  const progressRatio = requiredQuantity > 0 ? Math.min(1, currentQuantity / requiredQuantity) : 0
+
+                  return (
+                    <div
+                      key={campaign.id}
+                      className="rounded-[24px] border bg-white p-4 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
+                      style={{ borderColor: menuBorderColor }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl" style={{ background: withAlpha(menuPrimaryColor, 0.1) }}>
+                          <Gift size={18} style={{ color: menuPrimaryColor }} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[15px] font-bold leading-snug" style={{ color: menuTextColor }}>{campaign.name}</p>
+                          <p className="mt-1 text-[13px] leading-5" style={{ color: menuMutedColor }}>
+                            {buildLoyaltyCampaignRule(campaign, language)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {loyaltyCustomer ? (
+                        <>
+                          <div className="mt-3 flex items-center justify-between">
+                            <span className="text-xs font-semibold" style={{ color: menuMutedColor }}>
+                              {t(language, 'loyaltyYourProgress')}
+                            </span>
+                            <span className="text-sm font-bold" style={{ color: menuTextColor }}>
+                              {currentQuantity}/{requiredQuantity}
+                            </span>
+                          </div>
+                          {requiredQuantity <= 8 ? (
+                            <div className="mt-2 flex gap-1.5">
+                              {Array.from({ length: requiredQuantity }).map((_, index) => (
+                                <span
+                                  key={index}
+                                  className="h-2.5 flex-1 rounded-full transition-colors"
+                                  style={{ background: index < currentQuantity ? menuPrimaryColor : withAlpha(menuPrimaryColor, 0.14) }}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-2 h-2.5 overflow-hidden rounded-full" style={{ background: withAlpha(menuPrimaryColor, 0.14) }}>
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{ width: `${progressRatio * 100}%`, background: menuPrimaryColor }}
+                              />
+                            </div>
+                          )}
+                          {rewardCount > 0 ? (
+                            <div className="mt-3 rounded-[16px] border px-3 py-2.5" style={{ background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.22)' }}>
+                              <p className="text-sm font-bold" style={{ color: '#15803d' }}>
+                                🎁 {t(language, 'loyaltyRewardReadyShort', { count: rewardCount, product: campaign.rewardProductName })}
+                              </p>
+                            </div>
+                          ) : remainingQuantity > 0 ? (
+                            <p className="mt-2 text-xs" style={{ color: menuMutedColor }}>
+                              {t(language, 'loyaltyRemainingToReward', { count: remainingQuantity })}
+                            </p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <button
+                          onClick={openLoyaltyRegister}
+                          className="mt-3 w-full rounded-[16px] px-4 py-3 text-sm font-bold"
+                          style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                        >
+                          {t(language, 'loyaltyJoinCta')}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
           {visibleProducts.length === 0 ? (
             <div className="rounded-[28px] bg-white px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
               <UtensilsCrossed className="mx-auto mb-3 h-9 w-9 text-[var(--primary)]" />

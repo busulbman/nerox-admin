@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore'
 import { normalizeTable, normalizeWaiterCall, isOpenWaiterCallStatus } from '@/lib/firestore-models'
 import { db } from '@/lib/firebase'
-import { processRewardsOnOrderComplete } from '@/lib/loyalty-rewards'
+import { processLoyaltyForCall } from '@/lib/loyalty-engine'
 import type { TableStatus, WaiterCall } from '@/lib/types'
 
 type SyncableTableStatus = Extract<TableStatus, 'aktif' | 'çağrı var' | 'hesap istendi'>
@@ -131,11 +131,19 @@ export async function completeRestaurantCall(restaurantId: string, call: WaiterC
 
   await batch.commit()
 
+  // Loyalty engine: accumulate campaign progress and create rewards only after
+  // the order is completed. Failures must not break the completion flow.
   if (liveCall.tip === 'sipariş') {
     try {
-      await processRewardsOnOrderComplete(restaurantId, liveCall, actor)
+      await processLoyaltyForCall({
+        restaurantId,
+        callId: liveCall.id,
+        actorId: actor?.uid ?? liveCall.waiterId ?? '',
+        actorName: actor?.name ?? liveCall.waiterName ?? 'Sistem',
+        actorRole: actor?.role ?? 'admin',
+      })
     } catch (error) {
-      console.error('Reward processing error:', error)
+      console.error('Loyalty processing error:', error)
     }
   }
 }

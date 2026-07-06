@@ -6,18 +6,24 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
+  limit,
   onSnapshot,
+  query,
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore'
 import {
+  ChevronDown,
   CircleCheckBig,
   Gift,
   LoaderCircle,
   PencilLine,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
+  Users,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
@@ -46,6 +52,22 @@ const EMPTY_FORM: CampaignFormState = {
   rewardQuantity: '1',
   description: '',
   active: true,
+}
+
+type CampaignParticipant = {
+  customerId: string
+  name: string
+  phone: string
+  currentQuantity: number
+  requiredQuantity: number
+  totalEarnedRewards: number
+}
+
+type CampaignStats = {
+  participants: CampaignParticipant[]
+  inProgressCount: number
+  earnedCount: number
+  usedCount: number
 }
 
 function buildCampaignRule(campaign: Pick<LoyaltyCampaign, 'targetProductName' | 'requiredQuantity' | 'rewardProductName' | 'rewardQuantity'>) {
@@ -77,6 +99,10 @@ export default function LoyaltyPage() {
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const [campaignStats, setCampaignStats] = useState<Record<string, CampaignStats>>({})
+  const [statsLoading, setStatsLoading] = useState(false)
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0)
+  const [expandedStatsId, setExpandedStatsId] = useState<string | null>(null)
   const loyaltyEnabled = features.loyalty
 
   useEffect(() => {
@@ -115,6 +141,79 @@ export default function LoyaltyPage() {
       unsubscribeCampaigns()
     }
   }, [restaurantId])
+
+  // Campaign participation stats: customer progress docs + redeem transactions
+  useEffect(() => {
+    if (!restaurantId) return
+
+    let cancelled = false
+
+    async function loadStats() {
+      setStatsLoading(true)
+      try {
+        const [customersSnap, transactionsSnap] = await Promise.all([
+          getDocs(query(collection(db, 'restaurants', restaurantId, 'customers'), limit(300))),
+          getDocs(query(collection(db, 'restaurants', restaurantId, 'loyaltyTransactions'), limit(1000))),
+        ])
+        if (cancelled) return
+
+        const progressSnaps = await Promise.all(
+          customersSnap.docs.map((customerDoc) =>
+            getDocs(collection(db, 'restaurants', restaurantId, 'customers', customerDoc.id, 'loyaltyProgress')),
+          ),
+        )
+        if (cancelled) return
+
+        const stats: Record<string, CampaignStats> = {}
+
+        customersSnap.docs.forEach((customerDoc, index) => {
+          const customerData = customerDoc.data()
+          for (const progressDoc of progressSnaps[index].docs) {
+            const progress = progressDoc.data()
+            const campaignId = typeof progress.campaignId === 'string' ? progress.campaignId : progressDoc.id
+            if (!stats[campaignId]) {
+              stats[campaignId] = { participants: [], inProgressCount: 0, earnedCount: 0, usedCount: 0 }
+            }
+            const currentQuantity = typeof progress.currentQuantity === 'number' ? progress.currentQuantity : 0
+            const totalEarnedRewards = typeof progress.totalEarnedRewards === 'number' ? progress.totalEarnedRewards : 0
+            stats[campaignId].participants.push({
+              customerId: customerDoc.id,
+              name: typeof customerData.name === 'string' ? customerData.name : '—',
+              phone: typeof customerData.phone === 'string' ? customerData.phone : '—',
+              currentQuantity,
+              requiredQuantity: typeof progress.requiredQuantity === 'number' ? progress.requiredQuantity : 0,
+              totalEarnedRewards,
+            })
+            if (currentQuantity > 0) stats[campaignId].inProgressCount += 1
+            stats[campaignId].earnedCount += totalEarnedRewards
+          }
+        })
+
+        for (const transactionDoc of transactionsSnap.docs) {
+          const transaction = transactionDoc.data()
+          if (transaction.action !== 'redeem') continue
+          const campaignId = typeof transaction.campaignId === 'string' ? transaction.campaignId : ''
+          if (!campaignId) continue
+          if (!stats[campaignId]) {
+            stats[campaignId] = { participants: [], inProgressCount: 0, earnedCount: 0, usedCount: 0 }
+          }
+          stats[campaignId].usedCount += 1
+        }
+
+        setCampaignStats(stats)
+      } catch (error) {
+        console.error('Loyalty stats load error:', error)
+      } finally {
+        if (!cancelled) setStatsLoading(false)
+      }
+    }
+
+    void loadStats()
+
+    return () => {
+      cancelled = true
+    }
+  }, [restaurantId, statsRefreshKey])
 
   const productOptions = useMemo(
     () => products.map((product) => ({ id: product.id, name: product.name })),
@@ -468,9 +567,21 @@ export default function LoyaltyPage() {
                 Aktif kampanyalar QR menüde modal olarak görünür.
               </p>
             </div>
-            <span className="rounded-full bg-[var(--surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--text)]">
-              {campaigns.length} kampanya
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setStatsRefreshKey((key) => key + 1)}
+                disabled={statsLoading}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-soft)] bg-white px-3 py-1 text-xs font-semibold text-[var(--text)] disabled:opacity-60"
+                title="Katılım istatistiklerini yenile"
+              >
+                <RefreshCw size={12} className={statsLoading ? 'animate-spin' : ''} />
+                İstatistikler
+              </button>
+              <span className="rounded-full bg-[var(--surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--text)]">
+                {campaigns.length} kampanya
+              </span>
+            </div>
           </div>
 
           {loading ? (
@@ -489,6 +600,9 @@ export default function LoyaltyPage() {
             <div className="space-y-4">
               {campaigns.map((campaign) => {
                 const deleting = deletingId === campaign.id
+                const stats = campaignStats[campaign.id] ?? null
+                const participantCount = stats?.participants.length ?? 0
+                const statsExpanded = expandedStatsId === campaign.id
                 return (
                   <article
                     key={campaign.id}
@@ -546,6 +660,67 @@ export default function LoyaltyPage() {
                           Sil
                         </button>
                       </div>
+                    </div>
+
+                    {/* Katılım istatistikleri */}
+                    <div className="mt-4 border-t border-[var(--border-soft)] pt-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-muted)] px-2.5 py-1 font-semibold text-[var(--text)]">
+                          <Users size={12} />
+                          {statsLoading && !stats ? '...' : `${participantCount} katılımcı`}
+                        </span>
+                        <span className="rounded-full bg-[var(--surface-muted)] px-2.5 py-1 font-semibold text-[var(--text)]">
+                          {stats?.inProgressCount ?? 0} ilerlemede
+                        </span>
+                        <span className="rounded-full px-2.5 py-1 font-semibold" style={{ background: 'rgba(34,197,94,0.10)', color: '#166534' }}>
+                          🎁 {stats?.earnedCount ?? 0} kazanıldı
+                        </span>
+                        <span className="rounded-full px-2.5 py-1 font-semibold" style={{ background: 'rgba(59,130,246,0.10)', color: '#1d4ed8' }}>
+                          ✓ {stats?.usedCount ?? 0} kullanıldı
+                        </span>
+                        {participantCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedStatsId(statsExpanded ? null : campaign.id)}
+                            className="ml-auto inline-flex items-center gap-1 rounded-full border border-[var(--border-soft)] bg-white px-2.5 py-1 font-semibold text-[var(--text)]"
+                          >
+                            Müşteriler
+                            <ChevronDown size={12} className={`transition-transform ${statsExpanded ? 'rotate-180' : ''}`} />
+                          </button>
+                        )}
+                      </div>
+
+                      {statsExpanded && stats && stats.participants.length > 0 && (
+                        <div className="mt-3 overflow-x-auto rounded-xl border border-[var(--border-soft)]">
+                          <table className="w-full min-w-[420px] text-left text-xs">
+                            <thead>
+                              <tr className="bg-[var(--surface-muted)] text-[var(--muted)]">
+                                <th className="px-3 py-2 font-semibold">Müşteri</th>
+                                <th className="px-3 py-2 font-semibold">Telefon</th>
+                                <th className="px-3 py-2 font-semibold">İlerleme</th>
+                                <th className="px-3 py-2 font-semibold">Kazanılan</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {stats.participants
+                                .slice()
+                                .sort((a, b) => b.totalEarnedRewards - a.totalEarnedRewards || b.currentQuantity - a.currentQuantity)
+                                .map((participant) => (
+                                  <tr key={participant.customerId} className="border-t border-[var(--border-soft)]">
+                                    <td className="px-3 py-2 font-medium text-[var(--text)]">{participant.name}</td>
+                                    <td className="px-3 py-2 text-[var(--muted)]">{participant.phone}</td>
+                                    <td className="px-3 py-2 font-semibold text-[var(--text)]">
+                                      {participant.currentQuantity}/{participant.requiredQuantity || campaign.requiredQuantity}
+                                    </td>
+                                    <td className="px-3 py-2 font-semibold" style={{ color: '#166534' }}>
+                                      {participant.totalEarnedRewards}
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   </article>
                 )

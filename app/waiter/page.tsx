@@ -759,7 +759,11 @@ export default function WaiterPage() {
   const isRtl = WAITER_LANGUAGES.find((l) => l.code === waiterLang)?.dir === 'rtl'
 
   return (
-    <div className="theme-page min-h-screen overflow-x-hidden pb-20" style={themeVars} dir={isRtl ? 'rtl' : 'ltr'}>
+    <div
+      className="theme-page min-h-screen overflow-x-clip"
+      style={{ ...themeVars, paddingBottom: 'calc(10rem + env(safe-area-inset-bottom))' }}
+      dir={isRtl ? 'rtl' : 'ltr'}
+    >
 
       {/* ── Header ── */}
       <header
@@ -966,13 +970,13 @@ export default function WaiterPage() {
               </div>
             )}
             {!tablesLoaded ? (
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[1,2,3,4,5,6].map((i) => <div key={i} className="bg-white rounded-2xl h-20 animate-pulse border border-gray-100" />)}
               </div>
             ) : tables.length === 0 ? (
               <EmptyState icon={<Armchair size={32} />} text={tw(waiterLang, 'emptyTables')} />
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {tables.map((table) => {
                   const sc = TABLE_STATUS_COLOR[table.status] ?? TABLE_STATUS_COLOR.boş
                   const isBoş = table.status === 'boş'
@@ -1171,7 +1175,7 @@ export default function WaiterPage() {
 
       {/* ── Bottom nav ── */}
       <nav
-        className="fixed bottom-0 left-0 right-0 flex border-t"
+        className="fixed bottom-0 left-0 right-0 z-40 flex border-t"
         style={{ background: '#fff', borderColor: BORDER_SOFT, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {([
@@ -1212,7 +1216,7 @@ export default function WaiterPage() {
           onClick={openOrderModal}
           className="fixed left-4 right-4 z-30 flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold shadow-lg transition-all active:scale-95 sm:left-auto sm:right-4 sm:w-auto"
           style={{
-            bottom: 'calc(70px + env(safe-area-inset-bottom))',
+            bottom: 'calc(80px + env(safe-area-inset-bottom))',
             right: '16px',
             background: BROWN,
             color: PRIMARY_FOREGROUND,

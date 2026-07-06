@@ -8,18 +8,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import type { CartItem, LoyaltyCampaign, LoyaltyReward, WaiterCall } from '@/lib/types'
-
-export type RewardEarnResult = {
-  campaignId: string
-  campaignName: string
-  rewardProductId: string
-  rewardProductName: string
-  rewardQuantity: number
-  targetProductId: string
-  targetProductName: string
-  targetQuantityUsed: number
-}
+import type { CartItem, LoyaltyCampaign, LoyaltyReward } from '@/lib/types'
 
 export type PendingRewardInfo = {
   campaignId: string
@@ -67,103 +56,6 @@ export function calculateCampaignProgress(
   const targetItems = items.filter((item) => item.productId === campaign.targetProductId)
   const totalQuantity = targetItems.reduce((sum, item) => sum + item.quantity, 0)
   return { current: totalQuantity, required: campaign.requiredQuantity }
-}
-
-export async function processRewardsOnOrderComplete(
-  restaurantId: string,
-  call: WaiterCall,
-  actor?: { uid: string; name: string; role: 'admin' | 'waiter' }
-): Promise<RewardEarnResult[]> {
-  if (call.tip !== 'sipariş') return []
-
-  const items = call.items ?? []
-  if (items.length === 0) return []
-
-  const customerId = (call as { customerId?: string }).customerId
-  const customerName = (call as { customerName?: string }).customerName
-  if (!customerId || !customerName) return []
-
-  const campaignsSnap = await getDocs(
-    query(
-      collection(db, 'restaurants', restaurantId, 'loyaltyCampaigns'),
-      where('active', '==', true)
-    )
-  )
-
-  if (campaignsSnap.empty) return []
-
-  const campaigns = campaignsSnap.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as LoyaltyCampaign[]
-
-  const results: RewardEarnResult[] = []
-
-  for (const campaign of campaigns) {
-    const targetItems = items.filter((item) => item.productId === campaign.targetProductId)
-    const totalQuantity = targetItems.reduce((sum, item) => sum + item.quantity, 0)
-
-    if (totalQuantity < campaign.requiredQuantity) continue
-
-    const existingRewardsSnap = await getDocs(
-      query(
-        collection(db, 'restaurants', restaurantId, 'customers', customerId, 'rewards'),
-        where('earnedFromCallId', '==', call.id),
-        where('campaignId', '==', campaign.id)
-      )
-    )
-
-    if (!existingRewardsSnap.empty) continue
-
-    const batch = writeBatch(db)
-
-    const rewardRef = doc(collection(db, 'restaurants', restaurantId, 'customers', customerId, 'rewards'))
-    batch.set(rewardRef, {
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      rewardProductId: campaign.rewardProductId,
-      rewardProductName: campaign.rewardProductName,
-      rewardQuantity: campaign.rewardQuantity,
-      status: 'available',
-      earnedFromCallId: call.id,
-      earnedAt: serverTimestamp(),
-    })
-
-    const transactionRef = doc(collection(db, 'restaurants', restaurantId, 'loyaltyTransactions'))
-    batch.set(transactionRef, {
-      customerId,
-      customerName,
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      callId: call.id,
-      action: 'earn',
-      targetProductId: campaign.targetProductId,
-      targetProductName: campaign.targetProductName,
-      targetQuantity: totalQuantity,
-      rewardProductId: campaign.rewardProductId,
-      rewardProductName: campaign.rewardProductName,
-      rewardQuantity: campaign.rewardQuantity,
-      createdAt: serverTimestamp(),
-      createdByRole: actor?.role ?? 'system',
-      createdById: actor?.uid ?? null,
-      createdByName: actor?.name ?? 'Sistem',
-    })
-
-    await batch.commit()
-
-    results.push({
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      rewardProductId: campaign.rewardProductId,
-      rewardProductName: campaign.rewardProductName,
-      rewardQuantity: campaign.rewardQuantity,
-      targetProductId: campaign.targetProductId,
-      targetProductName: campaign.targetProductName,
-      targetQuantityUsed: totalQuantity,
-    })
-  }
-
-  return results
 }
 
 export async function getCustomerAvailableRewards(

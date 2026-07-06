@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { Upload, Trash2, Link as LinkIcon, Wifi, HelpCircle, Rocket, CreditCard, Clock, MessageCircle, CheckCircle } from 'lucide-react'
+import { Upload, Trash2, Link as LinkIcon, Wifi, HelpCircle, Rocket, CreditCard, Clock, MessageCircle, CheckCircle, AlertTriangle, Globe, ShoppingBag, UtensilsCrossed } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { useOnboarding } from '@/components/dashboard/OnboardingProvider'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
@@ -17,7 +17,14 @@ import {
   isValidRestaurantThemeColor,
 } from '@/lib/restaurant-settings'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+import { buildThemePalette } from '@/lib/ui-theme'
 import type { RestaurantGeneralSettings } from '@/lib/types'
+
+const PREVIEW_CATEGORIES = ['Kahveler', 'Tatlılar', 'Ana Yemek']
+const PREVIEW_PRODUCTS = [
+  { emoji: '☕', name: 'Latte', desc: 'Taze süt köpüğü ve espresso', price: 85 },
+  { emoji: '🍰', name: 'Cheesecake', desc: 'Ev yapımı frambuaz soslu', price: 120 },
+]
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
 
@@ -147,6 +154,24 @@ export default function SettingsPage() {
     }
   }
 
+  async function persistLogoUrl(nextLogoUrl: string): Promise<boolean> {
+    if (!restaurantId) return false
+    try {
+      await Promise.all([
+        setDoc(
+          doc(db, 'restaurants', restaurantId, 'settings', 'general'),
+          { logoUrl: nextLogoUrl, updatedAt: serverTimestamp() },
+          { merge: true }
+        ),
+        setDoc(doc(db, 'restaurants', restaurantId), { logoUrl: nextLogoUrl }, { merge: true }),
+      ])
+      return true
+    } catch (error) {
+      console.error('Logo save error:', error)
+      return false
+    }
+  }
+
   async function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file) return
@@ -168,7 +193,12 @@ export default function SettingsPage() {
 
     if (url) {
       setForm((current) => ({ ...current, logoUrl: url }))
-      setMessage({ tone: 'success', text: 'Logo başarıyla yüklendi.' })
+      const persisted = await persistLogoUrl(url)
+      setMessage(
+        persisted
+          ? { tone: 'success', text: 'Logo yüklendi ve kaydedildi.' }
+          : { tone: 'error', text: 'Logo yüklendi ancak kaydedilemedi. Lütfen Kaydet butonuna basın.' }
+      )
     } else {
       setMessage({ tone: 'error', text: 'Logo yüklenemedi. Lütfen tekrar deneyin.' })
     }
@@ -177,6 +207,17 @@ export default function SettingsPage() {
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
+  }
+
+  async function handleLogoDelete() {
+    setForm((current) => ({ ...current, logoUrl: '' }))
+    setMessage(null)
+    const persisted = await persistLogoUrl('')
+    setMessage(
+      persisted
+        ? { tone: 'success', text: 'Logo silindi.' }
+        : { tone: 'error', text: 'Logo silinemedi. Lütfen tekrar deneyin.' }
+    )
   }
 
   async function handleSave() {
@@ -236,6 +277,8 @@ export default function SettingsPage() {
   const previewTextColor = getContrastColor(previewColor)
   const previewBusinessName = businessNameValue
   const previewLogoUrl = form.logoUrl.trim() || DEFAULT_BRAND_LOGO_PATH
+  const previewPalette = buildThemePalette(previewColor)
+  const previewCartTotal = PREVIEW_PRODUCTS.reduce((sum, product) => sum + product.price, 0)
   const menuLink = `/menu/${generatedSlug}/1`
 
   const inputCls = 'theme-input rounded-lg text-sm'
@@ -302,23 +345,32 @@ export default function SettingsPage() {
               <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
                 Logo
               </label>
-              <div className="flex items-center gap-3 mb-2">
-                <input
-                  type="file"
-                  accept="image/*"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
+              <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              {!IMGBB_API_KEY && (
+                <div className="mb-2 flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs" style={{ background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a' }}>
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  <span>
+                    Logo yükleme kapalı: <code>NEXT_PUBLIC_IMGBB_API_KEY</code> ortam değişkeni tanımlı değil.
+                    ImgBB API anahtarınızı ekleyip uygulamayı yeniden başlatın.
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+                  disabled={uploading || !IMGBB_API_KEY}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg border hover:bg-gray-50 disabled:opacity-50"
                   style={{ color: 'var(--text)', borderColor: 'var(--border-soft)' }}
                 >
                   <Upload size={16} />
-                  {uploading ? 'Yükleniyor...' : 'Dosya Seç'}
+                  {uploading ? 'Yükleniyor...' : form.logoUrl ? 'Logoyu Değiştir' : 'Logo Yükle'}
                 </button>
                 {form.logoUrl && (
                   <div className="flex items-center gap-2">
@@ -326,24 +378,24 @@ export default function SettingsPage() {
                     <img
                       src={form.logoUrl}
                       alt="Logo önizleme"
-                      className="h-10 w-10 rounded-lg object-cover border border-gray-200"
+                      className="h-12 w-12 rounded-xl object-cover border"
+                      style={{ borderColor: 'var(--border-soft)' }}
                     />
                     <button
                       type="button"
-                      onClick={() => setForm((current) => ({ ...current, logoUrl: '' }))}
-                      className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 rounded"
+                      onClick={() => void handleLogoDelete()}
+                      disabled={uploading}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={14} />
+                      Logoyu Sil
                     </button>
                   </div>
                 )}
               </div>
-              <input
-                className={inputCls}
-                value={form.logoUrl}
-                onChange={(event) => setForm((current) => ({ ...current, logoUrl: event.target.value }))}
-                placeholder="veya manuel URL girin: https://..."
-              />
+              <p className="text-xs text-gray-400 mt-1.5">
+                PNG veya JPG önerilir. Yüklenen logo anında kaydedilir ve QR menüde görünür.
+              </p>
             </div>
 
             <div>
@@ -443,51 +495,128 @@ export default function SettingsPage() {
         </div>
 
         <div className="theme-card rounded-2xl p-6">
-          <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">Canlı Önizleme</p>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Canlı Önizleme</p>
+            <span className="rounded-full px-2.5 py-1 text-[10px] font-semibold" style={{ background: previewPalette.surfaceMuted, color: previewPalette.text }}>
+              QR Menü Görünümü
+            </span>
+          </div>
 
-          <div className="overflow-hidden rounded-[20px] border border-[var(--border-soft)]">
-            <div className="p-5" style={{ background: previewColor }}>
-              <div className="flex items-center gap-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={previewLogoUrl}
-                  alt={previewBusinessName}
-                  className="h-12 w-12 rounded-xl object-cover"
-                  style={{ border: `1px solid ${previewTextColor}20` }}
-                />
-                <div>
-                  <p className="font-bold text-lg" style={{ color: previewTextColor }}>
-                    {previewBusinessName} Yönetim Paneli
-                  </p>
-                  <p className="text-sm" style={{ color: `${previewTextColor}80` }}>Yönetim Paneli</p>
+          {/* Phone mockup */}
+          <div className="mx-auto w-full max-w-[320px]">
+            <div className="overflow-hidden rounded-[2.4rem] border-[10px] border-[#1c1c1e] bg-[#1c1c1e] shadow-[0_24px_60px_rgba(15,23,42,0.28)]">
+              <div className="relative overflow-hidden rounded-[1.75rem]" style={{ background: previewPalette.surfaceMuted }}>
+                <div className="absolute left-1/2 top-1.5 z-10 h-4 w-20 -translate-x-1/2 rounded-full bg-[#1c1c1e]" />
+
+                <div className="px-3 pb-4 pt-8">
+                  {/* Menü header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={previewLogoUrl}
+                        alt={previewBusinessName}
+                        className="h-9 w-9 shrink-0 rounded-xl border border-black/5 bg-white object-cover shadow-sm"
+                      />
+                      <p className="truncate text-[13px] font-semibold" style={{ color: previewPalette.text }}>
+                        {previewBusinessName}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span className="flex h-7 items-center gap-1 rounded-full bg-white px-2 shadow-sm" style={{ color: previewPalette.text }}>
+                        <Globe size={11} />
+                        <span className="text-[9px] font-semibold">TR</span>
+                      </span>
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-sm" style={{ color: previewPalette.text }}>
+                        <ShoppingBag size={12} />
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Karşılama kartı */}
+                  <div className="mt-3 rounded-2xl bg-white px-3 py-2.5 shadow-sm">
+                    <p className="text-[10px]" style={{ color: previewPalette.muted }}>Masa 1 • Hoş geldiniz</p>
+                    <p className="mt-0.5 text-[11px] font-semibold" style={{ color: previewPalette.text }}>
+                      Günün favorilerini keşfedin
+                    </p>
+                  </div>
+
+                  {/* Wi-Fi kartı */}
+                  {form.wifiEnabled && (
+                    <div className="mt-2 flex items-center gap-2 rounded-2xl border bg-white px-3 py-2.5 shadow-sm" style={{ borderColor: previewPalette.borderSoft }}>
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: previewPalette.surfaceMuted }}>
+                        <Wifi size={13} style={{ color: previewColor }} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[9px]" style={{ color: previewPalette.muted }}>Wi-Fi Bilgileri</p>
+                        <p className="truncate text-[11px] font-semibold" style={{ color: previewPalette.text }}>
+                          {form.wifiName?.trim() || 'Isletme_WiFi'}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full px-2 py-1 text-[9px] font-medium" style={{ background: previewPalette.surfaceMuted, color: previewPalette.text }}>
+                        Kopyala
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Kategori butonları */}
+                  <div className="mt-3 flex gap-1.5 overflow-hidden">
+                    {PREVIEW_CATEGORIES.map((category, index) => (
+                      <span
+                        key={category}
+                        className="shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-[10px] font-semibold"
+                        style={index === 0
+                          ? { background: previewColor, color: previewTextColor, borderColor: previewColor }
+                          : { background: '#fff', color: previewPalette.muted, borderColor: previewPalette.borderSoft }}
+                      >
+                        {category}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Ürün kartları */}
+                  <div className="mt-3 space-y-2">
+                    {PREVIEW_PRODUCTS.map((product) => (
+                      <div key={product.name} className="flex items-center gap-2.5 rounded-2xl border bg-white p-2 shadow-sm" style={{ borderColor: previewPalette.borderSoft }}>
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: 'linear-gradient(160deg, #f7f2e8 0%, #ece3d3 100%)' }}>
+                          {product.emoji}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[11px] font-bold" style={{ color: previewPalette.text }}>{product.name}</p>
+                          <p className="truncate text-[9px]" style={{ color: previewPalette.muted }}>{product.desc}</p>
+                          <p className="mt-0.5 text-[11px] font-bold" style={{ color: previewColor }}>₺{product.price}</p>
+                        </div>
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow" style={{ background: previewColor, color: previewTextColor }}>
+                          +
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Alt aksiyon butonları */}
+                  <div className="mt-3 flex gap-1.5">
+                    <span
+                      className="flex flex-1 items-center justify-between rounded-xl px-3 py-2.5 text-[10px] font-bold"
+                      style={{ background: previewColor, color: previewTextColor, boxShadow: `0 8px 18px ${previewColor}40` }}
+                    >
+                      <span className="flex items-center gap-1">
+                        <ShoppingBag size={11} />
+                        Sipariş Ver ({PREVIEW_PRODUCTS.length})
+                      </span>
+                      <span>₺{previewCartTotal}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center justify-center rounded-xl border bg-white px-2.5" style={{ borderColor: previewPalette.borderSoft, color: previewPalette.text }} title="Garson Çağır">
+                      <UtensilsCrossed size={13} />
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div className="p-5" style={{ background: 'var(--surface-muted)' }}>
-              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3">QR Menü Linki</p>
-              <div className="flex items-center gap-2 rounded-lg border border-[var(--border-soft)] bg-white px-3 py-2">
-                <LinkIcon size={14} className="text-gray-400" />
-                <code className="text-xs text-gray-600 flex-1 truncate">{menuLink}</code>
-              </div>
-
-              <p className="text-xs uppercase tracking-[0.18em] text-gray-400 mb-3 mt-5">Butonlar</p>
-              <div className="flex gap-3 flex-wrap">
-                <button
-                  className="rounded-xl px-4 py-2.5 text-sm font-semibold"
-                  style={{ background: previewColor, color: previewTextColor }}
-                >
-                  Ana Buton
-                </button>
-                <button
-                  className="rounded-xl px-4 py-2.5 text-sm font-semibold border-2"
-                  style={{ borderColor: previewColor, color: previewColor, background: 'white' }}
-                >
-                  Outline Buton
-                </button>
-              </div>
-            </div>
           </div>
+
+          <p className="mt-4 text-center text-xs text-gray-400">
+            Renk, logo ve Wi-Fi değişiklikleri önizlemeye anında yansır.
+          </p>
         </div>
 
         {/* Subscription Info Card */}

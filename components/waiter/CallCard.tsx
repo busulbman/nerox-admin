@@ -23,9 +23,30 @@ interface Props {
   actor?: { uid: string; name: string; role: 'admin' | 'waiter' }
 }
 
+function getOrderKitchenBadge(call: WaiterCall) {
+  if (call.tip !== 'sipariş') return null
+  if (call.durum === 'bekliyor') {
+    return { label: 'Garson Onayı Bekliyor', className: 'bg-red-100 text-red-600' }
+  }
+  if (call.kitchenStatus === 'pending') {
+    return { label: 'Mutfağa Gönderildi', className: 'bg-amber-100 text-amber-700' }
+  }
+  if (call.kitchenStatus === 'preparing') {
+    return { label: 'Hazırlanıyor', className: 'bg-orange-500 text-white' }
+  }
+  if (call.kitchenStatus === 'ready') {
+    return { label: 'Hazır', className: 'bg-green-500 text-white' }
+  }
+  if (call.kitchenStatus === 'delivered') {
+    return { label: 'Teslim Edildi', className: 'bg-blue-500 text-white' }
+  }
+  return null
+}
+
 export default function CallCard({ call, variant, onAccept, onComplete, busy = false, restaurantId, actor }: Props) {
   const meta = getCallTipUi(call.tip)
   const AccentIcon = meta.Icon
+  const orderKitchenBadge = getOrderKitchenBadge(call)
 
   return (
     <div
@@ -59,16 +80,10 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
               Aktif
             </span>
           )}
-          {call.tip === 'sipariş' && call.kitchenStatus === 'ready' && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-500 px-2 py-0.5 text-xs font-medium text-white">
+          {orderKitchenBadge && (
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${orderKitchenBadge.className}`}>
               <ChefHat className="h-3 w-3" />
-              Hazır
-            </span>
-          )}
-          {call.tip === 'sipariş' && call.kitchenStatus === 'preparing' && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-0.5 text-xs font-medium text-white">
-              <ChefHat className="h-3 w-3" />
-              Hazırlanıyor
+              {orderKitchenBadge.label}
             </span>
           )}
         </div>
@@ -103,6 +118,11 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
                 {elapsed(call.acceptedAt)} önce kabul edildi
               </p>
             ) : null}
+            {variant === 'active' && call.tip === 'sipariş' && call.kitchenStatus === 'pending' ? (
+              <p className="mt-1 text-xs font-medium text-amber-700">
+                Mutfak siparişi bekleyenler listesine aldı.
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -133,7 +153,7 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
             className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-50"
             style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
-            {busy ? 'Kabul Ediliyor...' : 'Kabul Et →'}
+            {busy ? 'İşleniyor...' : call.tip === 'sipariş' ? 'Siparişi Onayla' : 'Kabul Et'}
           </button>
         ) : variant === 'active' && onComplete ? (
           <button

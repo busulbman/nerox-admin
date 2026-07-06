@@ -388,9 +388,7 @@ export default function WaiterPage() {
       logFirestoreWrite('waiter/accept call', { restaurantId, callId: call.id })
 
       const batch = writeBatch(db)
-
-      // Update call status
-      batch.update(doc(db, 'restaurants', restaurantId, 'calls', call.id), {
+      const callUpdates: Record<string, unknown> = {
         durum: 'kabul edildi',
         status: 'accepted',
         waiterId: profile.uid,
@@ -398,7 +396,16 @@ export default function WaiterPage() {
         waiterPhotoUrl: profile.photoUrl ?? null,
         waiterAverageRating: waiterAverageRatingSnapshot,
         acceptedAt: serverTimestamp(),
-      })
+        updatedAt: serverTimestamp(),
+      }
+
+      if (call.tip === 'sipariş') {
+        callUpdates.kitchenStatus = 'pending'
+        callUpdates.sentToKitchenAt = serverTimestamp()
+      }
+
+      // Update call status
+      batch.update(doc(db, 'restaurants', restaurantId, 'calls', call.id), callUpdates)
 
       // Update table status to aktif (garson kabul etti, çağrı artık işleniyor)
       if (call.tableId) {
@@ -644,9 +651,11 @@ export default function WaiterPage() {
         items,
         groupedByCustomer,
         totalPrice: orderCartTotal,
+        kitchenStatus: 'pending',
         note: '',
         createdAt: serverTimestamp(),
         acceptedAt: serverTimestamp(),
+        sentToKitchenAt: serverTimestamp(),
       }
 
       logFirestoreWrite('waiter/create manual order', { tableId: selectedOrderTable.id, totalPrice: orderCartTotal })

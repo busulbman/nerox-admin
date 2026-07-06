@@ -28,6 +28,10 @@ function isCallLifecycleStatus(value: unknown): value is NonNullable<WaiterCall[
   return value === 'open' || value === 'accepted' || value === 'completed'
 }
 
+function isKitchenStatus(value: unknown): value is NonNullable<WaiterCall['kitchenStatus']> {
+  return value === 'pending' || value === 'preparing' || value === 'ready' || value === 'delivered'
+}
+
 export function isOpenWaiterCallStatus(value: unknown): value is Extract<WaiterCall['durum'], 'bekliyor' | 'kabul edildi'> {
   return value === 'bekliyor' || value === 'kabul edildi'
 }
@@ -245,6 +249,13 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
           ? calculateCartTotal(items)
           : undefined,
     groupedByCustomer,
+    kitchenStatus: isKitchenStatus(data.kitchenStatus) ? data.kitchenStatus : undefined,
+    sentToKitchenAt: toMillis(data.sentToKitchenAt) ?? undefined,
+    preparingAt: toMillis(data.preparingAt) ?? undefined,
+    readyAt: toMillis(data.readyAt) ?? undefined,
+    deliveredAt: toMillis(data.deliveredAt) ?? undefined,
+    kitchenUpdatedById: typeof data.kitchenUpdatedById === 'string' ? data.kitchenUpdatedById : undefined,
+    kitchenUpdatedByName: typeof data.kitchenUpdatedByName === 'string' ? data.kitchenUpdatedByName : undefined,
   }
 }
 

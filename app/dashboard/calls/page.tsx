@@ -22,6 +22,30 @@ const PRIMARY_FOREGROUND = 'var(--primary-foreground)'
 
 type CallsTab = 'open' | 'completed'
 
+function getOpenCallStatusBadge(call: WaiterCall) {
+  if (call.tip === 'sipariş') {
+    if (call.durum === 'bekliyor') {
+      return { label: 'Garson Onayı Bekliyor', style: { background: '#fee2e2', color: '#dc2626' } }
+    }
+    if (call.kitchenStatus === 'pending') {
+      return { label: 'Mutfağa Gönderildi', style: { background: '#fef3c7', color: '#a16207' } }
+    }
+    if (call.kitchenStatus === 'preparing') {
+      return { label: 'Hazırlanıyor', style: { background: '#ffedd5', color: '#c2410c' } }
+    }
+    if (call.kitchenStatus === 'ready') {
+      return { label: 'Hazır', style: { background: '#dcfce7', color: '#15803d' } }
+    }
+    if (call.kitchenStatus === 'delivered') {
+      return { label: 'Teslim Edildi', style: { background: '#dbeafe', color: '#1d4ed8' } }
+    }
+  }
+
+  return call.durum === 'kabul edildi'
+    ? { label: 'Kabul Edildi', style: { background: '#fef3c7', color: '#a16207' } }
+    : { label: 'Bekliyor', style: { background: '#fee2e2', color: '#dc2626' } }
+}
+
 function elapsed(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000)
   if (diff < 60) return `${diff} sn`
@@ -290,6 +314,7 @@ export default function CallsPage() {
           {sortedOpenCalls.map((call) => {
             const tipUi = getCallTipUi(call.tip)
             const TipIcon = tipUi.Icon
+            const statusBadge = getOpenCallStatusBadge(call)
             return (
               <div
                 key={call.id}
@@ -307,13 +332,9 @@ export default function CallsPage() {
                     <p className="font-semibold mt-1" style={{ color: TEXT }}>{tipUi.label}</p>
                     <span
                       className="text-xs px-2 py-0.5 rounded-full mt-1 inline-block"
-                      style={
-                        call.durum === 'kabul edildi'
-                          ? { background: '#fef3c7', color: '#a16207' }
-                          : { background: '#fee2e2', color: '#dc2626' }
-                      }
+                      style={statusBadge.style}
                     >
-                      {call.durum === 'kabul edildi' ? 'Kabul Edildi' : 'Bekliyor'}
+                      {statusBadge.label}
                     </span>
                   </div>
                   <div className="text-right">

@@ -303,6 +303,7 @@ export interface WaiterCall {
   totalPrice?: number
   groupedByCustomer?: Record<string, CustomerGroup>
   kitchenStatus?: KitchenStatus
+  sentToKitchenAt?: number
   preparingAt?: number
   readyAt?: number
   deliveredAt?: number

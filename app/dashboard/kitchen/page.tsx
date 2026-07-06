@@ -17,6 +17,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { FeatureLockedPage } from '@/components/FeatureGate'
 import { useFeatures } from '@/lib/use-features'
+import { normalizeWaiterCall } from '@/lib/firestore-models'
 import { db } from '@/lib/firebase'
 import type { WaiterCall, KitchenStatus } from '@/lib/types'
 import { KITCHEN_STATUS_LABELS } from '@/lib/types'
@@ -103,8 +104,17 @@ function formatElapsed(createdAt: number) {
   return `${hours} saat ${minutes % 60} dk`
 }
 
-function getKitchenStatus(call: WaiterCall): KitchenStatus {
-  return call.kitchenStatus || 'pending'
+function getKitchenStatus(call: WaiterCall): KitchenStatus | null {
+  return call.kitchenStatus === 'pending' ||
+    call.kitchenStatus === 'preparing' ||
+    call.kitchenStatus === 'ready' ||
+    call.kitchenStatus === 'delivered'
+    ? call.kitchenStatus
+    : null
+}
+
+function isKitchenVisibleOrder(call: WaiterCall) {
+  return call.tip === 'sipariş' && getKitchenStatus(call) !== null
 }
 
 function StatCard({ label, value, icon: Icon, color }: {
@@ -159,45 +169,67 @@ export default function KitchenPage() {
     if (!restaurantId) return
 
     const callsRef = collection(db, 'restaurants', restaurantId, 'calls')
-    const q = query(callsRef, where('tip', '==', 'sipariş'))
+    const kitchenStatuses: KitchenStatus[] = ['pending', 'preparing', 'ready', 'delivered']
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const nextOrders: WaiterCall[] = []
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data()
-        nextOrders.push({
-          id: docSnap.id,
-          ...data,
-          createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
-          acceptedAt: data.acceptedAt?.toMillis?.() || data.acceptedAt,
-          completedAt: data.completedAt?.toMillis?.() || data.completedAt,
-          resolvedAt: data.resolvedAt?.toMillis?.() || data.resolvedAt,
-          preparingAt: data.preparingAt?.toMillis?.() || data.preparingAt,
-          readyAt: data.readyAt?.toMillis?.() || data.readyAt,
-          deliveredAt: data.deliveredAt?.toMillis?.() || data.deliveredAt,
-        } as WaiterCall)
-      })
-
-      nextOrders.sort((a, b) => a.createdAt - b.createdAt)
+    const processSnapshot = (snapshot: import('firebase/firestore').QuerySnapshot) => {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const todayStart = today.getTime()
+      const nextOrders = snapshot.docs
+        .map((docSnap) => normalizeWaiterCall(docSnap.id, docSnap.data() as Record<string, unknown>))
+        .filter((call) => isKitchenVisibleOrder(call))
+        .sort((a, b) => a.createdAt - b.createdAt)
 
       if (soundEnabled) {
         const newPending = nextOrders.filter(
-          (o) => getKitchenStatus(o) === 'pending' && !notifiedRef.current.has(o.id)
+          (order) =>
+            order.createdAt >= todayStart &&
+            getKitchenStatus(order) === 'pending' &&
+            !notifiedRef.current.has(order.id)
         )
         if (newPending.length > 0) {
           playNotificationSound()
-          newPending.forEach((o) => {
-            notifiedRef.current.add(o.id)
-            addNotifiedOrder(o.id)
+          newPending.forEach((order) => {
+            notifiedRef.current.add(order.id)
+            addNotifiedOrder(order.id)
           })
         }
       }
 
       setOrders(nextOrders)
       setLoading(false)
-    })
+    }
 
-    return () => unsubscribe()
+    let activeUnsubscribe: (() => void) | null = null
+
+    const subscribe = (preferKitchenQuery: boolean) => {
+      const activeQuery = preferKitchenQuery
+        ? query(callsRef, where('tip', '==', 'sipariş'), where('kitchenStatus', 'in', kitchenStatuses))
+        : query(callsRef, where('tip', '==', 'sipariş'))
+
+      activeUnsubscribe = onSnapshot(
+        activeQuery,
+        processSnapshot,
+        (error) => {
+          if (preferKitchenQuery && error.code === 'failed-precondition') {
+            console.warn('Kitchen query index eksik. Tip bazlı sorguya geri düşüldü.', error)
+            if (activeUnsubscribe) {
+              activeUnsubscribe()
+              activeUnsubscribe = null
+            }
+            subscribe(false)
+            return
+          }
+          console.error('Kitchen orders listener error:', error)
+          setLoading(false)
+        }
+      )
+    }
+
+    subscribe(true)
+    return () => {
+      if (activeUnsubscribe) activeUnsubscribe()
+    }
   }, [restaurantId, soundEnabled])
 
   const toggleSound = useCallback(() => {
@@ -237,24 +269,26 @@ export default function KitchenPage() {
     }
   }, [restaurantId, user, profile])
 
-  const { pending, preparing, ready, delivered, todayTotal } = useMemo(() => {
-    const today = new Date()
+  const todayOrders = useMemo(() => {
+    const today = new Date(currentTime)
     today.setHours(0, 0, 0, 0)
-    const todayStart = today.getTime()
+    return orders.filter((order) => order.createdAt >= today.getTime())
+  }, [currentTime, orders])
 
+  const { pending, preparing, ready, delivered, todayTotal } = useMemo(() => {
     return {
-      pending: orders.filter((o) => getKitchenStatus(o) === 'pending'),
-      preparing: orders.filter((o) => getKitchenStatus(o) === 'preparing'),
-      ready: orders.filter((o) => getKitchenStatus(o) === 'ready'),
-      delivered: orders.filter((o) => getKitchenStatus(o) === 'delivered'),
-      todayTotal: orders.filter((o) => o.createdAt >= todayStart).length,
+      pending: todayOrders.filter((o) => getKitchenStatus(o) === 'pending'),
+      preparing: todayOrders.filter((o) => getKitchenStatus(o) === 'preparing'),
+      ready: todayOrders.filter((o) => getKitchenStatus(o) === 'ready'),
+      delivered: todayOrders.filter((o) => getKitchenStatus(o) === 'delivered'),
+      todayTotal: todayOrders.length,
     }
-  }, [orders])
+  }, [todayOrders])
 
   const filteredOrders = useMemo(() => {
-    if (mobileFilter === 'all') return orders
-    return orders.filter((o) => getKitchenStatus(o) === mobileFilter)
-  }, [orders, mobileFilter])
+    if (mobileFilter === 'all') return todayOrders
+    return todayOrders.filter((o) => getKitchenStatus(o) === mobileFilter)
+  }, [todayOrders, mobileFilter])
 
   if (!kitchenEnabled) {
     return <FeatureLockedPage feature="kitchen" />
@@ -437,6 +471,7 @@ function OrderCard({ order, updating, onStatusChange, compact = false, currentTi
   currentTime: number
 }) {
   const status = getKitchenStatus(order)
+  if (!status) return null
   const isOverdue = status === 'pending' && (currentTime - order.createdAt) > TWENTY_MINUTES_MS
   const totalItems = order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0
 

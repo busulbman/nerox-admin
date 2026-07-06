@@ -67,6 +67,7 @@ service cloud.firestore {
     }
 
     function waiterCanAcceptCall(rid) {
+      let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
       return isWaiter(rid)
         && resource.data.durum == 'bekliyor'
         && request.resource.data.durum == 'kabul edildi'
@@ -75,8 +76,20 @@ service cloud.firestore {
         && request.resource.data.waiterName is string
         && isOptionalPhotoUrl(request.resource.data.waiterPhotoUrl)
         && isOptionalWaiterAverageRating(request.resource.data.waiterAverageRating)
-        && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['durum', 'status', 'waiterId', 'waiterName', 'waiterPhotoUrl', 'waiterAverageRating', 'acceptedAt']);
+        && request.resource.data.acceptedAt is timestamp
+        && request.resource.data.updatedAt is timestamp
+        && changedKeys.hasOnly([
+          'durum', 'status', 'waiterId', 'waiterName', 'waiterPhotoUrl',
+          'waiterAverageRating', 'acceptedAt', 'updatedAt', 'kitchenStatus',
+          'sentToKitchenAt'
+        ])
+        && (
+          resource.data.tip == 'sipariş'
+            ? request.resource.data.kitchenStatus == 'pending'
+              && request.resource.data.sentToKitchenAt is timestamp
+              && changedKeys.hasAll(['kitchenStatus', 'sentToKitchenAt'])
+            : !changedKeys.hasAny(['kitchenStatus', 'sentToKitchenAt'])
+        );
     }
 
     function waiterCanCompleteOwnCall(rid) {
@@ -103,6 +116,7 @@ service cloud.firestore {
         && request.resource.data.tip == 'sipariş'
         && request.resource.data.durum == 'kabul edildi'
         && request.resource.data.status == 'accepted'
+        && request.resource.data.kitchenStatus == 'pending'
         && request.resource.data.waiterId == request.auth.uid
         && request.resource.data.waiterName is string
         && isOptionalPhotoUrl(request.resource.data.waiterPhotoUrl)
@@ -111,6 +125,8 @@ service cloud.firestore {
         && request.resource.data.createdById == request.auth.uid
         && request.resource.data.items is list
         && request.resource.data.items.size() > 0
+        && request.resource.data.acceptedAt is timestamp
+        && request.resource.data.sentToKitchenAt is timestamp
         && isNonNegativeNumber(request.resource.data.totalPrice);
     }
 

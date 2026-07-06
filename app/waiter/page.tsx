@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
-import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, LogOut, Minus, Plus, Trophy, UtensilsCrossed, X } from 'lucide-react'
+import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, Globe, LogOut, Minus, Plus, Settings, Star, Trophy, X } from 'lucide-react'
 import { auth, db, rd, rtdb } from '@/lib/firebase'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
@@ -33,9 +33,21 @@ import {
   initializeAudioWithUserInteraction,
   isAudioEnabled,
   isAudioInitialized,
+  isSoundPrefEnabled,
   playNotificationSound,
   setAudioEnabled,
+  setSoundPref,
+  type NotificationSoundType,
 } from '@/lib/audio-notification'
+import {
+  getWaiterTableStatusLabel,
+  readStoredWaiterLanguage,
+  saveWaiterLanguage,
+  tw,
+  WAITER_LANGUAGES,
+  DEFAULT_WAITER_LANGUAGE,
+  type WaiterLanguage,
+} from '@/lib/waiter-i18n'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import {
   DEFAULT_PRIMARY_COLOR,
@@ -46,7 +58,7 @@ import LoadingScreen from '@/components/LoadingScreen'
 import { buildThemePalette, buildThemeStyleVars } from '@/lib/ui-theme'
 
 type Section = 'pending' | 'active' | 'done'
-type Tab = 'calls' | 'menu' | 'tables'
+type Tab = 'calls' | 'tables' | 'settings'
 type OrderStep = 'table' | 'products' | 'confirm'
 type OrderCartItem = {
   productId: string
@@ -91,11 +103,6 @@ function resolveStoredAverageRating(profile: { averageRating?: number | null; av
   return null
 }
 
-function formatDate(ts: number): string {
-  if (!ts) return '—'
-  return new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(ts)
-}
-
 function createSessionId(): string {
   if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
   return `${Math.random().toString(16).slice(2)}-${Date.now()}`
@@ -116,7 +123,6 @@ export default function WaiterPage() {
   const SURFACE_MUTED = themePalette.surfaceMuted
   const BORDER_SOFT = themePalette.borderSoft
   const businessName = resolveRestaurantBusinessName(restaurantSettings)
-  const panelTitle = `${businessName} Garson Paneli`
   const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
 
   const [activeTab,  setActiveTab]  = useState<Tab>('calls')
@@ -131,11 +137,16 @@ export default function WaiterPage() {
   const [callError, setCallError] = useState('')
   const [, setTick] = useState(0)
 
-  // Menu
+  // Menu data (used by the manual order modal)
   const [categories, setCategories] = useState<Category[]>([])
   const [products,   setProducts]   = useState<Product[]>([])
-  const [activeCat,  setActiveCat]  = useState<string | null>(null)
   const [loadedMenuRestaurantId, setLoadedMenuRestaurantId] = useState<string | null>(null)
+
+  // Language
+  const [waiterLang, setWaiterLang] = useState<WaiterLanguage>(() => {
+    if (typeof window === 'undefined') return DEFAULT_WAITER_LANGUAGE
+    return readStoredWaiterLanguage() ?? DEFAULT_WAITER_LANGUAGE
+  })
 
   // Tables
   const [tables,       setTables]       = useState<Table[]>([])
@@ -160,6 +171,10 @@ export default function WaiterPage() {
     if (typeof window === 'undefined') return false
     return isAudioInitialized()
   })
+  const [soundPrefs, setSoundPrefsState] = useState<Record<NotificationSoundType, boolean>>(() => ({
+    newCall: isSoundPrefEnabled('newCall'),
+    readyOrder: isSoundPrefEnabled('readyOrder'),
+  }))
 
   // Manual order creation
   const [orderModal, setOrderModal] = useState(false)
@@ -170,6 +185,7 @@ export default function WaiterPage() {
   const [orderActiveCat, setOrderActiveCat] = useState<string | null>(null)
 
   const prevPendingIds    = useRef<Set<string>>(new Set())
+  const prevKitchenStatuses = useRef<Map<string, string>>(new Map())
   const callsInitialized  = useRef(false)
   const profilePhotoUploadEnabled = isImgBbConfigured()
 
@@ -236,6 +252,8 @@ export default function WaiterPage() {
       console.log('[WAITER DEBUG] Received calls snapshot, count:', snap.docs.length)
       const all = snap.docs.map((d) => normalizeWaiterCall(d.id, d.data() as Record<string, unknown>))
       const pendingList = all.filter((c) => c.durum === 'bekliyor').sort((a, b) => a.createdAt - b.createdAt)
+      const myActiveCalls = all.filter((c) => c.durum === 'kabul edildi' && c.waiterId === currentProfile.uid).sort((a, b) => a.createdAt - b.createdAt)
+      const myActiveOrders = myActiveCalls.filter((c) => c.tip === 'sipariş')
 
       if (callsInitialized.current) {
         const tips: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
@@ -247,14 +265,27 @@ export default function WaiterPage() {
           }
         }
         if (hasNewCall) {
-          void playNotificationSound()
+          void playNotificationSound('newCall')
+        }
+
+        let hasReadyOrder = false
+        for (const call of myActiveOrders) {
+          const previousKitchenStatus = prevKitchenStatuses.current.get(call.id)
+          if (call.kitchenStatus === 'ready' && previousKitchenStatus && previousKitchenStatus !== 'ready') {
+            hasReadyOrder = true
+            showNotification('Sipariş hazır', `Masa ${getCallTableLabel(call)} siparişi mutfakta hazır`, '/waiter')
+          }
+        }
+        if (hasReadyOrder) {
+          void playNotificationSound('readyOrder')
         }
       }
       callsInitialized.current = true
       prevPendingIds.current = new Set(pendingList.map((c) => c.id))
+      prevKitchenStatuses.current = new Map(myActiveOrders.map((c) => [c.id, c.kitchenStatus ?? '']))
 
       setPending(pendingList)
-      setActive(all.filter((c) => c.durum === 'kabul edildi' && c.waiterId === currentProfile.uid).sort((a, b) => a.createdAt - b.createdAt))
+      setActive(myActiveCalls)
     }
 
     function handleSnapshotError(error: Error) {
@@ -276,7 +307,7 @@ export default function WaiterPage() {
 
   // ─── Ratings listener ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || !restaurantId) return
+    if (!profile || profile.role !== 'waiter' || (activeTab !== 'calls' && activeTab !== 'settings') || !restaurantId) return
 
     const currentProfile = profile
     let cancelled = false
@@ -301,7 +332,7 @@ export default function WaiterPage() {
 
   // ─── Done calls on demand ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'calls' || !restaurantId) return
+    if (!profile || profile.role !== 'waiter' || (activeTab !== 'calls' && activeTab !== 'settings') || !restaurantId) return
 
     const currentProfile = profile
     let cancelled = false
@@ -319,9 +350,9 @@ export default function WaiterPage() {
     }
   }, [activeTab, profile, restaurantId])
 
-  // ─── Tables listener ──────────────────────────────────────────────────────
+  // ─── Tables listener (also needed when the order modal opens) ─────────────
   useEffect(() => {
-    if (!profile || profile.role !== 'waiter' || activeTab !== 'tables' || !restaurantId) return
+    if (!profile || profile.role !== 'waiter' || (activeTab !== 'tables' && !orderModal) || !restaurantId) return
 
     let cancelled = false
 
@@ -348,7 +379,7 @@ export default function WaiterPage() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, profile, restaurantId])
+  }, [activeTab, orderModal, profile, restaurantId])
 
   // ─── Menu loader (once) ───────────────────────────────────────────────────
   useEffect(() => {
@@ -364,7 +395,6 @@ export default function WaiterPage() {
       const cats = catSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Category))
       setCategories(cats)
       setProducts(prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Product)))
-      setActiveCat(cats[0]?.id ?? null)
       setLoadedMenuRestaurantId(currentRestaurantId)
     }
     loadMenu().catch(() => {})
@@ -523,6 +553,34 @@ export default function WaiterPage() {
     } finally {
       setTablesBusy(null)
     }
+  }
+
+  async function toggleMasterAudio() {
+    if (!audioInitialized) {
+      await initializeAudioWithUserInteraction()
+      setAudioEnabled(true)
+      setAudioEnabledState(true)
+      setAudioInitializedState(true)
+      void playNotificationSound()
+      return
+    }
+    const newValue = !audioEnabled
+    setAudioEnabled(newValue)
+    setAudioEnabledState(newValue)
+    if (newValue) void playNotificationSound()
+  }
+
+  function toggleSoundPref(type: NotificationSoundType) {
+    setSoundPrefsState((prev) => {
+      const nextValue = !prev[type]
+      setSoundPref(type, nextValue)
+      return { ...prev, [type]: nextValue }
+    })
+  }
+
+  function handleWaiterLanguageChange(lang: WaiterLanguage) {
+    setWaiterLang(lang)
+    saveWaiterLanguage(lang)
   }
 
   async function handleLogout() {
@@ -687,22 +745,21 @@ export default function WaiterPage() {
     )
   }
 
-  const tipLabel: Record<string, string> = { sipariş: 'Sipariş', hesap: 'Hesap', yardım: 'Yardım' }
-  const todayTs = getTodayStartTs()
-  const todayRatingsCount  = myRatings.filter((r) => r.createdAt >= todayTs).length
+  const tipLabel: Record<string, string> = {
+    sipariş: tw(waiterLang, 'tipOrder'),
+    hesap: tw(waiterLang, 'tipBill'),
+    yardım: tw(waiterLang, 'tipHelp'),
+  }
   const storedAverageRating = resolveStoredAverageRating(profile)
   const avgWaiterRatingValue = averageNumber(myRatings.map((r) => r.waiterRating)) ?? storedAverageRating
   const avgWaiterRatingLabel = avgWaiterRatingValue === null ? '—' : `${avgWaiterRatingValue.toFixed(1)} ★`
   const displayedProfileName = profileDraftName ?? profile.name
   const displayedProfilePhotoUrl = profileDraftPhotoUrl !== undefined ? profileDraftPhotoUrl : (profile.photoUrl ?? null)
   const totalCompletedCalls = profile.completedCalls ?? profile.totalCalls ?? done.length
-  const isCurrentMenuLoaded = loadedMenuRestaurantId === restaurantId
-  const menuCategories = isCurrentMenuLoaded ? categories : []
-  const menuProducts = isCurrentMenuLoaded ? products : []
-  const visibleProducts = menuProducts.filter((p) => p.categoryId === activeCat && p.available).sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+  const isRtl = WAITER_LANGUAGES.find((l) => l.code === waiterLang)?.dir === 'rtl'
 
   return (
-    <div className="theme-page min-h-screen overflow-x-hidden pb-20" style={themeVars}>
+    <div className="theme-page min-h-screen overflow-x-hidden pb-20" style={themeVars} dir={isRtl ? 'rtl' : 'ltr'}>
 
       {/* ── Header ── */}
       <header
@@ -712,27 +769,14 @@ export default function WaiterPage() {
         <div className="px-4 pb-3 pt-4 sm:px-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.62)' }}>{panelTitle}</p>
+              <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.62)' }}>{businessName} {tw(waiterLang, 'panelSubtitle')}</p>
               <p className="mt-0.5 font-bold text-lg leading-tight" style={{ color: PRIMARY_FOREGROUND }}>
-                Merhaba, {profile.name.split(' ')[0]}
+                {tw(waiterLang, 'greeting')}, {profile.name.split(' ')[0]}
               </p>
             </div>
             <div className="mt-1 flex shrink-0 items-center gap-2">
               <button
-                onClick={async () => {
-                  if (!audioInitialized) {
-                    await initializeAudioWithUserInteraction()
-                    setAudioEnabled(true)
-                    setAudioEnabledState(true)
-                    setAudioInitializedState(true)
-                    void playNotificationSound()
-                  } else {
-                    const newValue = !audioEnabled
-                    setAudioEnabled(newValue)
-                    setAudioEnabledState(newValue)
-                    if (newValue) void playNotificationSound()
-                  }
-                }}
+                onClick={() => { void toggleMasterAudio() }}
                 className="inline-flex items-center justify-center rounded-xl px-3 py-2"
                 style={{
                   background: audioEnabled ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.10)',
@@ -750,22 +794,14 @@ export default function WaiterPage() {
               >
                 <Trophy className="h-4 w-4" />
               </button>
-              <button
-                onClick={handleLogout}
-                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium"
-                style={{ background: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.86)' }}
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Çıkış</span>
-              </button>
             </div>
           </div>
 
           {activeTab === 'calls' && (
             <div className="flex gap-2 mt-3 pb-1">
-              <StatPill value={pending.length} label="Bekliyor" active={openSection === 'pending'} urgent={pending.length > 0} onClick={() => setOpenSection('pending')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
-              <StatPill value={active.length}  label="Aktifim"  active={openSection === 'active'}  onClick={() => setOpenSection('active')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
-              <StatPill value={done.length}    label="Bugün"  active={openSection === 'done'}    onClick={() => setOpenSection('done')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
+              <StatPill value={pending.length} label={tw(waiterLang, 'statPending')} active={openSection === 'pending'} urgent={pending.length > 0} onClick={() => setOpenSection('pending')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
+              <StatPill value={active.length}  label={tw(waiterLang, 'statActive')}  active={openSection === 'active'}  onClick={() => setOpenSection('active')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
+              <StatPill value={done.length}    label={tw(waiterLang, 'statDoneToday')}  active={openSection === 'done'}    onClick={() => setOpenSection('done')} primaryColor={BROWN} secondaryColor={PRIMARY_FOREGROUND} />
             </div>
           )}
         </div>
@@ -777,19 +813,13 @@ export default function WaiterPage() {
           className="px-4 py-3 text-center"
           style={{ background: '#fef3c7', color: '#92400e' }}
         >
-          <p className="text-sm font-medium mb-2">Yeni çağrılarda sesli bildirim almak ister misiniz?</p>
+          <p className="text-sm font-medium mb-2">{tw(waiterLang, 'audioPromptText')}</p>
           <button
-            onClick={async () => {
-              await initializeAudioWithUserInteraction()
-              setAudioEnabled(true)
-              setAudioEnabledState(true)
-              setAudioInitializedState(true)
-              void playNotificationSound()
-            }}
+            onClick={() => { void toggleMasterAudio() }}
             className="px-4 py-1.5 rounded-lg text-sm font-semibold"
             style={{ background: '#f59e0b', color: '#fff' }}
           >
-            Sesi Aç
+            {tw(waiterLang, 'audioEnableBtn')}
           </button>
           <button
             onClick={() => {
@@ -799,7 +829,7 @@ export default function WaiterPage() {
             className="ml-2 px-4 py-1.5 rounded-lg text-sm"
             style={{ background: 'rgba(0,0,0,0.08)', color: '#92400e' }}
           >
-            Hayır
+            {tw(waiterLang, 'audioNo')}
           </button>
         </div>
       )}
@@ -810,7 +840,7 @@ export default function WaiterPage() {
           className="px-4 py-2 text-center text-sm"
           style={{ background: SURFACE_MUTED, color: TEXT }}
         >
-          Bağlantı koptu, yeniden bağlanılıyor...
+          {tw(waiterLang, 'connectionLostMsg')}
         </div>
       )}
 
@@ -819,151 +849,15 @@ export default function WaiterPage() {
           className="px-4 py-2 text-center text-sm"
           style={{ background: '#eff6ff', color: '#1d4ed8' }}
         >
-          Canlı durum kapalı.
+          {tw(waiterLang, 'liveStatusOffMsg')}
         </div>
       )}
 
       {/* ── Tab content ── */}
       <div className="mx-auto max-w-lg px-4 py-5">
-        <section className="theme-card rounded-[28px] p-5 mb-6">
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-4">
-              <UserAvatar
-                name={displayedProfileName}
-                photoUrl={displayedProfilePhotoUrl}
-                className="border-2"
-                style={{ width: '4.5rem', height: '4.5rem', borderColor: BORDER_SOFT, background: SURFACE_MUTED }}
-                fallbackStyle={{ color: TEXT }}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Profil</p>
-                <p className="mt-1 truncate text-xl font-bold" style={{ color: TEXT }}>{displayedProfileName}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-semibold"
-                    style={{
-                      background: profile.active === false ? '#f3f4f6' : 'var(--success-soft)',
-                      color: profile.active === false ? '#6b7280' : 'var(--success)',
-                    }}
-                  >
-                    {profile.active === false ? 'Pasif' : 'Aktif'}
-                  </span>
-                  <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: SURFACE_MUTED, color: TEXT }}>
-                    {avgWaiterRatingLabel}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <MiniStatCard label="Bugün Tamamlanan" value={String(done.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-              <MiniStatCard label="Toplam Tamamlanan" value={String(totalCompletedCalls)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-              <MiniStatCard label="Ort. Puan" value={avgWaiterRatingLabel} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-              <MiniStatCard label="Durum" value={profile.active === false ? 'Pasif' : 'Aktif'} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-            </div>
-
-            <ProfilePhotoPicker
-              name={displayedProfileName}
-              photoUrl={displayedProfilePhotoUrl}
-              label="Profil fotoğrafı"
-              helperText="Müşteri kartında ve garson listesinde görünür."
-              disabledText={!profilePhotoUploadEnabled ? 'ImgBB API anahtarı olmadığı için yükleme kapalı.' : undefined}
-              uploading={profilePhotoUploading}
-              disabled={!profilePhotoUploadEnabled}
-              onFileChange={handleProfilePhotoChange}
-              onClear={() => setProfileDraftPhotoUrl(null)}
-            />
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold text-gray-500">Ad Soyad</label>
-              <input
-                className="theme-input rounded-lg text-sm"
-                value={displayedProfileName}
-                onChange={(event) => setProfileDraftName(event.target.value)}
-              />
-            </div>
-
-            {profileFeedback && (
-              <div
-                className="rounded-2xl px-4 py-3 text-sm"
-                style={{
-                  background: profileFeedback.tone === 'success' ? 'var(--success-soft)' : '#fff7ed',
-                  color: profileFeedback.tone === 'success' ? 'var(--success)' : '#c2410c',
-                  border: `1px solid ${profileFeedback.tone === 'success' ? 'rgba(16,185,129,0.24)' : '#fdba74'}`,
-                }}
-              >
-                {profileFeedback.text}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={() => {
-                  setProfileDraftName(null)
-                  setProfileDraftPhotoUrl(undefined)
-                  setProfileFeedback(null)
-                }}
-                className="rounded-xl px-4 py-2.5 text-sm font-medium"
-                style={{ background: SURFACE_MUTED, color: TEXT }}
-              >
-                Sıfırla
-              </button>
-              <button
-                onClick={saveProfile}
-                disabled={profileSaving || profilePhotoUploading || !displayedProfileName.trim()}
-                className="rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
-                style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
-              >
-                {profileSaving ? 'Kaydediliyor...' : profilePhotoUploading ? 'Fotoğraf Yükleniyor...' : 'Profili Kaydet'}
-              </button>
-            </div>
-          </div>
-        </section>
-
         {/* ÇAĞRILAR TAB */}
         {activeTab === 'calls' && (
           <div className="space-y-6">
-            {/* Puanlarım */}
-            <section>
-              <SectionHeader label="Puanlarım" count={myRatings.length} badge={myRatings.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
-              <div className="theme-card rounded-2xl p-5">
-                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <MiniStatCard label="Ortalama" value={avgWaiterRatingLabel} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-                  <MiniStatCard label="Toplam"   value={String(myRatings.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-                  <MiniStatCard label="Bugün"    value={String(todayRatingsCount)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
-                </div>
-                {myRatings.slice(0, 5).length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-4">Henüz yorum yok.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {myRatings.slice(0, 5).map((r) => (
-                      <div key={r.id} className="rounded-xl px-4 py-3" style={{ background: SURFACE_MUTED }}>
-                        <div className="flex items-start justify-between gap-3 mb-2">
-                          <div>
-                            <p className="text-sm font-semibold" style={{ color: TEXT }}>
-                              Masa {r.tableNumber > 0 ? r.tableNumber : r.tableId}
-                            </p>
-                            <p className="text-xs text-gray-400 mt-0.5">{formatDate(r.createdAt)}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-400">Garson</p>
-                            <p className="text-sm font-semibold" style={{ color: TEXT }}>{r.waiterRating}/5</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <Stars value={r.waiterRating} secondaryColor={GOLD} />
-                          <span className="text-xs text-gray-400">Hizmet {r.serviceRating}/5</span>
-                        </div>
-                        <p className="text-sm leading-6" style={{ color: r.comment ? '#4b5563' : '#9ca3af' }}>
-                          {r.comment || 'Yorum bırakılmadı.'}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
-
             {callError && (
               <div
                 className="rounded-2xl px-4 py-3 text-sm"
@@ -976,9 +870,9 @@ export default function WaiterPage() {
             {/* Bekleyen */}
             {openSection === 'pending' && (
               <section>
-                <SectionHeader label="Bekleyen Çağrılar" count={pending.length} badge={pending.length > 0 ? 'red' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
+                <SectionHeader label={tw(waiterLang, 'sectionPending')} count={pending.length} badge={pending.length > 0 ? 'red' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {pending.length === 0 ? (
-                  <EmptyState icon={<CircleCheckBig size={32} />} text="Bekleyen çağrı yok" />
+                  <EmptyState icon={<CircleCheckBig size={32} />} text={tw(waiterLang, 'emptyPending')} />
                 ) : (
                   <div className="space-y-3">
                     {pending.map((call) => (
@@ -1000,9 +894,9 @@ export default function WaiterPage() {
             {/* Aktif */}
             {openSection === 'active' && (
               <section>
-                <SectionHeader label="Aktif Çağrılarım" count={active.length} badge={active.length > 0 ? 'gold' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
+                <SectionHeader label={tw(waiterLang, 'sectionActive')} count={active.length} badge={active.length > 0 ? 'gold' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {active.length === 0 ? (
-                  <EmptyState icon={<Clock3 size={32} />} text="Aktif çağrın yok" />
+                  <EmptyState icon={<Clock3 size={32} />} text={tw(waiterLang, 'emptyActive')} />
                 ) : (
                   <div className="space-y-3">
                     {active.map((call) => (
@@ -1024,9 +918,9 @@ export default function WaiterPage() {
             {/* Tamamlananlar */}
             {openSection === 'done' && (
               <section>
-                <SectionHeader label="Bugün Tamamladıklarım" count={done.length} badge={done.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
+                <SectionHeader label={tw(waiterLang, 'sectionDone')} count={done.length} badge={done.length > 0 ? 'green' : undefined} primaryColor={BROWN} secondaryColor={GOLD} />
                 {done.length === 0 ? (
-                  <EmptyState icon={<ClipboardList size={32} />} text="Henüz tamamlanan çağrı yok" />
+                  <EmptyState icon={<ClipboardList size={32} />} text={tw(waiterLang, 'emptyDone')} />
                 ) : (
                   <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', border: `1px solid ${BORDER_SOFT}` }}>
                     {done.map((call, i) => (
@@ -1037,12 +931,12 @@ export default function WaiterPage() {
                       >
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: SURFACE_MUTED, color: TEXT }}>
-                            Masa {getCallTableLabel(call)}
+                            {tw(waiterLang, 'tableWord')} {getCallTableLabel(call)}
                           </span>
                           <span className="text-sm text-gray-500">{tipLabel[call.tip] ?? call.tip}</span>
                         </div>
                         <span className="text-xs text-gray-400">
-                          {call.completedAt ? `${Math.round((call.completedAt - call.createdAt) / 60000)} dk` : '—'}
+                          {call.completedAt ? `${Math.round((call.completedAt - call.createdAt) / 60000)} ${tw(waiterLang, 'minutesShort')}` : '—'}
                         </span>
                       </div>
                     ))}
@@ -1053,61 +947,11 @@ export default function WaiterPage() {
           </div>
         )}
 
-        {/* MENÜ TAB */}
-        {activeTab === 'menu' && (
-          <div>
-            {!isCurrentMenuLoaded ? (
-              <div className="space-y-3">
-                {[1,2,3,4,5].map((i) => <div key={i} className="bg-white rounded-2xl h-16 animate-pulse border border-gray-100" />)}
-              </div>
-            ) : (
-              <>
-                {menuCategories.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pb-3 mb-4 -mx-4 px-4">
-                    {menuCategories.map((cat) => (
-                      <button
-                        key={cat.id}
-                        onClick={() => setActiveCat(cat.id)}
-                        className="shrink-0 px-4 py-2 rounded-full text-sm font-medium"
-                        style={
-                          activeCat === cat.id
-                            ? { background: BROWN, color: PRIMARY_FOREGROUND }
-                            : { background: '#fff', color: TEXT, border: `1px solid ${BORDER_SOFT}` }
-                        }
-                      >
-                        {cat.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {visibleProducts.length === 0 ? (
-                  <EmptyState
-                    icon={<UtensilsCrossed size={32} />}
-                    text={menuProducts.some((product) => product.available) ? 'Bu kategoride ürün yok' : 'Henüz ürün eklenmedi'}
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    {visibleProducts.map((p) => (
-                      <div key={p.id} className="rounded-2xl bg-white p-4" style={{ border: `1px solid ${BORDER_SOFT}` }}>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-sm" style={{ color: TEXT }}>{p.name}</p>
-                          {p.description && <p className="text-xs text-gray-400 mt-1 leading-5">{p.description}</p>}
-                        </div>
-                        <p className="font-bold shrink-0" style={{ color: BROWN }}>₺{p.price}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
         {/* MASA SEÇ TAB */}
         {activeTab === 'tables' && (
           <div>
             <p className="text-xs text-gray-400 mb-3">
-              Boş masaya tıklayarak oturum açabilirsiniz.
+              {tw(waiterLang, 'tablesHint')}
             </p>
             {tablesMsg && (
               <div
@@ -1126,7 +970,7 @@ export default function WaiterPage() {
                 {[1,2,3,4,5,6].map((i) => <div key={i} className="bg-white rounded-2xl h-20 animate-pulse border border-gray-100" />)}
               </div>
             ) : tables.length === 0 ? (
-              <EmptyState icon={<Armchair size={32} />} text="Henüz masa eklenmemiş" />
+              <EmptyState icon={<Armchair size={32} />} text={tw(waiterLang, 'emptyTables')} />
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                 {tables.map((table) => {
@@ -1150,13 +994,177 @@ export default function WaiterPage() {
                         {table.number}
                       </p>
                       <p className="text-xs mt-1.5" style={{ color: isBoş ? '#9ca3af' : sc.text }}>
-                        {busy ? '...' : TABLE_STATUS_LABEL[table.status] ?? table.status}
+                        {busy ? '...' : getWaiterTableStatusLabel(waiterLang, table.status)}
                       </p>
                     </button>
                   )
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* AYARLAR TAB */}
+        {activeTab === 'settings' && (
+          <div className="space-y-5">
+            {/* Performans */}
+            <section className="theme-card rounded-[28px] p-6">
+              <div className="flex flex-col items-center text-center">
+                <UserAvatar
+                  name={displayedProfileName}
+                  photoUrl={displayedProfilePhotoUrl}
+                  className="border-2"
+                  style={{ width: '6rem', height: '6rem', borderColor: BORDER_SOFT, background: SURFACE_MUTED }}
+                  fallbackStyle={{ color: TEXT, fontSize: '1.75rem' }}
+                />
+                <p className="mt-3 text-xl font-bold" style={{ color: TEXT }}>{displayedProfileName}</p>
+                <span
+                  className="mt-2 rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{
+                    background: profile.active === false ? '#f3f4f6' : 'var(--success-soft)',
+                    color: profile.active === false ? '#6b7280' : 'var(--success)',
+                  }}
+                >
+                  {profile.active === false ? tw(waiterLang, 'passiveLabel') : tw(waiterLang, 'activeLabel')}
+                </span>
+              </div>
+
+              <div className="mt-5 flex items-center gap-2">
+                <Star className="h-4 w-4" style={{ color: BROWN }} />
+                <h2 className="text-sm font-bold uppercase tracking-wide" style={{ color: BROWN }}>{tw(waiterLang, 'performanceTitle')}</h2>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <MiniStatCard label={tw(waiterLang, 'perfAvgRating')} value={avgWaiterRatingLabel} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+                <MiniStatCard label={tw(waiterLang, 'perfTotalRatings')} value={String(myRatings.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+                <MiniStatCard label={tw(waiterLang, 'perfTodayCompleted')} value={String(done.length)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+                <MiniStatCard label={tw(waiterLang, 'perfTotalCompleted')} value={String(totalCompletedCalls)} primaryColor={TEXT} surfaceMuted={SURFACE_MUTED} />
+              </div>
+            </section>
+
+            {/* Profil */}
+            <section className="theme-card rounded-[28px] p-6">
+              <h2 className="mb-4 text-sm font-bold uppercase tracking-wide" style={{ color: BROWN }}>{tw(waiterLang, 'settingsProfileTitle')}</h2>
+              <div className="flex flex-col gap-4">
+                <ProfilePhotoPicker
+                  name={displayedProfileName}
+                  photoUrl={displayedProfilePhotoUrl}
+                  label={tw(waiterLang, 'photoLabel')}
+                  helperText={tw(waiterLang, 'photoHelper')}
+                  disabledText={!profilePhotoUploadEnabled ? 'ImgBB API anahtarı olmadığı için yükleme kapalı.' : undefined}
+                  uploading={profilePhotoUploading}
+                  disabled={!profilePhotoUploadEnabled}
+                  onFileChange={handleProfilePhotoChange}
+                  onClear={() => setProfileDraftPhotoUrl(null)}
+                />
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-500">{tw(waiterLang, 'nameLabel')}</label>
+                  <input
+                    className="theme-input rounded-lg text-sm"
+                    value={displayedProfileName}
+                    onChange={(event) => setProfileDraftName(event.target.value)}
+                  />
+                </div>
+
+                {profileFeedback && (
+                  <div
+                    className="rounded-2xl px-4 py-3 text-sm"
+                    style={{
+                      background: profileFeedback.tone === 'success' ? 'var(--success-soft)' : '#fff7ed',
+                      color: profileFeedback.tone === 'success' ? 'var(--success)' : '#c2410c',
+                      border: `1px solid ${profileFeedback.tone === 'success' ? 'rgba(16,185,129,0.24)' : '#fdba74'}`,
+                    }}
+                  >
+                    {profileFeedback.text}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    onClick={() => {
+                      setProfileDraftName(null)
+                      setProfileDraftPhotoUrl(undefined)
+                      setProfileFeedback(null)
+                    }}
+                    className="rounded-xl px-4 py-2.5 text-sm font-medium"
+                    style={{ background: SURFACE_MUTED, color: TEXT }}
+                  >
+                    {tw(waiterLang, 'resetBtn')}
+                  </button>
+                  <button
+                    onClick={saveProfile}
+                    disabled={profileSaving || profilePhotoUploading || !displayedProfileName.trim()}
+                    className="rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+                    style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
+                  >
+                    {profileSaving ? tw(waiterLang, 'savingBtn') : profilePhotoUploading ? tw(waiterLang, 'photoUploadingBtn') : tw(waiterLang, 'saveProfileBtn')}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Dil */}
+            <section className="theme-card rounded-[28px] p-6">
+              <div className="mb-4 flex items-center gap-2">
+                <Globe className="h-4 w-4" style={{ color: BROWN }} />
+                <h2 className="text-sm font-bold uppercase tracking-wide" style={{ color: BROWN }}>{tw(waiterLang, 'settingsLanguageTitle')}</h2>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {WAITER_LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => handleWaiterLanguageChange(lang.code)}
+                    className="rounded-xl px-4 py-3 text-sm font-semibold border transition-all"
+                    style={waiterLang === lang.code
+                      ? { background: BROWN, borderColor: BROWN, color: PRIMARY_FOREGROUND }
+                      : { background: '#fff', borderColor: BORDER_SOFT, color: TEXT }}
+                    dir={lang.dir}
+                  >
+                    {lang.nativeName}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* Bildirimler */}
+            <section className="theme-card rounded-[28px] p-6">
+              <div className="mb-2 flex items-center gap-2">
+                <Bell className="h-4 w-4" style={{ color: BROWN }} />
+                <h2 className="text-sm font-bold uppercase tracking-wide" style={{ color: BROWN }}>{tw(waiterLang, 'settingsNotificationsTitle')}</h2>
+              </div>
+              <div className="divide-y" style={{ borderColor: BORDER_SOFT }}>
+                <ToggleRow
+                  label={tw(waiterLang, 'soundMasterLabel')}
+                  description={tw(waiterLang, 'soundMasterDesc')}
+                  checked={audioEnabled}
+                  onToggle={() => { void toggleMasterAudio() }}
+                />
+                <ToggleRow
+                  label={tw(waiterLang, 'soundNewCallLabel')}
+                  description={tw(waiterLang, 'soundNewCallDesc')}
+                  checked={soundPrefs.newCall}
+                  disabled={!audioEnabled}
+                  onToggle={() => toggleSoundPref('newCall')}
+                />
+                <ToggleRow
+                  label={tw(waiterLang, 'soundReadyOrderLabel')}
+                  description={tw(waiterLang, 'soundReadyOrderDesc')}
+                  checked={soundPrefs.readyOrder}
+                  disabled={!audioEnabled}
+                  onToggle={() => toggleSoundPref('readyOrder')}
+                />
+              </div>
+            </section>
+
+            {/* Çıkış */}
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 text-sm font-bold"
+              style={{ background: 'var(--error-soft)', color: 'var(--error)' }}
+            >
+              <LogOut className="h-4 w-4" />
+              {tw(waiterLang, 'logoutBtn')}
+            </button>
           </div>
         )}
       </div>
@@ -1167,9 +1175,9 @@ export default function WaiterPage() {
         style={{ background: '#fff', borderColor: BORDER_SOFT, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {([
-          { id: 'calls' as Tab, Icon: Bell, label: 'Çağrılar', badge: pending.length > 0 ? pending.length : 0 },
-          { id: 'menu'   as Tab, Icon: UtensilsCrossed, label: 'Menü', badge: 0 },
-          { id: 'tables' as Tab, Icon: Armchair, label: 'Masalar', badge: 0 },
+          { id: 'calls' as Tab, Icon: Bell, label: tw(waiterLang, 'tabCalls'), badge: pending.length > 0 ? pending.length : 0 },
+          { id: 'tables' as Tab, Icon: Armchair, label: tw(waiterLang, 'tabTables'), badge: 0 },
+          { id: 'settings' as Tab, Icon: Settings, label: tw(waiterLang, 'tabSettings'), badge: 0 },
         ] as const).map((tab) => (
           <button
             key={tab.id}
@@ -1199,20 +1207,22 @@ export default function WaiterPage() {
       </nav>
 
       {/* ── Floating New Order Button ── */}
-      <button
-        onClick={openOrderModal}
-        className="fixed left-4 right-4 z-30 flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold shadow-lg transition-all active:scale-95 sm:left-auto sm:right-4 sm:w-auto"
-        style={{
-          bottom: 'calc(70px + env(safe-area-inset-bottom))',
-          right: '16px',
-          background: BROWN,
-          color: PRIMARY_FOREGROUND,
-          boxShadow: `0 8px 24px ${BROWN}44`,
-        }}
-      >
-        <Plus size={18} />
-        Yeni Sipariş
-      </button>
+      {activeTab !== 'settings' && (
+        <button
+          onClick={openOrderModal}
+          className="fixed left-4 right-4 z-30 flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold shadow-lg transition-all active:scale-95 sm:left-auto sm:right-4 sm:w-auto"
+          style={{
+            bottom: 'calc(70px + env(safe-area-inset-bottom))',
+            right: '16px',
+            background: BROWN,
+            color: PRIMARY_FOREGROUND,
+            boxShadow: `0 8px 24px ${BROWN}44`,
+          }}
+        >
+          <Plus size={18} />
+          {tw(waiterLang, 'newOrder')}
+        </button>
+      )}
 
       {/* ── Order Creation Modal ── */}
       {orderModal && (
@@ -1238,12 +1248,12 @@ export default function WaiterPage() {
                 )}
                 <div>
                   <p className="font-bold text-base" style={{ color: TEXT }}>
-                    {orderStep === 'table' && 'Masa Seç'}
-                    {orderStep === 'products' && `Masa ${selectedOrderTable?.number} - Ürün Ekle`}
-                    {orderStep === 'confirm' && 'Siparişi Onayla'}
+                    {orderStep === 'table' && tw(waiterLang, 'orderSelectTableTitle')}
+                    {orderStep === 'products' && tw(waiterLang, 'orderAddProductsTitle', { number: selectedOrderTable?.number ?? '' })}
+                    {orderStep === 'confirm' && tw(waiterLang, 'orderConfirmTitle')}
                   </p>
                   {orderStep === 'products' && orderCartCount > 0 && (
-                    <p className="text-xs" style={{ color: BROWN }}>{orderCartCount} ürün · ₺{orderCartTotal}</p>
+                    <p className="text-xs" style={{ color: BROWN }}>{tw(waiterLang, 'orderProductsCount', { count: orderCartCount })} · ₺{orderCartTotal}</p>
                   )}
                 </div>
               </div>
@@ -1262,14 +1272,14 @@ export default function WaiterPage() {
               {orderStep === 'table' && (
                 <div>
                   <p className="text-xs mb-3" style={{ color: '#9ca3af' }}>
-                    Sipariş almak istediğiniz masayı seçin. Boş masalar otomatik açılır.
+                    {tw(waiterLang, 'orderTableHint')}
                   </p>
                   {!tablesLoaded ? (
                     <div className="grid grid-cols-3 gap-3">
                       {[1,2,3,4,5,6].map((i) => <div key={i} className="bg-gray-100 rounded-2xl h-20 animate-pulse" />)}
                     </div>
                   ) : tables.length === 0 ? (
-                    <EmptyState icon={<Armchair size={32} />} text="Henüz masa eklenmemiş" />
+                    <EmptyState icon={<Armchair size={32} />} text={tw(waiterLang, 'emptyTables')} />
                   ) : (
                     <div className="grid grid-cols-3 gap-3">
                       {tables.map((table) => {
@@ -1290,7 +1300,7 @@ export default function WaiterPage() {
                               {table.number}
                             </p>
                             <p className="text-xs mt-1.5" style={{ color: canOrder ? '#9ca3af' : sc.text }}>
-                              {TABLE_STATUS_LABEL[table.status] ?? table.status}
+                              {getWaiterTableStatusLabel(waiterLang, table.status)}
                             </p>
                           </button>
                         )
@@ -1367,7 +1377,7 @@ export default function WaiterPage() {
                                   className="px-4 py-2 rounded-xl text-sm font-semibold"
                                   style={{ background: SURFACE_MUTED, color: BROWN }}
                                 >
-                                  Ekle
+                                  {tw(waiterLang, 'addBtn')}
                                 </button>
                               )}
                             </div>
@@ -1382,7 +1392,7 @@ export default function WaiterPage() {
               {orderStep === 'confirm' && (
                 <div>
                   <div className="rounded-2xl p-4 mb-4" style={{ background: SURFACE_MUTED }}>
-                    <p className="text-sm font-semibold mb-2" style={{ color: TEXT }}>Masa {selectedOrderTable?.number}</p>
+                    <p className="text-sm font-semibold mb-2" style={{ color: TEXT }}>{tw(waiterLang, 'tableWord')} {selectedOrderTable?.number}</p>
                     <div className="space-y-2">
                       {orderCart.map((item) => (
                         <div key={item.productId} className="flex items-center justify-between text-sm">
@@ -1392,7 +1402,7 @@ export default function WaiterPage() {
                       ))}
                     </div>
                     <div className="border-t mt-3 pt-3 flex items-center justify-between" style={{ borderColor: BORDER_SOFT }}>
-                      <span className="font-bold" style={{ color: TEXT }}>Toplam</span>
+                      <span className="font-bold" style={{ color: TEXT }}>{tw(waiterLang, 'orderTotal')}</span>
                       <span className="font-bold text-lg" style={{ color: BROWN }}>₺{orderCartTotal}</span>
                     </div>
                   </div>
@@ -1411,7 +1421,7 @@ export default function WaiterPage() {
                   className="w-full rounded-2xl py-4 font-bold text-sm"
                   style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
                 >
-                  Devam Et · ₺{orderCartTotal}
+                  {tw(waiterLang, 'orderContinue')} · ₺{orderCartTotal}
                 </button>
               </div>
             )}
@@ -1427,7 +1437,7 @@ export default function WaiterPage() {
                   className="w-full rounded-2xl py-4 font-bold text-sm disabled:opacity-50"
                   style={{ background: BROWN, color: PRIMARY_FOREGROUND }}
                 >
-                  {orderSending ? 'Gönderiliyor...' : 'Siparişi Oluştur'}
+                  {orderSending ? tw(waiterLang, 'orderSendingBtn') : tw(waiterLang, 'orderCreate')}
                 </button>
               </div>
             )}
@@ -1486,11 +1496,30 @@ function MiniStatCard({ label, value, primaryColor = DEFAULT_BROWN, surfaceMuted
   )
 }
 
-function Stars({ value, secondaryColor = DEFAULT_GOLD }: { value: number; secondaryColor?: string }) {
+function ToggleRow({ label, description, checked, disabled, onToggle }: {
+  label: string; description?: string; checked: boolean; disabled?: boolean; onToggle: () => void
+}) {
   return (
-    <span className="text-sm tracking-[0.2em]" style={{ color: secondaryColor }}>
-      {'★'.repeat(Math.max(0, Math.min(5, value)))}
-      <span style={{ color: '#d1d5db' }}>{'★'.repeat(Math.max(0, 5 - value))}</span>
-    </span>
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={disabled}
+      className="flex w-full items-center justify-between gap-3 py-3.5 text-left disabled:opacity-40"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{label}</p>
+        {description && <p className="mt-0.5 text-xs text-gray-400">{description}</p>}
+      </div>
+      <span
+        className="relative h-6 w-11 shrink-0 rounded-full transition-colors"
+        style={{ background: checked ? 'var(--primary)' : '#d1d5db' }}
+        aria-hidden
+      >
+        <span
+          className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all"
+          style={{ insetInlineStart: checked ? '22px' : '2px' }}
+        />
+      </span>
+    </button>
   )
 }

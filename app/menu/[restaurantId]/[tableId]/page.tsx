@@ -39,6 +39,8 @@ import {
 import { useAuth } from '@/components/AuthProvider'
 import UserAvatar from '@/components/UserAvatar'
 import LoadingScreen from '@/components/LoadingScreen'
+import DemoMenuTour, { DEMO_TOUR_STORAGE_KEY } from '@/components/menu/DemoMenuTour'
+import MenuDeveloperFooter from '@/components/menu/MenuDeveloperFooter'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { db } from '@/lib/firebase'
@@ -338,6 +340,8 @@ export default function MenuPage() {
   const [activeCat, setActiveCat] = useState<string | null>(null)
 
   const restaurantId = resolvedRestaurant?.id ?? ''
+  const isDemoRestaurant =
+    resolvedRestaurant?.id === 'demo' || (resolvedRestaurant?.slug ?? '').toLowerCase() === 'demo'
 
   const [tableDocId, setTableDocId] = useState<string | null>(null)
   const [table, setTable] = useState<Table | null>(null)
@@ -399,6 +403,7 @@ export default function MenuPage() {
 
   const [wifiCopied, setWifiCopied] = useState(false)
   const [languageModal, setLanguageModal] = useState(false)
+  const [demoTourOpen, setDemoTourOpen] = useState(false)
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null)
   const previousSessionCallStates = useRef<Map<string, WaiterCall['durum']>>(new Map())
 
@@ -740,6 +745,16 @@ export default function MenuPage() {
       cancelled = true
     }
   }, [accessState, customerNameModal, loyaltyCustomer, onboardingStep, restaurantId, sessionId, tableDocId])
+
+  // Demo tour: only on the demo restaurant, once per device
+  useEffect(() => {
+    if (!isDemoRestaurant || loading || onboardingStep !== 'done') return
+    const frameId = requestAnimationFrame(() => {
+      if (window.localStorage.getItem(DEMO_TOUR_STORAGE_KEY) === 'true') return
+      setDemoTourOpen(true)
+    })
+    return () => cancelAnimationFrame(frameId)
+  }, [isDemoRestaurant, loading, onboardingStep])
 
   // Fetch exchange rates for currency conversion
   useEffect(() => {
@@ -1417,6 +1432,11 @@ export default function MenuPage() {
     }
   }
 
+  function closeDemoTour() {
+    window.localStorage.setItem(DEMO_TOUR_STORAGE_KEY, 'true')
+    setDemoTourOpen(false)
+  }
+
   function handleLanguageChange(lang: MenuLanguage) {
     setLanguage(lang)
     saveLanguage(tableId, lang)
@@ -1809,6 +1829,21 @@ export default function MenuPage() {
               })}
             </div>
           )}
+
+          {isDemoRestaurant && (
+            <div className="mt-8 text-center">
+              <button
+                type="button"
+                onClick={() => setDemoTourOpen(true)}
+                className="rounded-full border bg-white px-4 py-2 text-xs font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.06)]"
+                style={{ borderColor: menuBorderColor, color: menuMutedColor }}
+              >
+                {t(language, 'demoTourShowAgain')}
+              </button>
+            </div>
+          )}
+
+          <MenuDeveloperFooter language={language} mutedColor={menuMutedColor} borderColor={menuBorderColor} />
         </main>
 
         <div className="fixed bottom-0 inset-x-0 z-20 px-4 pb-5 pt-3" style={{ background: `linear-gradient(to top, ${menuSurfaceMuted} 70%, transparent)` }}>
@@ -2445,6 +2480,20 @@ export default function MenuPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Demo Feature Tour (demo restaurant only) */}
+        {isDemoRestaurant && demoTourOpen && (
+          <DemoMenuTour
+            language={language}
+            primaryColor={menuPrimaryColor}
+            primaryTextColor={menuPrimaryTextColor}
+            textColor={menuTextColor}
+            mutedColor={menuMutedColor}
+            borderColor={menuBorderColor}
+            surfaceMutedColor={menuSurfaceMuted}
+            onClose={closeDemoTour}
+          />
         )}
       </div>
     </>

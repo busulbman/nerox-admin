@@ -368,6 +368,26 @@ export default function MenuPage() {
     setBulkResult(null)
   }
 
+  function openCreateProductModal() {
+    if (!selectedCatId) return
+    setProdForm({ ...EMPTY_PROD, categoryId: selectedCatId })
+    setProdImageError('')
+    setProdModal({ open: true })
+  }
+
+  function openEditProductModal(product: Product) {
+    setProdForm({
+      name: product.name,
+      description: product.description,
+      price: String(product.price),
+      categoryId: product.categoryId,
+      available: product.available,
+      image: product.image || '',
+    })
+    setProdImageError('')
+    setProdModal({ open: true, editing: product })
+  }
+
   const tenantCategories = categoriesRestaurantId === restaurantId ? categories : []
   const tenantProducts = productsRestaurantId === restaurantId ? products : []
 
@@ -378,8 +398,8 @@ export default function MenuPage() {
   const invalidItemsCount = bulkParsed.filter((i) => !i.valid).length
 
   return (
-    <div className="p-8">
-      <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-start lg:justify-between">
+    <div className="overflow-x-hidden p-4 md:p-8">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="font-bold text-2xl" style={{ color: TEXT }}>Menü Yönetimi</h1>
           <p className="text-gray-400 text-sm mt-0.5">Menü içerikleri ve QR menü görünümü buradan yönetilir.</p>
@@ -388,11 +408,11 @@ export default function MenuPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {isDevelopment && (
             <button
               onClick={() => setBulkModal(true)}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors sm:w-auto"
               style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
             >
               <FileUp size={16} />
@@ -401,7 +421,7 @@ export default function MenuPage() {
           )}
           <Link
             href="/dashboard/settings"
-            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold border border-gray-200 hover:bg-gray-50 transition-colors"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold transition-colors hover:bg-gray-50 sm:w-auto"
             style={{ color: TEXT, borderColor: BORDER_SOFT, background: SURFACE }}
           >
             <Settings size={16} />
@@ -410,8 +430,75 @@ export default function MenuPage() {
         </div>
       </div>
 
-      <div className="flex gap-6">
-        <div className="w-52 shrink-0">
+      <div className="flex flex-col gap-6 md:flex-row">
+        <div className="md:hidden">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-sm font-semibold" style={{ color: TEXT }}>Kategoriler</span>
+            <button
+              onClick={() => {
+                setCatName('')
+                setCatModal({ open: true })
+              }}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold leading-none"
+              style={{ background: SURFACE, color: PRIMARY, border: `1px solid ${BORDER_SOFT}` }}
+              aria-label="Kategori ekle"
+            >
+              +
+            </button>
+          </div>
+
+          {tenantCategories.length > 0 ? (
+            <>
+              <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none]">
+                <div className="flex w-max gap-2 pb-1">
+                  {tenantCategories.map((category) => {
+                    const active = selectedCatId === category.id
+                    return (
+                      <button
+                        key={category.id}
+                        onClick={() => setSelectedCatId(category.id)}
+                        className="max-w-[12rem] shrink-0 rounded-full px-4 py-2 text-sm font-medium"
+                        style={active
+                          ? { background: PRIMARY, color: PRIMARY_FOREGROUND }
+                          : { background: SURFACE, color: TEXT, border: `1px solid ${BORDER_SOFT}` }}
+                      >
+                        <span className="block truncate">{category.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {selectedCat && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setCatName(selectedCat.name)
+                      setCatModal({ open: true, editing: selectedCat })
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
+                    style={{ background: SURFACE, color: TEXT, border: `1px solid ${BORDER_SOFT}` }}
+                  >
+                    <Pencil size={14} />
+                    Kategoriyi Düzenle
+                  </button>
+                  <button
+                    onClick={() => void deleteCat(selectedCat.id)}
+                    className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-red-500"
+                    style={{ background: SURFACE, border: `1px solid ${BORDER_SOFT}` }}
+                  >
+                    <Trash size={14} />
+                    Sil
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="mt-4 text-center text-xs text-gray-400">Henüz kategori eklenmedi.</p>
+          )}
+        </div>
+
+        <div className="hidden w-52 shrink-0 md:block">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-semibold" style={{ color: TEXT }}>Kategoriler</span>
             <button
@@ -465,20 +552,16 @@ export default function MenuPage() {
           {tenantCategories.length === 0 && <p className="text-gray-400 text-xs text-center mt-4">Henüz kategori eklenmedi.</p>}
         </div>
 
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="min-w-0 font-semibold" style={{ color: TEXT }}>
-              {selectedCat?.name ?? 'Kategori seçin'}
-              <span className="text-gray-400 font-normal text-sm ml-2">({visibleProducts.length} ürün)</span>
+              <span className="block truncate">{selectedCat?.name ?? 'Kategori seçin'}</span>
+              <span className="ml-0 mt-1 block text-sm font-normal text-gray-400 sm:ml-2 sm:mt-0 sm:inline">({visibleProducts.length} ürün)</span>
             </h2>
             {selectedCatId && (
               <button
-                onClick={() => {
-                  setProdForm({ ...EMPTY_PROD, categoryId: selectedCatId })
-                  setProdImageError('')
-                  setProdModal({ open: true })
-                }}
-                className="text-sm font-semibold px-4 py-2 rounded-lg"
+                onClick={openCreateProductModal}
+                className="w-full rounded-lg px-4 py-2 text-sm font-semibold sm:w-auto"
                 style={{ background: PRIMARY, color: PRIMARY_FOREGROUND }}
               >
                 + Ürün Ekle
@@ -496,78 +579,109 @@ export default function MenuPage() {
               ) : selectedCatId ? 'Bu kategoride ürün yok.' : 'Soldaki listeden bir kategori seçin.'}
             </div>
           ) : (
-            <div className="space-y-2">
-              {visibleProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className="flex flex-col gap-4 rounded-xl border bg-white p-4 sm:flex-row sm:items-center"
-                  style={{ borderColor: BORDER_SOFT, opacity: product.available ? 1 : 0.6, background: SURFACE }}
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-4">
-                    <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
-                      {product.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={product.image}
-                          alt={product.name}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            const target = e.target as HTMLImageElement
-                            target.style.display = 'none'
-                            target.parentElement!.innerHTML = '<span class="text-[11px] font-semibold text-gray-400">Görsel</span>'
-                          }}
-                        />
-                      ) : (
-                        <span className="text-[11px] font-semibold text-gray-400">Görsel</span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="mb-0.5 flex items-center gap-2">
-                        <span className="truncate font-medium text-sm" style={{ color: TEXT }}>{product.name}</span>
-                        {!product.available && <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Pasif</span>}
+            <>
+              <div className="space-y-3 md:hidden">
+                {visibleProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="w-full rounded-2xl border p-4"
+                    style={{ borderColor: BORDER_SOFT, opacity: product.available ? 1 : 0.7, background: SURFACE }}
+                  >
+                    <div className="flex items-start gap-4">
+                      <ProductImagePreview image={product.image} name={product.name} className="h-20 w-20 rounded-xl" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="min-w-0 truncate text-sm font-semibold" style={{ color: TEXT }}>{product.name}</h3>
+                          <span
+                            className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                            style={product.available ? { background: '#dcfce7', color: '#166534' } : { background: '#f3f4f6', color: '#6b7280' }}
+                          >
+                            {product.available ? 'Aktif' : 'Pasif'}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-gray-400">{product.description || 'Açıklama girilmedi.'}</p>
+                        <p className="mt-3 text-sm font-semibold" style={{ color: PRIMARY }}>₺{product.price}</p>
                       </div>
-                      <p className="truncate text-xs text-gray-400">{product.description}</p>
                     </div>
-                  </div>
-                  <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end">
-                    <div className="shrink-0 font-semibold text-sm" style={{ color: PRIMARY }}>₺{product.price}</div>
-                    <div className="flex items-center gap-0.5 shrink-0">
+
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
                       <button
-                        onClick={() => void toggleAvailable(product)}
-                        className="p-1.5 rounded hover:bg-gray-50"
-                        style={{ color: product.available ? '#22c55e' : '#9ca3af' }}
-                      >
-                        {product.available ? <Check size={16} /> : <Square size={16} />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setProdForm({
-                            name: product.name,
-                            description: product.description,
-                            price: String(product.price),
-                            categoryId: product.categoryId,
-                            available: product.available,
-                            image: product.image || '',
-                          })
-                          setProdImageError('')
-                          setProdModal({ open: true, editing: product })
-                        }}
-                        className="p-1.5 rounded hover:bg-gray-50"
-                        style={{ color: TEXT }}
+                        onClick={() => openEditProductModal(product)}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold"
+                        style={{ background: SURFACE, color: TEXT, border: `1px solid ${BORDER_SOFT}` }}
                       >
                         <Pencil size={16} />
+                        Düzenle
+                      </button>
+                      <button
+                        onClick={() => void toggleAvailable(product)}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold"
+                        style={product.available
+                          ? { background: '#ecfdf5', color: '#15803d', border: '1px solid rgba(34,197,94,0.18)' }
+                          : { background: '#f3f4f6', color: '#6b7280', border: '1px solid rgba(156,163,175,0.25)' }}
+                      >
+                        {product.available ? <Check size={16} /> : <Square size={16} />}
+                        {product.available ? 'Pasif Yap' : 'Aktif Yap'}
                       </button>
                       <button
                         onClick={() => void deleteProd(product.id)}
-                        className="p-1.5 rounded hover:bg-red-50 text-red-500"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-500"
+                        style={{ background: '#fef2f2', border: '1px solid rgba(239,68,68,0.16)' }}
                       >
                         <Trash size={16} />
+                        Sil
                       </button>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+
+              <div className="hidden space-y-2 md:block">
+                {visibleProducts.map((product) => (
+                  <div
+                    key={product.id}
+                    className="flex items-center gap-4 rounded-xl border bg-white p-4"
+                    style={{ borderColor: BORDER_SOFT, opacity: product.available ? 1 : 0.6, background: SURFACE }}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-4">
+                      <ProductImagePreview image={product.image} name={product.name} className="h-12 w-12 rounded-lg" />
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-0.5 flex items-center gap-2">
+                          <span className="truncate font-medium text-sm" style={{ color: TEXT }}>{product.name}</span>
+                          {!product.available && <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Pasif</span>}
+                        </div>
+                        <p className="truncate text-xs text-gray-400">{product.description}</p>
+                      </div>
+                    </div>
+                    <div className="flex w-auto items-center justify-end gap-3">
+                      <div className="shrink-0 font-semibold text-sm" style={{ color: PRIMARY }}>₺{product.price}</div>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          onClick={() => void toggleAvailable(product)}
+                          className="rounded p-1.5 hover:bg-gray-50"
+                          style={{ color: product.available ? '#22c55e' : '#9ca3af' }}
+                        >
+                          {product.available ? <Check size={16} /> : <Square size={16} />}
+                        </button>
+                        <button
+                          onClick={() => openEditProductModal(product)}
+                          className="rounded p-1.5 hover:bg-gray-50"
+                          style={{ color: TEXT }}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          onClick={() => void deleteProd(product.id)}
+                          className="rounded p-1.5 text-red-500 hover:bg-red-50"
+                        >
+                          <Trash size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -840,6 +954,29 @@ export default function MenuPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProductImagePreview({ image, name, className }: { image?: string; name: string; className: string }) {
+  const [failedImage, setFailedImage] = useState<string | null>(null)
+  const showImage = !!image && failedImage !== image
+
+  return (
+    <div className={`${className} flex shrink-0 items-center justify-center overflow-hidden bg-gray-100`}>
+      {showImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={image}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setFailedImage(image)}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-gray-100">
+          <ImageIcon size={18} className="text-gray-300" />
         </div>
       )}
     </div>

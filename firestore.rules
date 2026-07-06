@@ -493,6 +493,23 @@ service cloud.firestore {
 
         // Public can read own customer record by phone
         allow read: if restaurantAllowsPublicAccess(rid);
+
+        // ── Customer Rewards ──────────────────────────────────────────────────
+
+        match /rewards/{rewardId} {
+          // Rewards are tenant-scoped and staff-only; public ownership cannot be
+          // verified safely from an unauthenticated QR session.
+          allow read: if isStaff(rid);
+          allow create, update: if isStaff(rid);
+          allow delete: if false;
+        }
+      }
+
+      // ── Loyalty Transactions ───────────────────────────────────────────────
+
+      match /loyaltyTransactions/{transactionId} {
+        allow read, create: if isStaff(rid);
+        allow update, delete: if false;
       }
     }
 

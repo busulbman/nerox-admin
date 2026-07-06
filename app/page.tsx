@@ -260,14 +260,16 @@ export default function HomePage() {
                 <ArrowRight className="h-4 w-4" />
               </Link>
 
-              <Link
-                href="/register"
+              <a
+                href="https://wa.me/905421320706?text=Merhaba%2C%20Nerox%20Restaurant%20i%C3%A7in%207%20g%C3%BCn%20%C3%BCcretsiz%20deneme%20hesab%C4%B1%20olu%C5%9Fturmak%20istiyorum."
+                target="_blank"
+                rel="noreferrer"
                 className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90 sm:w-auto"
                 style={{ animationDelay: '440ms' }}
               >
                 Hesap Oluştur
                 <Building2 className="h-4 w-4" />
-              </Link>
+              </a>
 
               <Link
                 href="/login"

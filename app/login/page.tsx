@@ -112,9 +112,14 @@ export default function LoginPage() {
 
         <p className="text-center text-sm text-white/60">
           Hesabınız yok mu?{' '}
-          <Link href="/register" className="font-semibold text-[#d8c3ff] transition hover:text-white">
+          <a
+            href="https://wa.me/905421320706?text=Merhaba%2C%20Nerox%20Restaurant%20i%C3%A7in%207%20g%C3%BCn%20%C3%BCcretsiz%20deneme%20hesab%C4%B1%20olu%C5%9Fturmak%20istiyorum."
+            target="_blank"
+            rel="noreferrer"
+            className="font-semibold text-[#d8c3ff] transition hover:text-white"
+          >
             İşletme hesabı oluşturun
-          </Link>
+          </a>
         </p>
 
         <p className="text-center text-xs leading-5 text-white/48">

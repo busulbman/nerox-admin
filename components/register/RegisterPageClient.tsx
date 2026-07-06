@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   Mail,
   MapPinned,
+  MessageCircle,
   Phone,
   ShieldCheck,
   Store,
@@ -24,6 +25,9 @@ import {
   type SelfServiceBusinessType,
 } from '@/lib/self-service-registration-config'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+
+const WHATSAPP_LINK =
+  'https://wa.me/905421320706?text=Merhaba%2C%20Nerox%20Restaurant%20i%C3%A7in%207%20g%C3%BCn%20%C3%BCcretsiz%20deneme%20hesab%C4%B1%20olu%C5%9Fturmak%20istiyorum.'
 
 type RegisterFormState = {
   businessName: string
@@ -142,6 +146,39 @@ export default function RegisterPageClient() {
 
   if (loading || (user && profile?.role === 'admin' && restaurantLoading)) return null
 
+  const showRegistrationForm = process.env.NODE_ENV === 'development'
+
+  if (!showRegistrationForm) {
+    return (
+      <BrandAuthShell
+        eyebrow="Hesap oluşturma talebi"
+        title="Hesap oluşturma talebi"
+        description="7 günlük ücretsiz deneme hesabınızı oluşturmak için WhatsApp üzerinden bize ulaşabilirsiniz."
+        alternateHref="/login"
+        alternateLabel="Yönetim paneli girişi"
+        alternateText="Zaten hesabınız varsa"
+      >
+        <div className="text-center">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#25D366]/16 text-[#25D366]">
+            <MessageCircle className="h-8 w-8" />
+          </div>
+          <p className="mb-6 text-sm leading-6 text-white/60">
+            7 günlük ücretsiz deneme hesabınızı oluşturmak için WhatsApp üzerinden bize ulaşabilirsiniz.
+          </p>
+          <a
+            href={WHATSAPP_LINK}
+            target="_blank"
+            rel="noreferrer"
+            className="theme-button-primary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-semibold"
+          >
+            <MessageCircle className="h-4 w-4" />
+            WhatsApp ile Hesap Talebi Gönder
+          </a>
+        </div>
+      </BrandAuthShell>
+    )
+  }
+
   return (
     <BrandAuthShell
       eyebrow="7 günlük ücretsiz deneme"
@@ -167,7 +204,7 @@ export default function RegisterPageClient() {
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#7c3aed]/16 text-[#d8c3ff]">
             <Building2 className="h-5 w-5" />
           </div>
-          <p className="mt-3 text-sm font-semibold text-white">İşletme tenant’ı</p>
+          <p className="mt-3 text-sm font-semibold text-white">İşletme tenant&apos;ı</p>
           <p className="mt-1 text-xs leading-5 text-white/58">Slug ve temel işletme kaydı otomatik açılır.</p>
         </div>
         <div className="rounded-[1.4rem] border border-white/10 bg-white/6 p-4">
@@ -351,7 +388,7 @@ export default function RegisterPageClient() {
           </Link>{' '}
           ve{' '}
           <Link href="/privacy" className="text-white/68 underline decoration-white/15 underline-offset-2 transition hover:text-white">
-            Gizlilik Politikası’nı
+            Gizlilik Politikası&apos;nı
           </Link>{' '}
           kabul etmiş olursunuz.
         </p>

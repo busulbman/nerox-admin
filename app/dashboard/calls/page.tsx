@@ -6,6 +6,7 @@ import { CircleCheckBig, ClipboardList } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import CustomerRewards from '@/components/orders/CustomerRewards'
+import LoyaltyPreviewBadge from '@/components/orders/LoyaltyPreviewBadge'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import { completeRestaurantCall } from '@/lib/call-sync'
 import { getCallTipUi } from '@/lib/call-tip-ui'
@@ -334,6 +335,10 @@ export default function CallsPage() {
                 )}
 
                 <OrderBreakdown call={call} />
+
+                {call.loyaltyPreview && call.loyaltyPreview.eligible && (
+                  <LoyaltyPreviewBadge preview={call.loyaltyPreview} />
+                )}
 
                 {call.customerId && user && profile && (
                   <CustomerRewards

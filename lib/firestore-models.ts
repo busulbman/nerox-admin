@@ -3,6 +3,7 @@ import type {
   CartItem,
   CustomerGroup,
   LoyaltyCampaign,
+  LoyaltyPreview,
   Rating,
   RatingStatus,
   RestaurantCustomer,
@@ -33,6 +34,26 @@ export function isOpenWaiterCallStatus(value: unknown): value is Extract<WaiterC
 
 function isRatingStatus(value: unknown): value is RatingStatus {
   return value === 'approved' || value === 'suspicious'
+}
+
+function normalizeLoyaltyPreview(value: unknown): LoyaltyPreview | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const data = value as Record<string, unknown>
+  if (
+    typeof data.campaignId !== 'string' ||
+    typeof data.campaignName !== 'string' ||
+    typeof data.rewardProductName !== 'string' ||
+    typeof data.rewardQuantity !== 'number'
+  ) {
+    return undefined
+  }
+  return {
+    campaignId: data.campaignId,
+    campaignName: data.campaignName,
+    rewardProductName: data.rewardProductName,
+    rewardQuantity: data.rewardQuantity,
+    eligible: data.eligible === true,
+  }
 }
 
 export function isTableStatus(value: unknown): value is TableStatus {
@@ -196,6 +217,9 @@ export function normalizeWaiterCall(id: string, data: Record<string, unknown>): 
     completedByName: typeof data.completedByName === 'string' ? data.completedByName : undefined,
     completedByRole,
     customerName: typeof data.customerName === 'string' ? data.customerName : undefined,
+    customerId: typeof data.customerId === 'string' ? data.customerId : undefined,
+    customerPhone: typeof data.customerPhone === 'string' ? data.customerPhone : undefined,
+    loyaltyPreview: normalizeLoyaltyPreview(data.loyaltyPreview),
     note: typeof data.note === 'string' ? data.note : undefined,
     createdAt: toMillis(data.createdAt) ?? 0,
     acceptedAt: toMillis(data.acceptedAt) ?? undefined,

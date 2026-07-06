@@ -305,11 +305,11 @@ export default function DashboardOnboarding({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -20, scale: 0.95 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="absolute z-10"
-          style={getTooltipPosition(targetRect, step.position, isMobile)}
+          className={`z-10 ${isMobile ? 'fixed left-1/2 -translate-x-1/2 bottom-[88px] w-[calc(100vw-32px)] max-w-[360px]' : 'absolute'}`}
+          style={isMobile ? undefined : getTooltipPosition(targetRect, step.position, false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl border border-black/5 w-[calc(100vw-2rem)] sm:w-[360px] max-w-[360px] overflow-hidden"
+            className={`bg-white rounded-2xl shadow-2xl border border-black/5 overflow-hidden ${isMobile ? 'max-h-[55vh] overflow-y-auto' : 'w-[360px]'}`}
           >
             {/* Progress bar */}
             <div className="h-1 bg-gray-100">

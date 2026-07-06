@@ -1111,6 +1111,16 @@ export default function MenuPage() {
       const callsCollection = collection(db, 'restaurants', restaurantId, 'calls')
       const newCallRef = doc(callsCollection)
 
+      const loyaltyPreview = loyaltyCustomer && pendingRewardsComputed.length > 0
+        ? {
+            campaignId: pendingRewardsComputed[0].campaignId,
+            campaignName: pendingRewardsComputed[0].campaignName,
+            rewardProductName: pendingRewardsComputed[0].rewardProductName,
+            rewardQuantity: pendingRewardsComputed[0].rewardQuantity,
+            eligible: true,
+          }
+        : null
+
       batch.set(newCallRef, {
         tableId: tableDocId,
         tableNumber: effectiveTableNumber,
@@ -1124,6 +1134,7 @@ export default function MenuPage() {
           customerId: loyaltyCustomer.id,
           customerPhone: loyaltyCustomer.phone,
         } : {}),
+        ...(loyaltyPreview ? { loyaltyPreview } : {}),
         createdAt: serverTimestamp(),
         waiterId: null,
         waiterName: null,

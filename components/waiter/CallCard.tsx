@@ -1,5 +1,7 @@
 import { Check, Clock3 } from 'lucide-react'
 import { getCallTableLabel } from '@/lib/firestore-models'
+import CustomerRewards from '@/components/orders/CustomerRewards'
+import LoyaltyPreviewBadge from '@/components/orders/LoyaltyPreviewBadge'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import type { WaiterCall } from '@/lib/types'
@@ -17,9 +19,11 @@ interface Props {
   onAccept?: () => void
   onComplete?: () => void
   busy?: boolean
+  restaurantId?: string
+  actor?: { uid: string; name: string; role: 'admin' | 'waiter' }
 }
 
-export default function CallCard({ call, variant, onAccept, onComplete, busy = false }: Props) {
+export default function CallCard({ call, variant, onAccept, onComplete, busy = false, restaurantId, actor }: Props) {
   const meta = getCallTipUi(call.tip)
   const AccentIcon = meta.Icon
 
@@ -91,6 +95,23 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
         </div>
 
         <OrderBreakdown call={call} className="mb-3" />
+
+        {call.loyaltyPreview && call.loyaltyPreview.eligible && (
+          <div className="mb-3">
+            <LoyaltyPreviewBadge preview={call.loyaltyPreview} />
+          </div>
+        )}
+
+        {call.customerId && restaurantId && actor && (
+          <div className="mb-3">
+            <CustomerRewards
+              restaurantId={restaurantId}
+              customerId={call.customerId}
+              customerName={call.customerName}
+              actor={actor}
+            />
+          </div>
+        )}
 
         {/* Action button */}
         {variant === 'pending' && onAccept ? (

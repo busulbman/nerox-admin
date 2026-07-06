@@ -169,6 +169,14 @@ export interface CustomerGroup {
   items: CartItem[]
 }
 
+export interface LoyaltyPreview {
+  campaignId: string
+  campaignName: string
+  rewardProductName: string
+  rewardQuantity: number
+  eligible: boolean
+}
+
 export interface WaiterCall {
   id: string
   tableId: string
@@ -186,6 +194,7 @@ export interface WaiterCall {
   customerName?: string
   customerId?: string
   customerPhone?: string
+  loyaltyPreview?: LoyaltyPreview
   note?: string
   createdAt: number
   acceptedAt?: number

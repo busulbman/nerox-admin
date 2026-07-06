@@ -801,6 +801,8 @@ export default function WaiterPage() {
                         variant="pending"
                         busy={callBusyId === call.id}
                         onAccept={() => acceptCall(call)}
+                        restaurantId={restaurantId}
+                        actor={user && profile ? { uid: user.uid, name: profile.name || 'Garson', role: 'waiter' } : undefined}
                       />
                     ))}
                   </div>
@@ -823,6 +825,8 @@ export default function WaiterPage() {
                         variant="active"
                         busy={callBusyId === call.id}
                         onComplete={() => completeCall(call)}
+                        restaurantId={restaurantId}
+                        actor={user && profile ? { uid: user.uid, name: profile.name || 'Garson', role: 'waiter' } : undefined}
                       />
                     ))}
                   </div>

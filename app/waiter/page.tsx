@@ -3,14 +3,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  addDoc, collection, doc, getDocs, onSnapshot,
+  Timestamp, addDoc, collection, doc, getDocs, onSnapshot,
   runTransaction, serverTimestamp, updateDoc, writeBatch,
 } from 'firebase/firestore'
 import { ref as dbRef, set as dbSet, onDisconnect as dbOnDisconnect, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database'
 import { signOut } from 'firebase/auth'
 import { Armchair, Bell, CircleCheckBig, ClipboardList, Clock3, Globe, LogOut, Minus, Plus, RefreshCw, Settings, Star, Trophy, X } from 'lucide-react'
 import { auth, db, rd, rtdb } from '@/lib/firebase'
-import { completeRestaurantCall } from '@/lib/call-sync'
+import { completeRestaurantCall, markOrderPaid } from '@/lib/call-sync'
 import { useAuth } from '@/components/AuthProvider'
 import CallCard from '@/components/waiter/CallCard'
 import ProfilePhotoPicker from '@/components/ProfilePhotoPicker'
@@ -53,6 +53,7 @@ import {
   DEFAULT_PRIMARY_COLOR,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
+import { createTableSessionWindow } from '@/lib/table-session'
 import { isImgBbConfigured, uploadImageToImgBB } from '@/lib/imgbb'
 import LoadingScreen from '@/components/LoadingScreen'
 import { buildThemePalette, buildThemeStyleVars } from '@/lib/ui-theme'
@@ -135,6 +136,7 @@ export default function WaiterPage() {
   const [myRatings, setMyRatings] = useState<Rating[]>([])
   const [callBusyId, setCallBusyId] = useState<string | null>(null)
   const [callError, setCallError] = useState('')
+  const [callSuccess, setCallSuccess] = useState('')
   const [, setTick] = useState(0)
 
   // Menu data (used by the manual order modal)
@@ -476,6 +478,60 @@ export default function WaiterPage() {
     }
   }
 
+  async function deliverOrder(call: WaiterCall) {
+    if (!profile || !restaurantId) return
+    setCallBusyId(call.id)
+    setCallError('')
+    setCallSuccess('')
+    try {
+      logFirestoreWrite('waiter/deliver order', { restaurantId, callId: call.id })
+      await updateDoc(doc(db, 'restaurants', restaurantId, 'calls', call.id), {
+        kitchenStatus: 'delivered',
+        deliveredAt: serverTimestamp(),
+        kitchenUpdatedById: profile.uid,
+        kitchenUpdatedByName: profile.name || 'Garson',
+      })
+    } catch (err) {
+      console.error('Sipariş teslim hatası:', err)
+      setCallError(err instanceof Error ? err.message : 'Sipariş teslim edilemedi.')
+    } finally {
+      setCallBusyId(null)
+    }
+  }
+
+  async function closeOrderPayment(call: WaiterCall) {
+    if (!profile || !restaurantId) return
+    setCallBusyId(call.id)
+    setCallError('')
+    setCallSuccess('')
+    try {
+      logFirestoreWrite('waiter/close order payment', { restaurantId, callId: call.id })
+      const result = await markOrderPaid(restaurantId, call, {
+        uid: profile.uid,
+        name: profile.name,
+        role: 'waiter',
+      })
+      setActive((current) => current.filter((activeCall) => activeCall.id !== call.id))
+      const rewardText = result.earnedRewards
+        .map((reward) => `${reward.rewardCount * reward.rewardQuantity} ${reward.rewardProductName}`)
+        .join(', ')
+      setCallSuccess(
+        rewardText
+          ? `Masa ${getCallTableLabel(call)} hesabı kapatıldı. Müşteri hediye kazandı: ${rewardText} 🎁`
+          : `Masa ${getCallTableLabel(call)} hesabı kapatıldı.`
+      )
+      if (activeTab === 'calls' && openSection === 'done') {
+        const allCompleted = await fetchDoneCalls(profile.uid, restaurantId)
+        setDone(allCompleted.filter((doneCall) => getCallCompletedAt(doneCall) >= getTodayStartTs()))
+      }
+    } catch (err) {
+      console.error('Hesap kapatma hatası:', err)
+      setCallError(err instanceof Error ? err.message : 'Hesap kapatılamadı.')
+    } finally {
+      setCallBusyId(null)
+    }
+  }
+
   async function handleProfilePhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -533,6 +589,7 @@ export default function WaiterPage() {
     setTablesBusy(table.id)
     setTablesMsg('')
     const newSessionId = createSessionId()
+    const { sessionStartedAtMs, sessionExpiresAtMs } = createTableSessionWindow(restaurantSettings)
     try {
       logFirestoreWrite('waiter/open table session', { tableId: table.id, sessionId: newSessionId })
       await runTransaction(db, async (tx) => {
@@ -541,7 +598,15 @@ export default function WaiterPage() {
         const t = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
         if (t.status !== 'boş') throw new Error(`Masa şu anda "${TABLE_STATUS_LABEL[t.status] ?? t.status}" durumunda.`)
         tx.update(tableDocRef(table.id), {
-          status: 'aktif', sessionId: newSessionId, openedAt: serverTimestamp(), lastPaymentCompletedAt: null, lastPaymentWaiterName: null, updatedAt: serverTimestamp(),
+          status: 'aktif',
+          sessionId: newSessionId,
+          openedAt: serverTimestamp(),
+          sessionStartedAt: Timestamp.fromMillis(sessionStartedAtMs),
+          sessionExpiresAt: Timestamp.fromMillis(sessionExpiresAtMs),
+          closedAt: null,
+          lastPaymentCompletedAt: null,
+          lastPaymentWaiterName: null,
+          updatedAt: serverTimestamp(),
         })
       })
       // Optimistic update: show the table as active immediately; the realtime
@@ -553,8 +618,11 @@ export default function WaiterPage() {
                 ...t,
                 status: 'aktif' as TableStatus,
                 sessionId: newSessionId,
-                openedAt: Date.now(),
-                updatedAt: Date.now(),
+                openedAt: sessionStartedAtMs,
+                sessionStartedAt: sessionStartedAtMs,
+                sessionExpiresAt: sessionExpiresAtMs,
+                closedAt: null,
+                updatedAt: sessionStartedAtMs,
                 lastPaymentCompletedAt: null,
                 lastPaymentWaiterName: null,
               }
@@ -642,6 +710,7 @@ export default function WaiterPage() {
     if (table.status === 'boş') {
       // Open the table first
       const newSessionId = createSessionId()
+      const { sessionStartedAtMs, sessionExpiresAtMs } = createTableSessionWindow(restaurantSettings)
       try {
         logFirestoreWrite('waiter/open table for order', { tableId: table.id, sessionId: newSessionId })
         await runTransaction(db, async (tx) => {
@@ -650,18 +719,43 @@ export default function WaiterPage() {
           const t = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
           if (t.status !== 'boş') throw new Error(`Masa şu anda "${TABLE_STATUS_LABEL[t.status] ?? t.status}" durumunda.`)
           tx.update(tableDocRef(table.id), {
-            status: 'aktif', sessionId: newSessionId, openedAt: serverTimestamp(), lastPaymentCompletedAt: null, lastPaymentWaiterName: null, updatedAt: serverTimestamp(),
+            status: 'aktif',
+            sessionId: newSessionId,
+            openedAt: serverTimestamp(),
+            sessionStartedAt: Timestamp.fromMillis(sessionStartedAtMs),
+            sessionExpiresAt: Timestamp.fromMillis(sessionExpiresAtMs),
+            closedAt: null,
+            lastPaymentCompletedAt: null,
+            lastPaymentWaiterName: null,
+            updatedAt: serverTimestamp(),
           })
         })
         // Optimistic update for the tables grid, then proceed
         setTables((current) =>
           current.map((t) =>
             t.id === table.id
-              ? { ...t, status: 'aktif' as TableStatus, sessionId: newSessionId, openedAt: Date.now(), updatedAt: Date.now() }
+              ? {
+                  ...t,
+                  status: 'aktif' as TableStatus,
+                  sessionId: newSessionId,
+                  openedAt: sessionStartedAtMs,
+                  sessionStartedAt: sessionStartedAtMs,
+                  sessionExpiresAt: sessionExpiresAtMs,
+                  closedAt: null,
+                  updatedAt: sessionStartedAtMs,
+                }
               : t
           )
         )
-        setSelectedOrderTable({ ...table, status: 'aktif', sessionId: newSessionId })
+        setSelectedOrderTable({
+          ...table,
+          status: 'aktif',
+          sessionId: newSessionId,
+          openedAt: sessionStartedAtMs,
+          sessionStartedAt: sessionStartedAtMs,
+          sessionExpiresAt: sessionExpiresAtMs,
+          closedAt: null,
+        })
         setOrderStep('products')
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Masa açılamadı.')
@@ -910,6 +1004,15 @@ export default function WaiterPage() {
               </div>
             )}
 
+            {callSuccess && (
+              <div
+                className="rounded-2xl px-4 py-3 text-sm"
+                style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }}
+              >
+                {callSuccess}
+              </div>
+            )}
+
             {/* Bekleyen */}
             {openSection === 'pending' && (
               <section>
@@ -949,6 +1052,8 @@ export default function WaiterPage() {
                         variant="active"
                         busy={callBusyId === call.id}
                         onComplete={() => completeCall(call)}
+                        onDeliver={() => deliverOrder(call)}
+                        onMarkPaid={() => closeOrderPayment(call)}
                         restaurantId={restaurantId}
                         actor={user && profile ? { uid: user.uid, name: profile.name || 'Garson', role: 'waiter' } : undefined}
                       />

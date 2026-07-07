@@ -103,17 +103,42 @@ service cloud.firestore {
     }
 
     function waiterCanDeliverReadyOrder(rid) {
+      // Kitchen may not be enabled on every plan, so waiters can deliver
+      // orders from any pre-delivery kitchen state.
       return isWaiter(rid)
-        && resource.data.kitchenStatus == 'ready'
+        && resource.data.kitchenStatus in ['pending', 'preparing', 'ready']
         && request.resource.data.kitchenStatus == 'delivered'
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['kitchenStatus', 'deliveredAt', 'kitchenUpdatedById', 'kitchenUpdatedByName']);
     }
 
+    function waiterCanCloseOrderPayment(rid) {
+      // "Hesap Ödendi / Hesabı Kapat": closes the payment of an order and, if
+      // needed, completes/delivers it in the same write. Loyalty runs only
+      // after this transition.
+      return isWaiter(rid)
+        && resource.data.tip == 'sipariş'
+        && !('paymentStatus' in resource.data && resource.data.paymentStatus == 'paid')
+        && request.resource.data.paymentStatus == 'paid'
+        && request.resource.data.paidAt is timestamp
+        && request.resource.data.paidById == request.auth.uid
+        && request.resource.data.paidByRole == 'waiter'
+        && request.resource.data.durum == 'tamamlandı'
+        && request.resource.data.status == 'completed'
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'paymentStatus', 'paidAt', 'paidById', 'paidByName', 'paidByRole',
+              'durum', 'status', 'completedAt', 'resolvedAt', 'completedById',
+              'completedByName', 'completedByRole', 'waiterId', 'waiterName',
+              'kitchenStatus', 'deliveredAt', 'kitchenUpdatedById', 'kitchenUpdatedByName'
+            ]);
+    }
+
     function waiterCanMarkLoyaltyProcessed(rid) {
-      // Loyalty engine marks a completed order as processed (idempotency flag).
+      // Loyalty engine marks a paid order as processed (idempotency flag).
       return isWaiter(rid)
         && resource.data.durum == 'tamamlandı'
+        && resource.data.paymentStatus == 'paid'
         && request.resource.data.loyaltyProcessed == true
         && request.resource.data.loyaltyRewardIds is list
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -156,6 +181,18 @@ service cloud.firestore {
       );
     }
 
+    function tableSessionIsLive(tableData) {
+      return tableData.status in ['aktif', 'çağrı var', 'hesap istendi']
+        && tableData.sessionId is string
+        && tableData.sessionId.size() > 0
+        && tableData.sessionExpiresAt is timestamp
+        && tableData.sessionExpiresAt > request.time;
+    }
+
+    function requestedPublicTableData(rid) {
+      return get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data;
+    }
+
     function publicCallTargetsLiveTableSession(rid) {
       return request.resource.data.restaurantId == rid
         && request.resource.data.tableId is string
@@ -164,9 +201,9 @@ service cloud.firestore {
         && request.resource.data.sessionId is string
         && request.resource.data.sessionId.size() > 0
         && exists(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId))
-        && get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data.number == request.resource.data.tableNumber
-        && get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data.sessionId == request.resource.data.sessionId
-        && get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data.status in ['aktif', 'çağrı var', 'hesap istendi'];
+        && requestedPublicTableData(rid).number == request.resource.data.tableNumber
+        && requestedPublicTableData(rid).sessionId == request.resource.data.sessionId
+        && tableSessionIsLive(requestedPublicTableData(rid));
     }
 
     function validPublicCallBase(rid) {
@@ -356,20 +393,32 @@ service cloud.firestore {
           && request.resource.data.status == 'aktif'
           && request.resource.data.sessionId is string
           && request.resource.data.sessionId.size() > 0
+          && request.resource.data.openedAt is timestamp
+          && request.resource.data.sessionStartedAt is timestamp
+          && request.resource.data.sessionExpiresAt is timestamp
+          && request.resource.data.sessionExpiresAt > request.time
+          && request.resource.data.closedAt == null
+          && request.resource.data.updatedAt is timestamp
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'sessionId', 'openedAt', 'updatedAt']);
+              .hasOnly(['status', 'sessionId', 'openedAt', 'sessionStartedAt', 'sessionExpiresAt', 'closedAt', 'updatedAt']);
 
         // QR menu: update table status for call (aktif -> çağrı var, aktif -> hesap istendi)
         allow update: if restaurantAllowsPublicAccess(rid)
           && resource.data.status == 'aktif'
+          && tableSessionIsLive(resource.data)
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
+          && request.resource.data.sessionId == resource.data.sessionId
+          && request.resource.data.updatedAt is timestamp
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
 
         // QR menu: update table status for call from existing call states
         allow update: if restaurantAllowsPublicAccess(rid)
           && resource.data.status in ['çağrı var', 'hesap istendi']
+          && tableSessionIsLive(resource.data)
           && request.resource.data.status in ['çağrı var', 'hesap istendi']
+          && request.resource.data.sessionId == resource.data.sessionId
+          && request.resource.data.updatedAt is timestamp
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt']);
 
@@ -382,7 +431,7 @@ service cloud.firestore {
 
           function tableIsActive() {
             return exists(/databases/$(database)/documents/restaurants/$(rid)/tables/$(tableId))
-              && parentTable().status in ['aktif', 'çağrı var', 'hesap istendi'];
+              && tableSessionIsLive(parentTable());
           }
 
           // Staff can read/write all cart items
@@ -406,11 +455,15 @@ service cloud.firestore {
           // Public can update cart items (quantity changes)
           allow update: if restaurantAllowsPublicAccess(rid)
             && tableIsActive()
+            && resource.data.sessionId == parentTable().sessionId
+            && request.resource.data.sessionId == resource.data.sessionId
             && request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['quantity', 'updatedAt']);
 
           // Public can delete cart items
-          allow delete: if restaurantAllowsPublicAccess(rid) && tableIsActive();
+          allow delete: if restaurantAllowsPublicAccess(rid)
+            && tableIsActive()
+            && resource.data.sessionId == parentTable().sessionId;
         }
       }
 
@@ -425,7 +478,7 @@ service cloud.firestore {
 
         // Admin can manage all calls, waiters only their own accept/complete flow
         allow create, update, delete: if isAdmin(rid);
-        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid) || waiterCanDeliverReadyOrder(rid) || waiterCanMarkLoyaltyProcessed(rid);
+        allow update: if waiterCanAcceptCall(rid) || waiterCanCompleteOwnCall(rid) || waiterCanDeliverReadyOrder(rid) || waiterCanCloseOrderPayment(rid) || waiterCanMarkLoyaltyProcessed(rid);
 
         // Waiter can create manual orders
         allow create: if waiterCanCreateOrder(rid);

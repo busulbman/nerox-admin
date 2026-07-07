@@ -95,6 +95,10 @@ export async function registerRestaurantAccount(input: SelfServiceRegistrationIn
       status: 'boş',
       active: true,
       sessionId: null,
+      openedAt: null,
+      sessionStartedAt: null,
+      sessionExpiresAt: null,
+      closedAt: null,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     })

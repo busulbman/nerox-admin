@@ -8,7 +8,7 @@ import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import CustomerRewards from '@/components/orders/CustomerRewards'
 import LoyaltyPreviewBadge from '@/components/orders/LoyaltyPreviewBadge'
 import OrderBreakdown from '@/components/orders/OrderBreakdown'
-import { completeRestaurantCall } from '@/lib/call-sync'
+import { completeRestaurantCall, markOrderPaid } from '@/lib/call-sync'
 import { getCallTipUi } from '@/lib/call-tip-ui'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { getCallCompletedAt, getCallTableLabel, isOpenWaiterCallStatus, normalizeWaiterCall } from '@/lib/firestore-models'
@@ -44,6 +44,13 @@ function getOpenCallStatusBadge(call: WaiterCall) {
   return call.durum === 'kabul edildi'
     ? { label: 'Kabul Edildi', style: { background: '#fef3c7', color: '#a16207' } }
     : { label: 'Bekliyor', style: { background: '#fee2e2', color: '#dc2626' } }
+}
+
+function getPaymentBadge(call: WaiterCall) {
+  if (call.tip !== 'sipariş') return null
+  return call.paymentStatus === 'paid'
+    ? { label: 'Ödendi', style: { background: '#d1fae5', color: '#047857' } }
+    : { label: 'Ödenmedi', style: { background: '#f3f4f6', color: '#6b7280' } }
 }
 
 function elapsed(ts: number): string {
@@ -125,6 +132,26 @@ export default function CallsPage() {
       await completeRestaurantCall(call.restaurantId || restaurantId, call, actor)
     } catch (err) {
       console.error('Çağrı tamamlama hatası:', err)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function closeOrderPayment(call: WaiterCall) {
+    if (!user || !profile) return
+    setBusyId(call.id)
+    try {
+      logFirestoreWrite('dashboard/close order payment', { restaurantId: call.restaurantId || restaurantId, callId: call.id })
+      await markOrderPaid(call.restaurantId || restaurantId, call, {
+        uid: user.uid,
+        name: profile.name || 'İşletme',
+        role: profile.role as 'admin' | 'waiter',
+      })
+      if (tab === 'completed') {
+        await loadCompletedCalls()
+      }
+    } catch (err) {
+      console.error('Hesap kapatma hatası:', err)
     } finally {
       setBusyId(null)
     }
@@ -315,6 +342,7 @@ export default function CallsPage() {
             const tipUi = getCallTipUi(call.tip)
             const TipIcon = tipUi.Icon
             const statusBadge = getOpenCallStatusBadge(call)
+            const paymentBadge = getPaymentBadge(call)
             return (
               <div
                 key={call.id}
@@ -336,6 +364,14 @@ export default function CallsPage() {
                     >
                       {statusBadge.label}
                     </span>
+                    {paymentBadge && (
+                      <span
+                        className="text-xs px-2 py-0.5 rounded-full mt-1 ml-1 inline-block"
+                        style={paymentBadge.style}
+                      >
+                        {paymentBadge.label}
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className="text-2xl font-bold" style={{ color: TEXT }}>#{getCallTableLabel(call)}</div>
@@ -374,14 +410,25 @@ export default function CallsPage() {
 
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-gray-400 text-xs">⏱ {elapsed(call.createdAt)} önce</span>
-                  <button
-                    onClick={() => resolveCall(call)}
-                    disabled={busyId === call.id}
-                    className="text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                    style={{ background: '#22c55e' }}
-                  >
-                    {busyId === call.id ? 'İşleniyor...' : 'Tamamlandı ✓'}
-                  </button>
+                  {call.tip === 'sipariş' ? (
+                    <button
+                      onClick={() => closeOrderPayment(call)}
+                      disabled={busyId === call.id}
+                      className="text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      style={{ background: '#22c55e' }}
+                    >
+                      {busyId === call.id ? 'İşleniyor...' : 'Hesap Ödendi ✓'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => resolveCall(call)}
+                      disabled={busyId === call.id}
+                      className="text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      style={{ background: '#22c55e' }}
+                    >
+                      {busyId === call.id ? 'İşleniyor...' : 'Tamamlandı ✓'}
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -394,6 +441,8 @@ export default function CallsPage() {
             const TipIcon = tipUi.Icon
             const completedAt = getCallCompletedAt(call)
             const selected = selectedCompletedIds.has(call.id)
+            const paymentBadge = getPaymentBadge(call)
+            const needsPayment = call.tip === 'sipariş' && call.paymentStatus !== 'paid'
 
             return (
               <div
@@ -425,6 +474,11 @@ export default function CallsPage() {
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#dcfce7', color: '#15803d' }}>
                         Tamamlandı
                       </span>
+                      {paymentBadge && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={paymentBadge.style}>
+                          {paymentBadge.label}
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-gray-500 mt-1">
                       {tipUi.label}
@@ -444,14 +498,26 @@ export default function CallsPage() {
                   <p>{formatDate(completedAt)}</p>
                   <p className="mt-1">Toplam süre: {formatDuration(completedAt - call.createdAt)}</p>
                   {!selectionMode && (
-                    <button
-                      onClick={() => void deleteCompletedCall(call)}
-                      disabled={deleteBusyId === call.id}
-                      className="mt-3 inline-flex rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50"
-                      style={{ background: '#fee2e2', color: '#b91c1c' }}
-                    >
-                      {deleteBusyId === call.id ? 'Siliniyor...' : 'Sil'}
-                    </button>
+                    <div className="mt-3 flex gap-2 md:justify-end">
+                      {needsPayment && (
+                        <button
+                          onClick={() => void closeOrderPayment(call)}
+                          disabled={busyId === call.id}
+                          className="inline-flex rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                          style={{ background: '#22c55e' }}
+                        >
+                          {busyId === call.id ? 'İşleniyor...' : 'Hesap Ödendi ✓'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => void deleteCompletedCall(call)}
+                        disabled={deleteBusyId === call.id}
+                        className="inline-flex rounded-lg px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                        style={{ background: '#fee2e2', color: '#b91c1c' }}
+                      >
+                        {deleteBusyId === call.id ? 'Siliniyor...' : 'Sil'}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

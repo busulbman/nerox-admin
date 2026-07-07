@@ -134,6 +134,7 @@ export interface RestaurantGeneralSettings {
   wifiEnabled?: boolean
   wifiName?: string
   wifiPassword?: string
+  tableSessionDurationMinutes?: number
   updatedAt?: number | null
 }
 
@@ -314,6 +315,11 @@ export interface WaiterCall {
   customerPhone?: string
   loyaltyPreview?: LoyaltyPreview
   loyaltyProcessed?: boolean
+  paymentStatus?: OrderPaymentStatus
+  paidAt?: number
+  paidById?: string
+  paidByName?: string
+  paidByRole?: 'admin' | 'waiter'
   note?: string
   createdAt: number
   acceptedAt?: number
@@ -332,6 +338,40 @@ export interface WaiterCall {
 }
 
 export type KitchenStatus = 'pending' | 'preparing' | 'ready' | 'delivered'
+
+export type OrderPaymentStatus = 'unpaid' | 'paid'
+
+export type OrderFlowStage =
+  | 'awaiting_approval'
+  | 'sent_to_kitchen'
+  | 'preparing'
+  | 'ready'
+  | 'delivered'
+  | 'paid'
+
+/**
+ * Sipariş yaşam döngüsü aşaması. Kampanya motoru yalnızca `paid` aşamasında
+ * çalışır; teslim/tamamlama kampanya kazandırmaz.
+ */
+export function getOrderFlowStage(
+  call: Pick<WaiterCall, 'durum' | 'kitchenStatus' | 'paymentStatus'>
+): OrderFlowStage {
+  if (call.paymentStatus === 'paid') return 'paid'
+  if (call.kitchenStatus === 'delivered' || call.durum === 'tamamlandı') return 'delivered'
+  if (call.kitchenStatus === 'ready') return 'ready'
+  if (call.kitchenStatus === 'preparing') return 'preparing'
+  if (call.durum === 'kabul edildi') return 'sent_to_kitchen'
+  return 'awaiting_approval'
+}
+
+export const ORDER_FLOW_STAGE_LABELS: Record<OrderFlowStage, string> = {
+  awaiting_approval: 'Garson Onayı Bekliyor',
+  sent_to_kitchen: 'Mutfağa Gönderildi',
+  preparing: 'Hazırlanıyor',
+  ready: 'Hazır',
+  delivered: 'Teslim Edildi',
+  paid: 'Ödendi',
+}
 
 export const KITCHEN_STATUS_LABELS: Record<KitchenStatus, string> = {
   pending: 'Bekliyor',
@@ -367,6 +407,9 @@ export interface Table {
   active?: boolean
   sessionId: string | null
   openedAt: number | null
+  sessionStartedAt?: number | null
+  sessionExpiresAt?: number | null
+  closedAt?: number | null
   lastPaymentCompletedAt?: number | null
   lastPaymentWaiterName?: string | null
   createdAt: number | null

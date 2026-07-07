@@ -1,4 +1,5 @@
 import type { Restaurant, RestaurantGeneralSettings, RestaurantPlan, RestaurantStatus } from '@/lib/types'
+import { DEFAULT_TABLE_SESSION_DURATION_MINUTES, resolveTableSessionDurationMinutes } from '@/lib/table-session'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 const DAY_IN_MS = 24 * 60 * 60 * 1000
@@ -16,6 +17,7 @@ export const EMPTY_RESTAURANT_GENERAL_SETTINGS: RestaurantGeneralSettings = {
   wifiEnabled: false,
   wifiName: '',
   wifiPassword: '',
+  tableSessionDurationMinutes: DEFAULT_TABLE_SESSION_DURATION_MINUTES,
   updatedAt: null,
 }
 
@@ -107,6 +109,10 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
   const wifiEnabled = data.wifiEnabled === true
   const wifiName = typeof data.wifiName === 'string' ? data.wifiName.trim() : ''
   const wifiPassword = typeof data.wifiPassword === 'string' ? data.wifiPassword : ''
+  const tableSessionDurationMinutes = resolveTableSessionDurationMinutes({
+    tableSessionDurationMinutes:
+      typeof data.tableSessionDurationMinutes === 'number' ? data.tableSessionDurationMinutes : undefined,
+  })
 
   return {
     businessName,
@@ -116,6 +122,7 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
     wifiEnabled,
     wifiName,
     wifiPassword,
+    tableSessionDurationMinutes,
     updatedAt: toMillis(data.updatedAt),
   }
 }
@@ -191,6 +198,7 @@ export function mergeRestaurantGeneralSettings(
     wifiEnabled: settings.wifiEnabled ?? false,
     wifiName: settings.wifiName ?? '',
     wifiPassword: settings.wifiPassword ?? '',
+    tableSessionDurationMinutes: resolveTableSessionDurationMinutes(settings),
     updatedAt: settings.updatedAt,
   }
 }

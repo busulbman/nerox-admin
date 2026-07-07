@@ -30,10 +30,13 @@ export type ProcessLoyaltyResult = {
 }
 
 /**
- * Runs after an order call is completed. Accumulates campaign progress for the
- * registered customer, creates rewards when the threshold is crossed and logs
- * loyalty transactions. Idempotent per call via `loyaltyProcessed` on the call
- * document (checked inside a Firestore transaction to survive races).
+ * Runs only after an order's payment is closed (`paymentStatus === 'paid'`).
+ * Placing an order, waiter approval, kitchen states or delivery never earn
+ * campaign progress. Accumulates campaign progress for the registered
+ * customer, creates rewards when the threshold is crossed and logs loyalty
+ * transactions. Idempotent per call via `loyaltyProcessed` on the call
+ * document (checked inside a Firestore transaction to survive races), so a
+ * paid order can never produce duplicate rewards.
  */
 export async function processLoyaltyForCall({
   restaurantId,
@@ -67,7 +70,7 @@ export async function processLoyaltyForCall({
     const call = normalizeWaiterCall(callSnap.id, callSnap.data() as Record<string, unknown>)
 
     if (call.loyaltyProcessed) return noResult
-    if (call.tip !== 'sipariş' || call.durum !== 'tamamlandı') return noResult
+    if (call.tip !== 'sipariş' || call.paymentStatus !== 'paid') return noResult
 
     const customerId = call.customerId?.trim()
     if (!customerId) return noResult

@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
+  Timestamp,
   collection,
   doc,
   getDoc,
@@ -22,11 +23,11 @@ import {
   BadgeCheck,
   Check,
   CircleCheckBig,
+  ClipboardList,
   Copy,
   Gift,
   Globe,
   LoaderCircle,
-  Mail,
   Phone,
   SearchX,
   ShoppingBag,
@@ -60,6 +61,12 @@ import {
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
+import {
+  createTableSessionWindow,
+  isLiveTableSessionStatus,
+  isTableSessionExpired,
+  isTableSessionLive,
+} from '@/lib/table-session'
 import { buildThemePalette, buildThemeStyleVars, withAlpha } from '@/lib/ui-theme'
 import {
   DEFAULT_LANGUAGE,
@@ -82,6 +89,7 @@ import {
   subscribeToSharedCart,
   updateSharedCartItemQuantity,
 } from '@/lib/shared-cart'
+import { getOrderFlowStage, type OrderFlowStage } from '@/lib/types'
 import type {
   Category,
   LoyaltyCampaign,
@@ -96,7 +104,7 @@ import { formatPriceWithConversion, getExchangeRates, type ExchangeRates } from 
 import { calculatePendingRewards } from '@/lib/loyalty-rewards'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
-type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'missing' | 'error'
+type AccessState = 'checking' | 'ready' | 'locked' | 'cleaning' | 'expired' | 'missing' | 'error'
 type TableLookupResult = { tableDocId: string; table: Table }
 type RatingForm = { serviceRating: number; waiterRating: number; comment: string }
 type OnboardingStep = 'language' | 'name' | 'done'
@@ -146,6 +154,24 @@ type CachedMenuData = {
 
 const menuDataCache = new Map<string, CachedMenuData>()
 const TIP_OPTIONS: CallTip[] = ['sipariş', 'hesap', 'yardım']
+
+const ORDER_STAGE_I18N_KEY: Record<OrderFlowStage, string> = {
+  awaiting_approval: 'orderStatusAwaitingApproval',
+  sent_to_kitchen: 'orderStatusSentToKitchen',
+  preparing: 'orderStatusPreparing',
+  ready: 'orderStatusReady',
+  delivered: 'orderStatusDelivered',
+  paid: 'orderStatusPaid',
+}
+
+const ORDER_STAGE_COLORS: Record<OrderFlowStage, { bg: string; text: string }> = {
+  awaiting_approval: { bg: '#fee2e2', text: '#dc2626' },
+  sent_to_kitchen: { bg: '#fef3c7', text: '#a16207' },
+  preparing: { bg: '#ffedd5', text: '#c2410c' },
+  ready: { bg: '#dcfce7', text: '#15803d' },
+  delivered: { bg: '#dbeafe', text: '#1d4ed8' },
+  paid: { bg: '#d1fae5', text: '#047857' },
+}
 const EMPTY_RATING_FORM: RatingForm = { serviceRating: 0, waiterRating: 0, comment: '' }
 const EMPTY_LOYALTY_FORM: LoyaltyRegisterForm = { name: '', phone: '', email: '' }
 const ANONYMOUS_CUSTOMER_NAME_PATTERN_BASE = /^(Müşteri|Customer|Клиент|عميل)(?:\s+(\d+))?$/
@@ -159,11 +185,19 @@ function getSessionStorageKey(tableId: string) {
   return `nerox_session_${tableId}`
 }
 
+function getScopedSessionStorageKey(restaurantId: string, tableDocId: string) {
+  return `table_session_${restaurantId}_${tableDocId}`
+}
+
 function getLegacySessionStorageKey(restaurantId: string, tableDocId: string) {
   return `nerox:table-session:${restaurantId}:${tableDocId}`
 }
 
 function readStoredSessionId(routeTableId: string, restaurantId: string, tableDocId?: string | null) {
+  if (tableDocId) {
+    const scoped = window.localStorage.getItem(getScopedSessionStorageKey(restaurantId, tableDocId))
+    if (scoped) return scoped
+  }
   const primary = window.localStorage.getItem(getSessionStorageKey(routeTableId))
   if (primary) return primary
   if (!tableDocId) return null
@@ -171,6 +205,7 @@ function readStoredSessionId(routeTableId: string, restaurantId: string, tableDo
 }
 
 function persistSessionId(routeTableId: string, restaurantId: string, tableDocId: string, sessionId: string) {
+  window.localStorage.setItem(getScopedSessionStorageKey(restaurantId, tableDocId), sessionId)
   window.localStorage.setItem(getSessionStorageKey(routeTableId), sessionId)
   window.localStorage.setItem(getLegacySessionStorageKey(restaurantId, tableDocId), sessionId)
 }
@@ -178,8 +213,23 @@ function persistSessionId(routeTableId: string, restaurantId: string, tableDocId
 function clearStoredSessionId(routeTableId: string, restaurantId: string, tableDocId?: string | null) {
   window.localStorage.removeItem(getSessionStorageKey(routeTableId))
   if (tableDocId) {
+    window.localStorage.removeItem(getScopedSessionStorageKey(restaurantId, tableDocId))
     window.localStorage.removeItem(getLegacySessionStorageKey(restaurantId, tableDocId))
   }
+}
+
+function getInactiveSessionMessage(
+  language: MenuLanguage,
+  table: Table | null | undefined,
+  sessionId: string | null | undefined,
+  now = Date.now(),
+) {
+  if (!table) return t(language, 'sessionInactive')
+  if (table.status === 'temizlik') return t(language, 'tableBeingPrepared')
+  if (sessionId && table.sessionId === sessionId && isTableSessionExpired(table, now)) {
+    return t(language, 'sessionExpired')
+  }
+  return t(language, 'sessionInactive')
 }
 
 function getRatingPromptKey(restaurantId: string, callId: string) {
@@ -354,6 +404,7 @@ export default function MenuPage() {
   const [generalSettings, setGeneralSettings] = useState<RestaurantGeneralSettings>(EMPTY_RESTAURANT_GENERAL_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [activeCat, setActiveCat] = useState<string | null>(null)
+  const tableSessionDurationMinutes = generalSettings.tableSessionDurationMinutes
 
   const restaurantId = resolvedRestaurant?.id ?? ''
   const isDemoRestaurant =
@@ -365,6 +416,8 @@ export default function MenuPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [accessMessage, setAccessMessage] = useState<string | null>(null)
   const [sessionCalls, setSessionCalls] = useState<WaiterCall[]>([])
+  const [sessionOrders, setSessionOrders] = useState<WaiterCall[]>([])
+  const [ordersModal, setOrdersModal] = useState(false)
   const [paymentCalls, setPaymentCalls] = useState<WaiterCall[]>([])
   const [ratedCallIds, setRatedCallIds] = useState<Record<string, true>>({})
   const [actionMessage, setActionMessage] = useState<string | null>(null)
@@ -424,7 +477,11 @@ export default function MenuPage() {
   const [languageModal, setLanguageModal] = useState(false)
   const [demoTourOpen, setDemoTourOpen] = useState(false)
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null)
+  const [currentSessionTime, setCurrentSessionTime] = useState(() => Date.now())
   const previousSessionCallStates = useRef<Map<string, WaiterCall['durum']>>(new Map())
+  const previousPaidCallIds = useRef<Set<string>>(new Set())
+  const sessionCallsSnapshotSeen = useRef(false)
+  const canUseSessionActions = isTableSessionLive(table, sessionId, currentSessionTime)
 
   useEffect(() => {
     let cancelled = false
@@ -539,7 +596,7 @@ export default function MenuPage() {
   }, [language, restaurantAccessReason, restaurantId])
 
   useEffect(() => {
-    if (!restaurantId || restaurantNotFound || restaurantAccessReason) return
+    if (!restaurantId || restaurantNotFound || restaurantAccessReason || loading) return
     const currentRestaurantId = restaurantId
     let cancelled = false
     async function initSession() {
@@ -587,6 +644,11 @@ export default function MenuPage() {
         const tableRef = doc(db, 'restaurants', currentRestaurantId, 'tables', resolved.tableDocId)
 
         const result = await runTransaction(db, async (transaction) => {
+          const now = Date.now()
+          const { sessionStartedAtMs, sessionExpiresAtMs } = createTableSessionWindow(
+            { tableSessionDurationMinutes },
+            now,
+          )
           logFirestoreWrite('menu/init session transaction', {
             restaurantId: currentRestaurantId,
             tableId: resolved.tableDocId,
@@ -601,19 +663,36 @@ export default function MenuPage() {
               status: 'aktif',
               sessionId: nextSessionId,
               openedAt: serverTimestamp(),
+              sessionStartedAt: Timestamp.fromMillis(sessionStartedAtMs),
+              sessionExpiresAt: Timestamp.fromMillis(sessionExpiresAtMs),
+              closedAt: null,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             })
             return {
               state: 'ready' as const,
               message: null,
-              table: { ...resolved.table, status: 'aktif' as const, sessionId: nextSessionId },
+              table: {
+                ...resolved.table,
+                status: 'aktif' as const,
+                sessionId: nextSessionId,
+                sessionStartedAt: sessionStartedAtMs,
+                sessionExpiresAt: sessionExpiresAtMs,
+                closedAt: null,
+              },
               sessionId: nextSessionId,
+              clearStoredSession: false,
             }
           }
           const currentTable = normalizeTable(snap.id, snap.data() as Record<string, unknown>)
           if (currentTable.status === 'temizlik') {
-            return { state: 'cleaning' as const, message: t(language, 'tableBeingPrepared'), table: currentTable, sessionId: null }
+            return {
+              state: 'cleaning' as const,
+              message: t(language, 'tableBeingPrepared'),
+              table: currentTable,
+              sessionId: null,
+              clearStoredSession: false,
+            }
           }
           if (currentTable.status === 'boş') {
             const nextSessionId = createSessionId()
@@ -621,25 +700,101 @@ export default function MenuPage() {
               status: 'aktif',
               sessionId: nextSessionId,
               openedAt: serverTimestamp(),
+              sessionStartedAt: Timestamp.fromMillis(sessionStartedAtMs),
+              sessionExpiresAt: Timestamp.fromMillis(sessionExpiresAtMs),
+              closedAt: null,
               updatedAt: serverTimestamp(),
             })
             return {
               state: 'ready' as const,
               message: null,
-              table: { ...currentTable, status: 'aktif' as const, sessionId: nextSessionId },
+              table: {
+                ...currentTable,
+                status: 'aktif' as const,
+                sessionId: nextSessionId,
+                sessionStartedAt: sessionStartedAtMs,
+                sessionExpiresAt: sessionExpiresAtMs,
+                closedAt: null,
+              },
               sessionId: nextSessionId,
+              clearStoredSession: false,
             }
           }
-          if (localSessionId && currentTable.sessionId === localSessionId) {
-            return { state: 'ready' as const, message: null, table: currentTable, sessionId: localSessionId }
+
+          let liveSessionTable = currentTable
+          if (
+            liveSessionTable.sessionId &&
+            isLiveTableSessionStatus(liveSessionTable.status) &&
+            !liveSessionTable.sessionExpiresAt
+          ) {
+            const fallbackStartedAtMs = liveSessionTable.sessionStartedAt ?? liveSessionTable.openedAt ?? now
+            const { sessionExpiresAtMs: fallbackExpiresAtMs } = createTableSessionWindow(
+              { tableSessionDurationMinutes },
+              fallbackStartedAtMs,
+            )
+            transaction.update(tableRef, {
+              sessionStartedAt: Timestamp.fromMillis(fallbackStartedAtMs),
+              sessionExpiresAt: Timestamp.fromMillis(fallbackExpiresAtMs),
+              closedAt: null,
+              updatedAt: serverTimestamp(),
+            })
+            liveSessionTable = {
+              ...liveSessionTable,
+              sessionStartedAt: fallbackStartedAtMs,
+              sessionExpiresAt: fallbackExpiresAtMs,
+              closedAt: null,
+            }
+          }
+
+          if (localSessionId && liveSessionTable.sessionId === localSessionId) {
+            if (isTableSessionLive(liveSessionTable, localSessionId, now)) {
+              return {
+                state: 'ready' as const,
+                message: null,
+                table: liveSessionTable,
+                sessionId: localSessionId,
+                clearStoredSession: false,
+              }
+            }
+            return {
+              state: 'expired' as const,
+              message: t(language, 'sessionExpired'),
+              table: liveSessionTable,
+              sessionId: null,
+              clearStoredSession: false,
+            }
           }
           if (
-            currentTable.sessionId &&
-            (currentTable.status === 'aktif' || currentTable.status === 'çağrı var' || currentTable.status === 'hesap istendi')
+            !localSessionId &&
+            liveSessionTable.sessionId &&
+            isTableSessionLive(liveSessionTable, liveSessionTable.sessionId, now)
           ) {
-            return { state: 'ready' as const, message: null, table: currentTable, sessionId: currentTable.sessionId }
+            return {
+              state: 'ready' as const,
+              message: null,
+              table: liveSessionTable,
+              sessionId: liveSessionTable.sessionId,
+              clearStoredSession: false,
+            }
           }
-          return { state: 'locked' as const, message: t(language, 'activeSessionOnTable'), table: currentTable, sessionId: null }
+
+          if (liveSessionTable.sessionId && isLiveTableSessionStatus(liveSessionTable.status)) {
+            return {
+              state: isTableSessionExpired(liveSessionTable, now) ? 'expired' as const : 'locked' as const,
+              message: getInactiveSessionMessage(language, liveSessionTable, localSessionId, now),
+              table: liveSessionTable,
+              sessionId: null,
+              clearStoredSession: false,
+            }
+          }
+
+          return {
+            state: 'locked' as const,
+            message: t(language, 'sessionInactive'),
+            table: liveSessionTable,
+            sessionId: null,
+            clearStoredSession: false,
+          }
         })
 
         if (cancelled) return
@@ -651,7 +806,9 @@ export default function MenuPage() {
           setAccessMessage(null)
           return
         }
-        clearStoredSessionId(tableId, currentRestaurantId, resolved.tableDocId)
+        if (result.clearStoredSession) {
+          clearStoredSessionId(tableId, currentRestaurantId, resolved.tableDocId)
+        }
         setAccessState(result.state)
         setAccessMessage(result.message)
       } catch (error) {
@@ -662,7 +819,7 @@ export default function MenuPage() {
     }
     initSession()
     return () => { cancelled = true }
-  }, [language, restaurantAccessReason, restaurantId, restaurantNotFound, tableId])
+  }, [language, loading, restaurantAccessReason, restaurantId, restaurantNotFound, tableId, tableSessionDurationMinutes])
 
   // Load customer name when session is ready
   useEffect(() => {
@@ -821,7 +978,7 @@ export default function MenuPage() {
 
   // Subscribe to shared cart
   useEffect(() => {
-    if (!restaurantId || !tableDocId || !sessionId) return
+    if (!restaurantId || !tableDocId || !sessionId || !canUseSessionActions) return
     const unsubscribe = subscribeToSharedCart(
       restaurantId,
       tableDocId,
@@ -830,7 +987,7 @@ export default function MenuPage() {
       (error) => console.error('Cart subscription error:', error)
     )
     return () => unsubscribe()
-  }, [restaurantId, sessionId, tableDocId])
+  }, [canUseSessionActions, restaurantId, sessionId, tableDocId])
 
   // Subscribe to table updates
   useEffect(() => {
@@ -852,10 +1009,20 @@ export default function MenuPage() {
     return () => unsubscribe()
   }, [restaurantId, tableDocId])
 
+  useEffect(() => {
+    if (!table?.sessionExpiresAt) return
+    const timeoutId = window.setTimeout(() => {
+      setCurrentSessionTime(Date.now())
+    }, Math.max(0, table.sessionExpiresAt - Date.now()) + 100)
+    return () => window.clearTimeout(timeoutId)
+  }, [table?.sessionExpiresAt, table?.sessionId])
+
   // Subscribe to session calls
   useEffect(() => {
     if (!restaurantId || !sessionId || !tableDocId) return
     previousSessionCallStates.current = new Map()
+    previousPaidCallIds.current = new Set()
+    sessionCallsSnapshotSeen.current = false
     logFirestoreRead('menu/session calls listener', { restaurantId, tableId: tableDocId, sessionId })
     const sessionCallsQuery = query(
       collection(db, 'restaurants', restaurantId, 'calls'),
@@ -871,21 +1038,20 @@ export default function MenuPage() {
           .filter((call) => call.tableId === tableDocId)
           .sort((a, b) => b.createdAt - a.createdAt)
         const nextStates = new Map<string, WaiterCall['durum']>()
+        const nextPaidIds = new Set<string>()
         let nextNotice: WaiterAssistNotice | null = null
-        let hasCompletedOrder = false
+        let hasNewlyPaidOrder = false
 
         for (const call of allSessionCalls) {
           nextStates.set(call.id, call.durum)
           const previousStatus = previousSessionCallStates.current.get(call.id)
           const waiterName = call.waiterName?.trim()
 
-          if (
-            call.tip === 'sipariş' &&
-            call.durum === 'tamamlandı' &&
-            previousStatus &&
-            previousStatus !== 'tamamlandı'
-          ) {
-            hasCompletedOrder = true
+          if (call.tip === 'sipariş' && call.paymentStatus === 'paid') {
+            nextPaidIds.add(call.id)
+            if (sessionCallsSnapshotSeen.current && !previousPaidCallIds.current.has(call.id)) {
+              hasNewlyPaidOrder = true
+            }
           }
 
           if (
@@ -907,12 +1073,15 @@ export default function MenuPage() {
         }
 
         previousSessionCallStates.current = nextStates
+        previousPaidCallIds.current = nextPaidIds
+        sessionCallsSnapshotSeen.current = true
         setSessionCalls(allSessionCalls.filter((call) => call.durum === 'bekliyor' || call.durum === 'kabul edildi'))
+        setSessionOrders(allSessionCalls.filter((call) => call.tip === 'sipariş'))
         setPaymentCalls(allSessionCalls.filter((call) => call.tip === 'hesap'))
         if (nextNotice) setWaiterAssistNotice(nextNotice)
-        if (hasCompletedOrder) {
-          // Loyalty engine writes progress right after completion; small delay
-          // lets the transaction land before the status refetch.
+        if (hasNewlyPaidOrder) {
+          // Kampanya motoru yalnızca ödeme kapanınca çalışır; küçük gecikme,
+          // transaction yazımının durum API'sinden önce oturmasını sağlar.
           window.setTimeout(() => setLoyaltyRefreshKey((key) => key + 1), 2500)
         }
       },
@@ -922,6 +1091,8 @@ export default function MenuPage() {
     )
     return () => {
       previousSessionCallStates.current = new Map()
+      previousPaidCallIds.current = new Set()
+      sessionCallsSnapshotSeen.current = false
       unsubscribe()
     }
   }, [restaurantId, sessionId, tableDocId])
@@ -1002,6 +1173,10 @@ export default function MenuPage() {
   }
 
   function openCartDrawer() {
+    if (!canUseSessionActions) {
+      setActionMessage(sessionActionMessage)
+      return
+    }
     setActionMessage(null)
     setCartDrawer(true)
   }
@@ -1041,9 +1216,9 @@ export default function MenuPage() {
   }
 
   async function submitLoyaltyRegistration() {
+    // Kampanya katılımı yalnızca ad + telefon ister; telefon müşteri kimliğidir.
     const name = loyaltyRegisterForm.name.trim()
     const phone = loyaltyRegisterForm.phone.trim()
-    const email = loyaltyRegisterForm.email.trim()
 
     if (!restaurantId) {
       setLoyaltyRegisterMessage(t(language, 'customerInfoError'))
@@ -1068,7 +1243,6 @@ export default function MenuPage() {
           restaurantId,
           name,
           phone,
-          email,
         }),
       })
 
@@ -1149,8 +1323,12 @@ export default function MenuPage() {
   }
 
   async function handleAddToCart(product: Product, quantity: number) {
+    if (!canUseSessionActions) {
+      setActionMessage(sessionActionMessage)
+      return
+    }
     if (!customerName || !sessionId || !tableDocId) return
-    const existingItem = sharedCart.find((item) => item.productId === product.id && item.customerId === customerId)
+    const existingItem = activeSharedCart.find((item) => item.productId === product.id && item.customerId === customerId)
     if (existingItem) {
       await updateSharedCartItemQuantity(restaurantId, tableDocId, existingItem.id, existingItem.quantity + quantity)
     } else {
@@ -1159,6 +1337,10 @@ export default function MenuPage() {
   }
 
   async function handleUpdateCartItemQuantity(item: SharedCartItem, delta: number) {
+    if (!canUseSessionActions) {
+      setActionMessage(sessionActionMessage)
+      return
+    }
     if (!tableDocId) return
     const newQuantity = item.quantity + delta
     if (newQuantity <= 0) {
@@ -1169,6 +1351,10 @@ export default function MenuPage() {
   }
 
   async function handleRemoveCartItem(item: SharedCartItem) {
+    if (!canUseSessionActions) {
+      setActionMessage(sessionActionMessage)
+      return
+    }
     if (!tableDocId) return
     await removeSharedCartItem(restaurantId, tableDocId, item.id)
   }
@@ -1193,7 +1379,11 @@ export default function MenuPage() {
   }
 
   async function sendOrder() {
-    if (sharedCart.length === 0 || !tableDocId || !sessionId) return
+    if (!canUseSessionActions) {
+      setActionMessage(sessionActionMessage)
+      return
+    }
+    if (activeSharedCart.length === 0 || !tableDocId || !sessionId) return
     setOrderSending(true)
     setActionMessage(null)
 
@@ -1211,13 +1401,13 @@ export default function MenuPage() {
         return
       }
       const liveTable = normalizeTable(liveTableSnap.id, liveTableSnap.data() as Record<string, unknown>)
-      if (liveTable.sessionId !== sessionId) {
-        setActionMessage(t(language, 'sessionChanged'))
+      if (!isTableSessionLive(liveTable, sessionId)) {
+        setActionMessage(getInactiveSessionMessage(language, liveTable, sessionId))
         return
       }
 
       const effectiveTableNumber = liveTable.number > 0 ? liveTable.number : (table?.number ?? Number.parseInt(tableId, 10))
-      const cartItems = sharedCartToCartItems(sharedCart)
+      const cartItems = sharedCartToCartItems(activeSharedCart)
       const grouped = groupCartItemsByCustomer(cartItems)
       const totalPrice = calculateCartTotal(cartItems)
       const batch = writeBatch(db)
@@ -1265,11 +1455,11 @@ export default function MenuPage() {
 
       logFirestoreWrite('menu/send order', { restaurantId, tableId: tableDocId, items: cartItems.length })
       await batch.commit()
-      await clearSharedCartForSession(restaurantId, tableDocId, sessionId, sharedCart)
+      await clearSharedCartForSession(restaurantId, tableDocId, sessionId, activeSharedCart)
 
       setOrderSent(true)
       if (liveTable.status === 'aktif') {
-        setTable((current) => (current ? { ...current, status: 'çağrı var', updatedAt: Date.now() } : current))
+        setTable((current) => (current ? { ...current, status: 'çağrı var', updatedAt: currentSessionTime } : current))
       }
       window.setTimeout(() => {
         setOrderSent(false)
@@ -1283,6 +1473,10 @@ export default function MenuPage() {
   }
 
   async function sendCall() {
+    if (!canUseSessionActions) {
+      setActionMessage(sessionActionMessage)
+      return
+    }
     if (!selectedTip || !tableDocId) return
     setSending(true)
     setActionMessage(null)
@@ -1313,12 +1507,8 @@ export default function MenuPage() {
         setActionMessage(t(language, 'tableBeingPrepared'))
         return
       }
-      if (liveTable.status !== 'aktif' && liveTable.status !== 'çağrı var' && liveTable.status !== 'hesap istendi') {
-        setActionMessage(t(language, 'tableNotActive'))
-        return
-      }
-      if (liveTable.sessionId !== activeSessionId) {
-        setActionMessage(t(language, 'activeSessionOnTable'))
+      if (!isTableSessionLive(liveTable, activeSessionId)) {
+        setActionMessage(getInactiveSessionMessage(language, liveTable, activeSessionId))
         return
       }
 
@@ -1387,7 +1577,7 @@ export default function MenuPage() {
         waiterAverageRating: null,
         customerName: activeCustomerName,
         note: note.trim() || '',
-        createdAt: Date.now(),
+        createdAt: currentSessionTime,
       }
       setSessionCalls((current) => [newOpenCall, ...current].slice(0, 50))
       setTable((current) => (current ? { ...current, status: nextStatus } : current))
@@ -1531,12 +1721,9 @@ export default function MenuPage() {
   const menuSurfaceMuted = palette.surfaceMuted
   const menuBorderColor = palette.borderSoft
 
-  const cartCount = getSharedCartCount(sharedCart)
-  const cartTotal = calculateSharedCartTotal(sharedCart)
-  const cartGrouped = groupSharedCartByCustomer(sharedCart)
-
   const hasActiveHelpRequest = sessionCalls.some((call) => call.tip === 'yardım')
   const hasActivePaymentRequest = sessionCalls.some((call) => call.tip === 'hesap')
+  const activeOrderCount = sessionOrders.filter((order) => getOrderFlowStage(order) !== 'paid').length
   const selectedTipLockMessage =
     selectedTip === 'yardım' && hasActiveHelpRequest
       ? t(language, 'activeHelpRequest')
@@ -1544,17 +1731,27 @@ export default function MenuPage() {
         ? t(language, 'activePaymentRequest')
         : null
   const sessionMatchesTable = !!table && !!sessionId && table.sessionId === sessionId
+  const activeSharedCart = canUseSessionActions ? sharedCart : []
+  const cartCount = getSharedCartCount(activeSharedCart)
+  const cartTotal = calculateSharedCartTotal(activeSharedCart)
+  const cartGrouped = groupSharedCartByCustomer(activeSharedCart)
   const isPreparing = table?.status === 'temizlik'
   const isDifferentActiveSession =
-    !!table && (table.status === 'aktif' || table.status === 'çağrı var' || table.status === 'hesap istendi') && !sessionMatchesTable
+    !!table && isLiveTableSessionStatus(table.status) && !!table.sessionId && !!sessionId && table.sessionId !== sessionId
+  const isSessionExpired = sessionMatchesTable && isTableSessionExpired(table, currentSessionTime)
   const isSessionClosed = !!table && table.status === 'boş' && !!sessionId && table.sessionId !== sessionId
   const ratingSubmitDisabled = ratingSending || ratingSubmitted || !activeRatingCall || !ratingForm.serviceRating || !ratingForm.waiterRating
 
   const derivedAccessMessage =
     accessMessage ??
-    (isPreparing ? t(language, 'tableBeingPrepared') : isDifferentActiveSession ? t(language, 'activeSessionOnTable') : isSessionClosed ? t(language, 'sessionClosed') : null)
+    (isPreparing
+      ? t(language, 'tableBeingPrepared')
+      : isSessionExpired || isDifferentActiveSession || isSessionClosed
+        ? getInactiveSessionMessage(language, table, sessionId, currentSessionTime)
+        : null)
 
   const infoMessage = derivedAccessMessage ?? actionMessage
+  const sessionActionMessage = derivedAccessMessage ?? getInactiveSessionMessage(language, table, sessionId, currentSessionTime)
   const callButtonDisabled = accessState === 'checking' || accessState === 'missing' || accessState === 'error' || !!derivedAccessMessage || sending
   const displayTableLabel = table?.number ? String(table.number) : tableId
   const canDismissCustomerModal = !!customerName
@@ -1710,8 +1907,31 @@ export default function MenuPage() {
                   <Globe size={16} />
                   <span className="text-xs font-semibold">{currentLanguageLabel}</span>
                 </button>
+                {sessionOrders.length > 0 && (
+                  <div className="relative">
+                    <button
+                      onClick={() => { setActionMessage(null); setOrdersModal(true) }}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                      style={{ color: menuTextColor }}
+                      aria-label={t(language, 'myOrders')}
+                    >
+                      <ClipboardList size={20} />
+                    </button>
+                    {activeOrderCount > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
+                        {activeOrderCount}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="relative">
-                  <button onClick={openCartDrawer} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'cart')}>
+                  <button
+                    onClick={openCartDrawer}
+                    disabled={!canUseSessionActions}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] disabled:opacity-50"
+                    style={{ color: menuTextColor }}
+                    aria-label={t(language, 'cart')}
+                  >
                     <ShoppingBag size={20} />
                   </button>
                   {cartCount > 0 && (
@@ -1957,7 +2177,8 @@ export default function MenuPage() {
                     <button
                       type="button"
                       onClick={(event) => { event.stopPropagation(); handleQuickAdd(product) }}
-                      className="shrink-0 h-10 w-10 rounded-full font-bold text-xl flex items-center justify-center shadow-lg"
+                      disabled={!canUseSessionActions}
+                      className="shrink-0 h-10 w-10 rounded-full font-bold text-xl flex items-center justify-center shadow-lg disabled:opacity-50"
                       style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 4px 14px ${withAlpha(menuPrimaryColor, 0.35)}` }}
                       aria-label={t(language, 'quickAdd')}
                     >
@@ -2103,11 +2324,84 @@ export default function MenuPage() {
                     <span className="w-12 text-center text-base font-bold text-[#1a1a1a]">{detailQuantity}</span>
                     <button onClick={() => adjustDetailQuantity('inc')} className="h-9 w-9 rounded-full text-xl flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>+</button>
                   </div>
-                  <button onClick={handleAddFromSheet} className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 16px 28px ${withAlpha(menuPrimaryColor, 0.28)}` }}>
+                  <button
+                    onClick={handleAddFromSheet}
+                    disabled={!canUseSessionActions}
+                    className="flex-1 rounded-[20px] px-5 py-4 font-bold text-sm disabled:opacity-50"
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor, boxShadow: `0 16px 28px ${withAlpha(menuPrimaryColor, 0.28)}` }}
+                  >
                     {t(language, 'addToCart')} — {renderPrice(selectedProduct.price * detailQuantity, { inline: true })}
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* My Orders Modal */}
+        {ordersModal && (
+          <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
+            <div className="w-full max-h-[85vh] overflow-y-auto rounded-t-[32px] px-5 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]" style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'myOrders')}</h2>
+                  <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'myOrdersDescription')}</p>
+                </div>
+                <button onClick={() => setOrdersModal(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'close')}>
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {sessionOrders.length === 0 ? (
+                <div className="py-12 text-center">
+                  <ClipboardList className="mx-auto mb-3 h-9 w-9" style={{ color: menuMutedColor }} />
+                  <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'noOrdersYet')}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {sessionOrders.map((order) => {
+                    const stage = getOrderFlowStage(order)
+                    const stageColor = ORDER_STAGE_COLORS[stage]
+                    return (
+                      <div
+                        key={order.id}
+                        className="rounded-[22px] border bg-white p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                        style={{ borderColor: menuBorderColor }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span
+                            className="rounded-full px-3 py-1 text-xs font-bold"
+                            style={{ background: stageColor.bg, color: stageColor.text }}
+                          >
+                            {t(language, ORDER_STAGE_I18N_KEY[stage])}
+                          </span>
+                          <span className="text-xs" style={{ color: menuMutedColor }}>
+                            {new Intl.DateTimeFormat(language === 'tr' ? 'tr-TR' : language, { hour: '2-digit', minute: '2-digit' }).format(order.createdAt)}
+                          </span>
+                        </div>
+
+                        {(order.items ?? []).length > 0 && (
+                          <div className="mt-3 space-y-1.5">
+                            {(order.items ?? []).map((item, index) => (
+                              <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 text-sm">
+                                <span style={{ color: menuTextColor }}>{item.quantity}x {item.name}</span>
+                                <span className="font-semibold" style={{ color: menuTextColor }}>{renderPrice(item.price * item.quantity, { inline: true })}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {typeof order.totalPrice === 'number' && (
+                          <div className="mt-3 flex items-center justify-between border-t pt-3" style={{ borderColor: menuBorderColor }}>
+                            <span className="text-sm font-semibold" style={{ color: menuMutedColor }}>{t(language, 'tableTotal')}</span>
+                            <span className="text-base font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(order.totalPrice, { inline: true })}</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2233,21 +2527,6 @@ export default function MenuPage() {
                     onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, phone: event.target.value }))}
                     placeholder={t(language, 'loyaltyPhoneLabel')}
                     inputMode="tel"
-                    className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
-                    style={{ color: menuTextColor }}
-                  />
-                </label>
-
-                <label className="block">
-                  <span className="mb-2 flex items-center gap-2 text-sm font-medium" style={{ color: menuTextColor }}>
-                    <Mail size={15} />
-                    {t(language, 'loyaltyEmailLabel')}
-                  </span>
-                  <input
-                    value={loyaltyRegisterForm.email}
-                    onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, email: event.target.value }))}
-                    placeholder={t(language, 'loyaltyEmailOptional')}
-                    inputMode="email"
                     className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
                     style={{ color: menuTextColor }}
                   />
@@ -2406,7 +2685,7 @@ export default function MenuPage() {
                     </div>
                   </div>
 
-                  {sharedCart.length === 0 ? (
+                  {activeSharedCart.length === 0 ? (
                     <div className="py-12 text-center">
                       <ShoppingCart size={48} className="mx-auto mb-3 text-[var(--primary)]" />
                       <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'cartEmpty')}</p>
@@ -2439,11 +2718,31 @@ export default function MenuPage() {
                                         {canEdit ? (
                                           <>
                                             <div className="flex items-center gap-2">
-                                              <button onClick={() => handleUpdateCartItemQuantity(item, -1)} className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg" style={{ color: menuTextColor }}>−</button>
+                                              <button
+                                                onClick={() => handleUpdateCartItemQuantity(item, -1)}
+                                                disabled={!canUseSessionActions}
+                                                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg disabled:opacity-50"
+                                                style={{ color: menuTextColor }}
+                                              >
+                                                −
+                                              </button>
                                               <span className="w-8 text-center text-sm font-bold text-[#1a1a1a]">{item.quantity}</span>
-                                              <button onClick={() => handleUpdateCartItemQuantity(item, 1)} className="h-8 w-8 rounded-full text-lg flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>+</button>
+                                              <button
+                                                onClick={() => handleUpdateCartItemQuantity(item, 1)}
+                                                disabled={!canUseSessionActions}
+                                                className="h-8 w-8 rounded-full text-lg flex items-center justify-center disabled:opacity-50"
+                                                style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                                              >
+                                                +
+                                              </button>
                                             </div>
-                                            <button onClick={() => handleRemoveCartItem(item)} className="text-xs text-[#ef4444] font-medium">{t(language, 'remove')}</button>
+                                            <button
+                                              onClick={() => handleRemoveCartItem(item)}
+                                              disabled={!canUseSessionActions}
+                                              className="text-xs font-medium text-[#ef4444] disabled:opacity-50"
+                                            >
+                                              {t(language, 'remove')}
+                                            </button>
                                           </>
                                         ) : (
                                           <span className="text-xs" style={{ color: menuMutedColor }}>x{item.quantity}</span>
@@ -2488,7 +2787,12 @@ export default function MenuPage() {
                             <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(cartTotal, { large: true })}</span>
                           </div>
                         </div>
-                        <button onClick={() => setOrderConfirmModal(true)} disabled={orderSending || sharedCart.length === 0} className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
+                        <button
+                          onClick={() => setOrderConfirmModal(true)}
+                          disabled={!canUseSessionActions || orderSending || activeSharedCart.length === 0}
+                          className="w-full rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50 shadow-[0_16px_28px_rgba(212,160,23,0.28)]"
+                          style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                        >
                           {orderSending ? t(language, 'sending') : t(language, 'sendOrder')}
                         </button>
                       </div>
@@ -2577,7 +2881,8 @@ export default function MenuPage() {
                 </button>
                 <button
                   onClick={() => { setOrderConfirmModal(false); sendOrder() }}
-                  className="flex-1 rounded-2xl px-4 py-3.5 text-sm font-bold transition-all active:scale-[0.98]"
+                  disabled={!canUseSessionActions || orderSending}
+                  className="flex-1 rounded-2xl px-4 py-3.5 text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50"
                   style={{
                     background: menuPrimaryColor,
                     color: menuPrimaryTextColor,

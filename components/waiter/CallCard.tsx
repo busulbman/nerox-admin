@@ -1,4 +1,4 @@
-import { Check, ChefHat, Clock3 } from 'lucide-react'
+import { Banknote, Check, ChefHat, Clock3 } from 'lucide-react'
 import { getCallTableLabel } from '@/lib/firestore-models'
 import CustomerRewards from '@/components/orders/CustomerRewards'
 import LoyaltyPreviewBadge from '@/components/orders/LoyaltyPreviewBadge'
@@ -18,6 +18,8 @@ interface Props {
   variant: 'pending' | 'active'
   onAccept?: () => void
   onComplete?: () => void
+  onDeliver?: () => void
+  onMarkPaid?: () => void
   busy?: boolean
   restaurantId?: string
   actor?: { uid: string; name: string; role: 'admin' | 'waiter' }
@@ -43,10 +45,13 @@ function getOrderKitchenBadge(call: WaiterCall) {
   return null
 }
 
-export default function CallCard({ call, variant, onAccept, onComplete, busy = false, restaurantId, actor }: Props) {
+export default function CallCard({ call, variant, onAccept, onComplete, onDeliver, onMarkPaid, busy = false, restaurantId, actor }: Props) {
   const meta = getCallTipUi(call.tip)
   const AccentIcon = meta.Icon
   const orderKitchenBadge = getOrderKitchenBadge(call)
+  const isOrder = call.tip === 'sipariş'
+  const isDelivered = call.kitchenStatus === 'delivered'
+  const isPaid = call.paymentStatus === 'paid'
 
   return (
     <div
@@ -84,6 +89,12 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
             <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${orderKitchenBadge.className}`}>
               <ChefHat className="h-3 w-3" />
               {orderKitchenBadge.label}
+            </span>
+          )}
+          {isOrder && (
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${isPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+              <Banknote className="h-3 w-3" />
+              {isPaid ? 'Ödendi' : 'Ödenmedi'}
             </span>
           )}
         </div>
@@ -145,7 +156,7 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
           </div>
         )}
 
-        {/* Action button */}
+        {/* Action buttons */}
         {variant === 'pending' && onAccept ? (
           <button
             onClick={onAccept}
@@ -153,8 +164,31 @@ export default function CallCard({ call, variant, onAccept, onComplete, busy = f
             className="w-full py-4 rounded-xl font-bold text-base active:scale-95 transition-transform disabled:opacity-50"
             style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
-            {busy ? 'İşleniyor...' : call.tip === 'sipariş' ? 'Siparişi Onayla' : 'Kabul Et'}
+            {busy ? 'İşleniyor...' : isOrder ? 'Siparişi Onayla' : 'Kabul Et'}
           </button>
+        ) : variant === 'active' && isOrder ? (
+          <div className="space-y-2">
+            {!isDelivered && onDeliver && (
+              <button
+                onClick={onDeliver}
+                disabled={busy}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-transform active:scale-95 disabled:opacity-50"
+                style={{ background: '#3b82f6', color: '#fff' }}
+              >
+                {busy ? 'İşleniyor...' : <><Check className="h-5 w-5" />Teslim Edildi</>}
+              </button>
+            )}
+            {!isPaid && onMarkPaid && (
+              <button
+                onClick={onMarkPaid}
+                disabled={busy}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-transform active:scale-95 disabled:opacity-50"
+                style={{ background: '#22c55e', color: '#fff' }}
+              >
+                {busy ? 'İşleniyor...' : <><Banknote className="h-5 w-5" />Hesap Ödendi / Hesabı Kapat</>}
+              </button>
+            )}
+          </div>
         ) : variant === 'active' && onComplete ? (
           <button
             onClick={onComplete}

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
 import { Download, TriangleAlert } from 'lucide-react'
 import {
-  getDocs, runTransaction, serverTimestamp, writeBatch,
+  Timestamp, getDocs, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { useAuth } from '@/components/AuthProvider'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
@@ -16,6 +16,7 @@ import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
 import { db, rd } from '@/lib/firebase'
 import { DEFAULT_PRIMARY_COLOR, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { createTableSessionWindow } from '@/lib/table-session'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
 const STATUS_META: Record<TableStatus, {
@@ -148,6 +149,7 @@ export default function TablesPage() {
     setBusyKey(`open-${tableId}`)
     setMessage(null)
     const newSessionId = createSessionId()
+    const { sessionStartedAtMs, sessionExpiresAtMs } = createTableSessionWindow(settings)
     try {
       logFirestoreWrite('dashboard/open table', { tableId, sessionId: newSessionId })
       await runTransaction(db, async (tx) => {
@@ -159,6 +161,9 @@ export default function TablesPage() {
           status: 'aktif' satisfies TableStatus,
           sessionId: newSessionId,
           openedAt: serverTimestamp(),
+          sessionStartedAt: Timestamp.fromMillis(sessionStartedAtMs),
+          sessionExpiresAt: Timestamp.fromMillis(sessionExpiresAtMs),
+          closedAt: null,
           lastPaymentCompletedAt: null,
           lastPaymentWaiterName: null,
           updatedAt: serverTimestamp(),
@@ -184,6 +189,9 @@ export default function TablesPage() {
           status: 'temizlik' satisfies TableStatus,
           sessionId: null,
           openedAt: null,
+          sessionStartedAt: null,
+          sessionExpiresAt: null,
+          closedAt: serverTimestamp(),
           lastPaymentCompletedAt: null,
           lastPaymentWaiterName: null,
           updatedAt: serverTimestamp(),
@@ -210,6 +218,8 @@ export default function TablesPage() {
           status: 'boş' satisfies TableStatus,
           sessionId: null,
           openedAt: null,
+          sessionStartedAt: null,
+          sessionExpiresAt: null,
           lastPaymentCompletedAt: null,
           lastPaymentWaiterName: null,
           updatedAt: serverTimestamp(),
@@ -238,6 +248,9 @@ export default function TablesPage() {
           id: String(n), number: n,
           status: 'boş' satisfies TableStatus,
           sessionId: null, openedAt: null,
+          sessionStartedAt: null,
+          sessionExpiresAt: null,
+          closedAt: null,
           lastPaymentCompletedAt: null,
           lastPaymentWaiterName: null,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp(),

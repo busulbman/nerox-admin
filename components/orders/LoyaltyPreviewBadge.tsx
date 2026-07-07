@@ -37,8 +37,8 @@ export default function LoyaltyPreviewBadge({ preview, variant = 'eligible' }: L
             style={{ color: isPending ? '#92400e' : '#166534' }}
           >
             {isPending
-              ? 'Sipariş tamamlanınca kazanacak:'
-              : 'Sipariş tamamlanınca kazanır:'}
+              ? 'Hesap ödenince kazanacak:'
+              : 'Hesap ödenince kazanır:'}
           </p>
           <p
             className="text-sm font-bold mt-0.5"

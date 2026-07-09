@@ -5,6 +5,8 @@ import { requireSuperAdmin, SuperAdminApiError } from '@/lib/super-admin'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+const isDev = process.env.NODE_ENV === 'development'
+
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest) {
       pendingEmail: newEmail,
     })
   } catch (error) {
-    console.error('[update-admin-email] Error:', error)
+    if (isDev) console.error('[update-admin-email] Error:', error)
 
     if (error instanceof SuperAdminApiError) {
       return NextResponse.json(

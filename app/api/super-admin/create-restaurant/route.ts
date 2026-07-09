@@ -21,7 +21,7 @@ const isDev = process.env.NODE_ENV === 'development'
 
 function toErrorResponse(error: unknown) {
   if (error instanceof AuthRestError) {
-    console.error('[create-restaurant] Auth REST error:', error.code, error.message)
+    if (isDev) console.error('[create-restaurant] Auth REST error:', error.code, error.message)
     return NextResponse.json(
       { error: error.message, code: error.code },
       { status: 400 }
@@ -35,11 +35,11 @@ function toErrorResponse(error: unknown) {
   }
 
   if (normalizedError instanceof FirebaseAdminError) {
-    console.error('[create-restaurant] Firebase Admin error:', normalizedError.code, normalizedError.message)
+    if (isDev) console.error('[create-restaurant] Firebase Admin error:', normalizedError.code, normalizedError.message)
     return NextResponse.json(
       {
-        error: normalizedError.message,
-        code: normalizedError.code,
+        error: 'İşletme oluşturma altyapısı şu anda kullanılamıyor.',
+        code: isDev ? normalizedError.code : undefined,
         details: isDev ? normalizedError.details : undefined,
       },
       { status: 500 }
@@ -47,9 +47,7 @@ function toErrorResponse(error: unknown) {
   }
 
   const errorMessage = normalizedError instanceof Error ? normalizedError.message : 'Unknown error'
-  const errorStack = normalizedError instanceof Error ? normalizedError.stack : undefined
-  console.error('[create-restaurant] Unexpected error:', errorMessage)
-  if (errorStack) console.error('[create-restaurant] Stack:', errorStack)
+  if (isDev) console.error('[create-restaurant] Unexpected error:', errorMessage)
 
   return NextResponse.json(
     {
@@ -61,7 +59,9 @@ function toErrorResponse(error: unknown) {
 }
 
 export async function POST(request: NextRequest) {
-  let adminUid: string | null = null
+  // Fresh ID token of the Auth user we create; used to roll it back via REST if
+  // the Firestore seed write fails.
+  let rollbackIdToken: string | null = null
 
   try {
     await requireSuperAdmin(request)
@@ -77,9 +77,9 @@ export async function POST(request: NextRequest) {
 
     const restaurantId = await getUniqueRestaurantSlug(restaurantName)
 
-    // Create user via REST API
+    // Create the real Firebase Auth user via REST (no firebase-admin/auth import).
     const userRecord = await createUser(adminEmail, adminPassword, adminName)
-    adminUid = userRecord.uid
+    rollbackIdToken = userRecord.idToken
 
     const seedData = await buildRestaurantSeedData({
       restaurantId,
@@ -101,6 +101,9 @@ export async function POST(request: NextRequest) {
 
     await batch.commit()
 
+    // Seed succeeded — no rollback needed.
+    rollbackIdToken = null
+
     return NextResponse.json(
       {
         restaurantId,
@@ -111,9 +114,12 @@ export async function POST(request: NextRequest) {
       { status: 201 },
     )
   } catch (error) {
-    if (adminUid) {
-      // Note: REST API deleteUser is limited, just log the UID for manual cleanup
-      await deleteUser(adminUid)
+    // Roll back the orphaned Auth user so its email is freed for a retry.
+    if (rollbackIdToken) {
+      const deleted = await deleteUser(rollbackIdToken)
+      if (!deleted) {
+        console.error('[create-restaurant] Auth rollback failed; the created auth user may need manual cleanup.')
+      }
     }
 
     return toErrorResponse(error)

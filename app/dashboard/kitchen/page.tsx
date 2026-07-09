@@ -117,27 +117,39 @@ function isKitchenVisibleOrder(call: WaiterCall) {
   return call.tip === 'sipariş' && getKitchenStatus(call) !== null
 }
 
-function StatCard({ label, value, icon: Icon, color }: {
+// Small neutral status dot colors — used only as tiny indicators, not as card
+// backgrounds, so the panel stays on the dashboard's neutral design language.
+const KITCHEN_STATUS_DOT: Record<KitchenStatus, string> = {
+  pending: '#f59e0b',
+  preparing: '#3b82f6',
+  ready: '#10b981',
+  delivered: '#94a3b8',
+}
+
+function StatCard({ label, value, icon: Icon, dotColor }: {
   label: string
   value: number
   icon: typeof Clock
-  color: 'amber' | 'orange' | 'green' | 'blue'
+  dotColor?: string
 }) {
-  const colors = {
-    amber: 'bg-amber-50 text-amber-600 border-amber-200',
-    orange: 'bg-orange-50 text-orange-600 border-orange-200',
-    green: 'bg-green-50 text-green-600 border-green-200',
-    blue: 'bg-blue-50 text-blue-600 border-blue-200',
-  }
   return (
-    <div className={`rounded-2xl border p-4 ${colors[color]}`}>
+    <div
+      className="rounded-2xl border p-4 shadow-sm"
+      style={{ background: 'var(--surface)', borderColor: 'var(--border-soft)' }}
+    >
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/80">
+        <div
+          className="flex h-10 w-10 items-center justify-center rounded-xl"
+          style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}
+        >
           <Icon className="h-5 w-5" />
         </div>
         <div>
-          <p className="text-2xl font-bold">{value}</p>
-          <p className="text-xs font-medium opacity-80">{label}</p>
+          <p className="text-2xl font-bold" style={{ color: 'var(--text)' }}>{value}</p>
+          <p className="flex items-center gap-1.5 text-xs font-medium" style={{ color: 'var(--muted)' }}>
+            {dotColor && <span className="h-2 w-2 rounded-full" style={{ background: dotColor }} />}
+            {label}
+          </p>
         </div>
       </div>
     </div>
@@ -295,24 +307,28 @@ export default function KitchenPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
+    <div className="min-h-screen p-4 sm:p-6" style={{ background: 'var(--page-bg)' }}>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-100 text-orange-600">
+          <div
+            className="flex h-12 w-12 items-center justify-center rounded-2xl"
+            style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}
+          >
             <ChefHat className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Mutfak Paneli</h1>
-            <p className="text-sm text-gray-500">Sipariş hazırlık durumlarını yönetin</p>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>Mutfak Paneli</h1>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>Sipariş hazırlık durumlarını yönetin</p>
           </div>
         </div>
         <button
           onClick={toggleSound}
-          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition ${
+          className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition"
+          style={
             soundEnabled
-              ? 'bg-green-100 text-green-700 hover:bg-green-200'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
+              ? { background: 'var(--primary)', color: 'var(--primary-foreground)', borderColor: 'var(--primary)' }
+              : { background: 'var(--surface)', color: 'var(--muted)', borderColor: 'var(--border-soft)' }
+          }
         >
           {soundEnabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
           {soundEnabled ? 'Ses Açık' : 'Ses Kapalı'}
@@ -320,46 +336,51 @@ export default function KitchenPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Bekliyor" value={pending.length} icon={Clock} color="amber" />
-        <StatCard label="Hazırlanıyor" value={preparing.length} icon={Timer} color="orange" />
-        <StatCard label="Hazır" value={ready.length} icon={CheckCircle2} color="green" />
-        <StatCard label="Bugün Toplam" value={todayTotal} icon={Package} color="blue" />
+        <StatCard label="Bekliyor" value={pending.length} icon={Clock} dotColor={KITCHEN_STATUS_DOT.pending} />
+        <StatCard label="Hazırlanıyor" value={preparing.length} icon={Timer} dotColor={KITCHEN_STATUS_DOT.preparing} />
+        <StatCard label="Hazır" value={ready.length} icon={CheckCircle2} dotColor={KITCHEN_STATUS_DOT.ready} />
+        <StatCard label="Bugün Toplam" value={todayTotal} icon={Package} />
       </div>
 
       {/* Mobile Filter */}
       <div className="mb-4 flex gap-2 overflow-x-auto pb-2 lg:hidden">
-        {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((status) => (
-          <button
-            key={status}
-            onClick={() => setMobileFilter(status)}
-            className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
-              mobileFilter === status
-                ? 'bg-orange-600 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            {status === 'all' ? 'Tümü' : KITCHEN_STATUS_LABELS[status]}
-            {status !== 'all' && (
-              <span className="ml-1.5 rounded-full bg-white/20 px-1.5 text-xs">
-                {status === 'pending' ? pending.length :
-                 status === 'preparing' ? preparing.length :
-                 status === 'ready' ? ready.length : delivered.length}
-              </span>
-            )}
-          </button>
-        ))}
+        {(['all', 'pending', 'preparing', 'ready', 'delivered'] as const).map((status) => {
+          const active = mobileFilter === status
+          return (
+            <button
+              key={status}
+              onClick={() => setMobileFilter(status)}
+              className="shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition"
+              style={
+                active
+                  ? { background: 'var(--primary)', color: 'var(--primary-foreground)', borderColor: 'var(--primary)' }
+                  : { background: 'var(--surface)', color: 'var(--muted)', borderColor: 'var(--border-soft)' }
+              }
+            >
+              {status === 'all' ? 'Tümü' : KITCHEN_STATUS_LABELS[status]}
+              {status !== 'all' && (
+                <span className="ml-1.5 rounded-full px-1.5 text-xs" style={{ background: active ? 'rgba(255,255,255,0.22)' : 'var(--surface-muted)' }}>
+                  {status === 'pending' ? pending.length :
+                   status === 'preparing' ? preparing.length :
+                   status === 'ready' ? ready.length : delivered.length}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {loading ? (
-        <div className="flex min-h-[300px] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-        </div>
+        <KitchenSkeleton />
       ) : (
         <>
           {/* Mobile View */}
           <div className="space-y-3 lg:hidden">
             {filteredOrders.length === 0 ? (
-              <div className="rounded-2xl bg-white p-8 text-center text-gray-500">
+              <div
+                className="rounded-2xl border p-8 text-center text-sm shadow-sm"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border-soft)', color: 'var(--muted)' }}
+              >
                 Sipariş bulunamadı
               </div>
             ) : (
@@ -380,7 +401,7 @@ export default function KitchenPage() {
             <KanbanColumn
               title="Bekliyor"
               orders={pending}
-              color="amber"
+              dotColor={KITCHEN_STATUS_DOT.pending}
               updating={updating}
               onStatusChange={updateKitchenStatus}
               currentTime={currentTime}
@@ -388,7 +409,7 @@ export default function KitchenPage() {
             <KanbanColumn
               title="Hazırlanıyor"
               orders={preparing}
-              color="orange"
+              dotColor={KITCHEN_STATUS_DOT.preparing}
               updating={updating}
               onStatusChange={updateKitchenStatus}
               currentTime={currentTime}
@@ -396,7 +417,7 @@ export default function KitchenPage() {
             <KanbanColumn
               title="Hazır"
               orders={ready}
-              color="green"
+              dotColor={KITCHEN_STATUS_DOT.ready}
               updating={updating}
               onStatusChange={updateKitchenStatus}
               currentTime={currentTime}
@@ -404,7 +425,7 @@ export default function KitchenPage() {
             <KanbanColumn
               title="Teslim Edildi"
               orders={delivered}
-              color="blue"
+              dotColor={KITCHEN_STATUS_DOT.delivered}
               updating={updating}
               onStatusChange={updateKitchenStatus}
               currentTime={currentTime}
@@ -416,34 +437,36 @@ export default function KitchenPage() {
   )
 }
 
-function KanbanColumn({ title, orders, color, updating, onStatusChange, currentTime }: {
+function KanbanColumn({ title, orders, dotColor, updating, onStatusChange, currentTime }: {
   title: string
   orders: WaiterCall[]
-  color: 'amber' | 'orange' | 'green' | 'blue'
+  dotColor: string
   updating: string | null
   onStatusChange: (order: WaiterCall, status: KitchenStatus) => void
   currentTime: number
 }) {
-  const headerColors = {
-    amber: 'bg-amber-100 text-amber-800 border-amber-200',
-    orange: 'bg-orange-100 text-orange-800 border-orange-200',
-    green: 'bg-green-100 text-green-800 border-green-200',
-    blue: 'bg-blue-100 text-blue-800 border-blue-200',
-  }
-
   return (
-    <div className="flex flex-col rounded-2xl bg-gray-100/50">
-      <div className={`rounded-t-2xl border-b px-4 py-3 ${headerColors[color]}`}>
+    <div
+      className="flex flex-col rounded-2xl border shadow-sm"
+      style={{ background: 'var(--surface-muted)', borderColor: 'var(--border-soft)' }}
+    >
+      <div className="rounded-t-2xl border-b px-4 py-3" style={{ borderColor: 'var(--border-soft)' }}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold">{title}</h3>
-          <span className="rounded-full bg-white/50 px-2 py-0.5 text-sm font-medium">
+          <h3 className="flex items-center gap-2 font-semibold" style={{ color: 'var(--text)' }}>
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: dotColor }} />
+            {title}
+          </h3>
+          <span
+            className="rounded-full px-2 py-0.5 text-sm font-medium"
+            style={{ background: 'var(--surface)', color: 'var(--muted)' }}
+          >
             {orders.length}
           </span>
         </div>
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-3" style={{ maxHeight: 'calc(100vh - 320px)' }}>
         {orders.length === 0 ? (
-          <div className="rounded-xl bg-white/50 p-4 text-center text-sm text-gray-400">
+          <div className="rounded-xl p-4 text-center text-sm" style={{ background: 'var(--surface)', color: 'var(--muted)' }}>
             Sipariş yok
           </div>
         ) : (
@@ -475,53 +498,55 @@ function OrderCard({ order, updating, onStatusChange, compact = false, currentTi
   const isOverdue = status === 'pending' && (currentTime - order.createdAt) > TWENTY_MINUTES_MS
   const totalItems = order.items?.reduce((sum, item) => sum + item.quantity, 0) || 0
 
-  const cardColors = {
-    pending: isOverdue ? 'border-red-300 bg-red-50' : 'border-amber-200 bg-amber-50',
-    preparing: 'border-orange-200 bg-orange-50',
-    ready: 'border-green-200 bg-green-50',
-    delivered: 'border-gray-200 bg-white',
-  }
-
   const nextAction = {
-    pending: { label: 'Hazırlanmaya Başla', next: 'preparing' as KitchenStatus, color: 'bg-orange-500 hover:bg-orange-600' },
-    preparing: { label: 'Hazır', next: 'ready' as KitchenStatus, color: 'bg-green-500 hover:bg-green-600' },
-    ready: { label: 'Teslim Edildi', next: 'delivered' as KitchenStatus, color: 'bg-blue-500 hover:bg-blue-600' },
+    pending: { label: 'Hazırlanmaya Başla', next: 'preparing' as KitchenStatus },
+    preparing: { label: 'Hazır', next: 'ready' as KitchenStatus },
+    ready: { label: 'Teslim Edildi', next: 'delivered' as KitchenStatus },
     delivered: null,
   }
 
   const action = nextAction[status]
 
   return (
-    <div className={`rounded-xl border p-3 ${cardColors[status]}`}>
+    <div
+      className="rounded-xl border p-3 shadow-sm"
+      style={{
+        background: 'var(--surface)',
+        // Overdue orders keep a functional red accent; everything else is neutral.
+        borderColor: isOverdue ? '#fca5a5' : 'var(--border-soft)',
+      }}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className={`rounded-lg px-2 py-1 text-sm font-bold ${
-            isOverdue ? 'bg-red-500 text-white' : 'bg-white text-gray-900'
-          }`}>
+          <span
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-bold"
+            style={{ background: 'var(--surface-muted)', color: 'var(--text)' }}
+          >
+            <span className="h-2 w-2 rounded-full" style={{ background: isOverdue ? '#ef4444' : KITCHEN_STATUS_DOT[status] }} />
             Masa {order.tableNumber}
           </span>
           {isOverdue && (
-            <span className="text-xs font-medium text-red-600">20+ dk</span>
+            <span className="text-xs font-medium" style={{ color: '#dc2626' }}>20+ dk</span>
           )}
         </div>
-        <div className="text-right text-xs text-gray-500">
+        <div className="text-right text-xs" style={{ color: 'var(--muted)' }}>
           <div>{formatTime(order.createdAt)}</div>
-          <div className="text-gray-400">{formatElapsed(order.createdAt)}</div>
+          <div style={{ opacity: 0.8 }}>{formatElapsed(order.createdAt)}</div>
         </div>
       </div>
 
       {/* Items */}
-      <div className="mt-3 space-y-1">
+      <div className="mt-3 space-y-1" style={{ color: 'var(--text)' }}>
         {order.groupedByCustomer ? (
           Object.entries(order.groupedByCustomer).map(([name, group]) => (
-            <div key={name} className="rounded-lg bg-white/60 p-2">
-              <div className="mb-1 flex items-center gap-1 text-xs font-medium text-gray-600">
+            <div key={name} className="rounded-lg p-2" style={{ background: 'var(--surface-muted)' }}>
+              <div className="mb-1 flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--muted)' }}>
                 <User className="h-3 w-3" /> {name}
               </div>
               {group.items.map((item, idx) => (
                 <div key={idx} className="flex justify-between text-sm">
                   <span>{item.quantity}x {item.name}</span>
-                  {!compact && <span className="text-gray-500">{item.price * item.quantity} TL</span>}
+                  {!compact && <span style={{ color: 'var(--muted)' }}>{item.price * item.quantity} TL</span>}
                 </div>
               ))}
             </div>
@@ -529,32 +554,69 @@ function OrderCard({ order, updating, onStatusChange, compact = false, currentTi
         ) : order.items?.map((item, idx) => (
           <div key={idx} className="flex justify-between text-sm">
             <span>{item.quantity}x {item.name}</span>
-            {!compact && <span className="text-gray-500">{item.price * item.quantity} TL</span>}
+            {!compact && <span style={{ color: 'var(--muted)' }}>{item.price * item.quantity} TL</span>}
           </div>
         ))}
       </div>
 
       {order.note && (
-        <div className="mt-2 rounded-lg bg-yellow-100 px-2 py-1 text-xs text-yellow-800">
+        <div className="mt-2 rounded-lg px-2 py-1 text-xs" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
           Not: {order.note}
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-between border-t border-black/5 pt-2">
-        <div className="text-xs text-gray-500">
+      <div className="mt-3 flex items-center justify-between border-t pt-2" style={{ borderColor: 'var(--border-soft)' }}>
+        <div className="text-xs" style={{ color: 'var(--muted)' }}>
           {totalItems} ürün {!compact && order.totalPrice ? `• ${order.totalPrice} TL` : ''}
         </div>
         {action && (
           <button
             onClick={() => onStatusChange(order, action.next)}
             disabled={updating}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50 ${action.color}`}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50"
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             {updating ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
             {action.label}
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+function KitchenSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-4 lg:gap-4">
+      {Array.from({ length: 4 }).map((_, colIdx) => (
+        <div
+          key={colIdx}
+          className="flex flex-col rounded-2xl border shadow-sm"
+          style={{ background: 'var(--surface-muted)', borderColor: 'var(--border-soft)' }}
+        >
+          <div className="border-b px-4 py-3" style={{ borderColor: 'var(--border-soft)' }}>
+            <div className="h-4 w-24 animate-pulse rounded" style={{ background: 'var(--surface-hover)' }} />
+          </div>
+          <div className="space-y-3 p-3">
+            {Array.from({ length: 2 }).map((_, cardIdx) => (
+              <div
+                key={cardIdx}
+                className="rounded-xl border p-3 shadow-sm"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border-soft)' }}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="h-6 w-20 animate-pulse rounded-lg" style={{ background: 'var(--surface-hover)' }} />
+                  <div className="h-4 w-12 animate-pulse rounded" style={{ background: 'var(--surface-hover)' }} />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-4 w-full animate-pulse rounded" style={{ background: 'var(--surface-hover)' }} />
+                  <div className="h-4 w-2/3 animate-pulse rounded" style={{ background: 'var(--surface-hover)' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

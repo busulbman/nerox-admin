@@ -2920,10 +2920,10 @@ export default function MenuPage() {
             >
               <div className="text-center mb-5">
                 <div
-                  className="mx-auto mb-4 w-16 h-16 rounded-full flex items-center justify-center text-3xl"
-                  style={{ background: withAlpha(menuPrimaryColor, 0.12) }}
+                  className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl"
+                  style={{ background: withAlpha(menuPrimaryColor, 0.12), color: menuPrimaryColor }}
                 >
-                  🍳🚀
+                  <ShoppingBag className="h-6 w-6" />
                 </div>
                 <h2 className="text-xl font-bold mb-2" style={{ color: menuTextColor }}>
                   {t(language, 'orderConfirmTitle')}

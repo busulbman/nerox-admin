@@ -1,8 +1,19 @@
 const FIREBASE_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY
+const isDev = process.env.NODE_ENV === 'development'
 
 export type VerifiedUser = {
   uid: string
   email: string | null
+}
+
+export type CreatedUser = {
+  uid: string
+  email: string
+  /**
+   * Fresh ID token for the just-created account. Kept so the account can be
+   * deleted via REST (`accounts:delete`) during rollback without the Admin SDK.
+   */
+  idToken: string
 }
 
 export class AuthRestError extends Error {
@@ -32,7 +43,7 @@ export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
     const errorMessage = error?.error?.message || 'Token verification failed'
-    console.error('[firebase-auth-rest] verifyIdToken failed:', errorMessage)
+    if (isDev) console.error('[firebase-auth-rest] verifyIdToken failed:', errorMessage)
     throw new AuthRestError(errorMessage, 'auth/invalid-token')
   }
 
@@ -49,7 +60,7 @@ export async function verifyIdToken(idToken: string): Promise<VerifiedUser> {
   }
 }
 
-export async function createUser(email: string, password: string, displayName?: string): Promise<{ uid: string; email: string }> {
+export async function createUser(email: string, password: string, displayName?: string): Promise<CreatedUser> {
   if (!FIREBASE_API_KEY) {
     throw new AuthRestError('NEXT_PUBLIC_FIREBASE_API_KEY is not configured', 'config/missing-api-key')
   }
@@ -62,7 +73,8 @@ export async function createUser(email: string, password: string, displayName?: 
       body: JSON.stringify({
         email,
         password,
-        returnSecureToken: false,
+        // Return a token so the account can be deleted via REST during rollback.
+        returnSecureToken: true,
       }),
     }
   )
@@ -70,7 +82,7 @@ export async function createUser(email: string, password: string, displayName?: 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
     const errorCode = error?.error?.message || 'UNKNOWN_ERROR'
-    console.error('[firebase-auth-rest] createUser failed:', errorCode)
+    if (isDev) console.error('[firebase-auth-rest] createUser failed:', errorCode)
 
     if (errorCode === 'EMAIL_EXISTS') {
       throw new AuthRestError('Bu e-posta adresi zaten kayıtlı.', 'auth/email-already-exists')
@@ -85,7 +97,7 @@ export async function createUser(email: string, password: string, displayName?: 
     throw new AuthRestError('Kullanıcı oluşturulamadı.', 'auth/create-failed')
   }
 
-  const data = await response.json() as { localId: string; email: string }
+  const data = await response.json() as { localId: string; email: string; idToken: string }
 
   // Display name is persisted in the Firestore user doc (not the Auth profile),
   // so nothing extra to do here with `displayName`.
@@ -94,13 +106,50 @@ export async function createUser(email: string, password: string, displayName?: 
   return {
     uid: data.localId,
     email: data.email,
+    idToken: data.idToken,
   }
 }
 
-export async function deleteUser(uid: string): Promise<void> {
-  // Firebase REST API doesn't have a direct deleteUser endpoint for admin use
-  // We'll mark the user as deleted in Firestore instead
-  // The actual Auth cleanup can be done via Firebase Console or a Cloud Function
-  console.warn('[firebase-auth-rest] deleteUser not available via REST API. UID:', uid)
-  console.warn('[firebase-auth-rest] User should be manually deleted from Firebase Console if needed')
+/**
+ * Deletes an Auth account via the REST `accounts:delete` endpoint using the
+ * account's own ID token (obtained from `createUser`). This is a real deletion
+ * — no Admin SDK / `firebase-admin/auth` import — and is used to roll back a
+ * freshly created admin user when the Firestore seed write fails.
+ *
+ * Returns `true` on success and `false` on failure (never throws) so a rollback
+ * failure can't mask the original error that triggered it.
+ */
+export async function deleteUser(idToken: string): Promise<boolean> {
+  if (!FIREBASE_API_KEY) {
+    if (isDev) console.error('[firebase-auth-rest] deleteUser: missing API key')
+    return false
+  }
+  if (!idToken) {
+    if (isDev) console.error('[firebase-auth-rest] deleteUser: missing idToken')
+    return false
+  }
+
+  try {
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${FIREBASE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      const errorCode = error?.error?.message || 'UNKNOWN_ERROR'
+      // Log only the Firebase error code (not the token) so no secret leaks.
+      console.error('[firebase-auth-rest] deleteUser failed:', errorCode)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    if (isDev) console.error('[firebase-auth-rest] deleteUser error:', error instanceof Error ? error.message : error)
+    return false
+  }
 }

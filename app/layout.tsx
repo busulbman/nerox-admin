@@ -12,6 +12,9 @@ export const metadata: Metadata = {
   title: 'Yönetim Paneli',
   description: 'QR Menü ve Sipariş Yönetim Sistemi',
   metadataBase: new URL('https://www.neroxstudio.com'),
+  verification: {
+    google: 'lUp8cO3ezUQD4_QRRs4GGmR6PmC9fp41NM1OJ4t72cE',
+  },
   icons: {
     icon: DEFAULT_BRAND_LOGO_PATH,
     shortcut: DEFAULT_BRAND_LOGO_PATH,

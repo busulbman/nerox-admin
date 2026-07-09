@@ -3,14 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
-import { Upload, Trash2, Link as LinkIcon, Wifi, HelpCircle, Rocket, CreditCard, Clock, MessageCircle, CheckCircle, AlertTriangle, Globe, MapPin, Star, Phone, Share2, Palette, LayoutDashboard, UtensilsCrossed, Armchair, Bell, Settings as SettingsIcon, Search } from 'lucide-react'
-import InstagramIcon from '@/components/icons/InstagramIcon'
+import { Upload, Trash2, Link as LinkIcon, HelpCircle, Rocket, CreditCard, Clock, MessageCircle, CheckCircle, AlertTriangle, Palette } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { useOnboarding } from '@/components/dashboard/OnboardingProvider'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { db } from '@/lib/firebase'
 import {
-  DEFAULT_BRAND_LOGO_PATH,
   DEFAULT_BUSINESS_NAME,
   DEFAULT_PRIMARY_COLOR,
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
@@ -19,16 +17,8 @@ import {
   isValidRestaurantThemeColor,
 } from '@/lib/restaurant-settings'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import { buildThemePalette, withAlpha } from '@/lib/ui-theme'
+import { withAlpha } from '@/lib/ui-theme'
 import type { RestaurantGeneralSettings } from '@/lib/types'
-
-const PREVIEW_NAV_ITEMS = [
-  { label: 'Genel Bakış', Icon: LayoutDashboard, active: true },
-  { label: 'Menü Yönetimi', Icon: UtensilsCrossed, active: false },
-  { label: 'Masalar', Icon: Armchair, active: false },
-  { label: 'Çağrılar', Icon: Bell, active: false },
-  { label: 'Ayarlar', Icon: SettingsIcon, active: false },
-]
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
 
@@ -242,8 +232,9 @@ export default function SettingsPage() {
     setMessage(null)
 
     try {
-      // menuPrimaryColor ve menuThemeMode Menü Yönetimi sayfasından yönetilir;
-      // eski primaryColor alanı geriye dönük uyumluluk için burada değiştirilmez.
+      // menuPrimaryColor, menuThemeMode ve QR menü Wi-Fi/iletişim/sosyal medya
+      // alanları Menü Yönetimi sayfasından yönetilir; burada yalnızca panel/sistem
+      // ayarları kaydedilir. (merge:true olduğundan diğer alanlar korunur.)
       await setDoc(
         doc(db, 'restaurants', restaurantId, 'settings', 'general'),
         {
@@ -251,15 +242,6 @@ export default function SettingsPage() {
           slug: trimmedSlug,
           logoUrl: form.logoUrl.trim(),
           panelPrimaryColor: trimmedPanelColor || DEFAULT_PRIMARY_COLOR,
-          wifiEnabled: form.wifiEnabled ?? false,
-          wifiName: form.wifiName?.trim() ?? '',
-          wifiPassword: form.wifiPassword ?? '',
-          instagramUrl: form.instagramUrl?.trim() ?? '',
-          whatsappNumber: form.whatsappNumber?.trim() ?? '',
-          phoneNumber: form.phoneNumber?.trim() ?? '',
-          googleMapsUrl: form.googleMapsUrl?.trim() ?? '',
-          googleReviewUrl: form.googleReviewUrl?.trim() ?? '',
-          websiteUrl: form.websiteUrl?.trim() ?? '',
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -286,9 +268,6 @@ export default function SettingsPage() {
 
   const previewColor = (form.panelPrimaryColor ?? '').trim() || DEFAULT_PRIMARY_COLOR
   const previewTextColor = getContrastColor(previewColor)
-  const previewBusinessName = businessNameValue
-  const previewLogoUrl = form.logoUrl.trim() || DEFAULT_BRAND_LOGO_PATH
-  const previewPalette = buildThemePalette(previewColor, 'light')
   const menuLink = `/menu/${generatedSlug}/1`
 
   const inputCls = 'theme-input rounded-lg text-sm'
@@ -441,142 +420,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-[var(--border-soft)]">
-              <div className="flex items-center gap-3 mb-4">
-                <Wifi size={20} className="text-gray-500" />
-                <h3 className="font-semibold text-[var(--text)]">Wi-Fi Ayarları</h3>
-              </div>
-
-              <div className="space-y-4">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.wifiEnabled ?? false}
-                    onChange={(event) => setForm((current) => ({ ...current, wifiEnabled: event.target.checked }))}
-                    className="h-5 w-5 rounded border-gray-300 text-[var(--primary)] focus:ring-[var(--primary)]"
-                  />
-                  <span className="text-sm text-[var(--text)]">Wi-Fi bilgilerini menüde göster</span>
-                </label>
-
-                {form.wifiEnabled && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                        Wi-Fi Adı (SSID)
-                      </label>
-                      <input
-                        className={inputCls}
-                        value={form.wifiName ?? ''}
-                        onChange={(event) => setForm((current) => ({ ...current, wifiName: event.target.value }))}
-                        placeholder="Örnek: LocalCafe_WiFi"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                        Wi-Fi Şifresi
-                      </label>
-                      <input
-                        className={inputCls}
-                        value={form.wifiPassword ?? ''}
-                        onChange={(event) => setForm((current) => ({ ...current, wifiPassword: event.target.value }))}
-                        placeholder="Wi-Fi şifrenizi girin"
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-[var(--border-soft)]">
-              <div className="flex items-center gap-3 mb-1">
-                <Share2 size={20} className="text-gray-500" />
-                <h3 className="font-semibold text-[var(--text)]">İletişim ve Sosyal Medya</h3>
-              </div>
-              <p className="text-xs text-gray-400 mb-4">
-                Yalnızca doldurduğunuz alanlar QR menüde &quot;İşletme Bilgileri&quot; kartında gösterilir.
-              </p>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                    <span className="inline-flex items-center gap-1.5"><InstagramIcon size={14} /> Instagram Linki</span>
-                  </label>
-                  <input
-                    className={inputCls}
-                    value={form.instagramUrl ?? ''}
-                    onChange={(event) => setForm((current) => ({ ...current, instagramUrl: event.target.value }))}
-                    placeholder="https://instagram.com/isletmeniz"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                    <span className="inline-flex items-center gap-1.5"><MessageCircle size={14} /> WhatsApp Numarası</span>
-                  </label>
-                  <input
-                    className={inputCls}
-                    value={form.whatsappNumber ?? ''}
-                    onChange={(event) => setForm((current) => ({ ...current, whatsappNumber: event.target.value }))}
-                    placeholder="0542 123 45 67"
-                    inputMode="tel"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                    <span className="inline-flex items-center gap-1.5"><Phone size={14} /> Telefon Numarası</span>
-                  </label>
-                  <input
-                    className={inputCls}
-                    value={form.phoneNumber ?? ''}
-                    onChange={(event) => setForm((current) => ({ ...current, phoneNumber: event.target.value }))}
-                    placeholder="0212 123 45 67"
-                    inputMode="tel"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                    <span className="inline-flex items-center gap-1.5"><MapPin size={14} /> Google Maps Linki</span>
-                  </label>
-                  <input
-                    className={inputCls}
-                    value={form.googleMapsUrl ?? ''}
-                    onChange={(event) => setForm((current) => ({ ...current, googleMapsUrl: event.target.value }))}
-                    placeholder="https://maps.app.goo.gl/..."
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                    <span className="inline-flex items-center gap-1.5"><Star size={14} /> Google Yorum / Puan Verme Linki</span>
-                  </label>
-                  <input
-                    className={inputCls}
-                    value={form.googleReviewUrl ?? ''}
-                    onChange={(event) => setForm((current) => ({ ...current, googleReviewUrl: event.target.value }))}
-                    placeholder="https://g.page/r/.../review"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">
-                    Doldurulursa QR menüde &quot;Google&apos;da Puan Ver&quot; butonu gösterilir.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1.5 text-[var(--text)]">
-                    <span className="inline-flex items-center gap-1.5"><Globe size={14} /> Website Linki (opsiyonel)</span>
-                  </label>
-                  <input
-                    className={inputCls}
-                    value={form.websiteUrl ?? ''}
-                    onChange={(event) => setForm((current) => ({ ...current, websiteUrl: event.target.value }))}
-                    placeholder="https://isletmeniz.com"
-                  />
-                </div>
-              </div>
-            </div>
-
           </div>
 
           {message && (
@@ -604,122 +447,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="theme-card rounded-2xl p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Canlı Önizleme</p>
-            <span className="rounded-full px-2.5 py-1 text-[10px] font-semibold" style={{ background: previewPalette.surfaceMuted, color: previewPalette.text }}>
-              Panel Görünümü
-            </span>
-          </div>
-
-          {/* Panel mockup — sidebar, header ve butonlarıyla mini yönetim paneli */}
-          <div className="overflow-hidden rounded-2xl border shadow-[0_18px_44px_rgba(15,23,42,0.14)]" style={{ borderColor: previewPalette.borderSoft }}>
-            {/* Tarayıcı üst çubuğu */}
-            <div className="flex items-center gap-2 border-b px-3 py-2" style={{ background: previewPalette.surface, borderColor: previewPalette.borderSoft }}>
-              <span className="flex gap-1">
-                <span className="h-2 w-2 rounded-full bg-[#ff5f57]" />
-                <span className="h-2 w-2 rounded-full bg-[#febc2e]" />
-                <span className="h-2 w-2 rounded-full bg-[#28c840]" />
-              </span>
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full px-3 py-1 text-[10px]" style={{ background: previewPalette.surfaceMuted, color: previewPalette.muted }}>
-                <Search size={10} />
-                <span className="truncate">nerox.app/dashboard</span>
-              </span>
-            </div>
-
-            <div className="flex min-h-[300px]" style={{ background: previewPalette.pageBg }}>
-              {/* Sidebar */}
-              <div className="flex w-[132px] shrink-0 flex-col p-2.5" style={{ background: previewColor }}>
-                <div className="flex items-center gap-1.5 px-1 pb-2.5" style={{ borderBottom: `1px solid ${withAlpha('#ffffff', previewTextColor === '#ffffff' ? 0.18 : 0.4)}` }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={previewLogoUrl}
-                    alt={previewBusinessName}
-                    className="h-6 w-6 shrink-0 rounded-lg bg-white object-cover"
-                  />
-                  <span className="truncate text-[10px] font-bold" style={{ color: previewTextColor }}>
-                    {previewBusinessName}
-                  </span>
-                </div>
-                <div className="mt-2.5 space-y-1">
-                  {PREVIEW_NAV_ITEMS.map(({ label, Icon, active }) => (
-                    <span
-                      key={label}
-                      className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-semibold"
-                      style={active
-                        ? { background: previewTextColor === '#ffffff' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.14)', color: previewTextColor }
-                        : { color: previewTextColor, opacity: 0.72 }}
-                    >
-                      <Icon size={11} />
-                      <span className="truncate">{label}</span>
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-auto rounded-lg px-2 py-1.5 text-[9px] font-medium" style={{ color: previewTextColor, opacity: 0.65 }}>
-                  Yönetim Paneli
-                </div>
-              </div>
-
-              {/* İçerik alanı */}
-              <div className="min-w-0 flex-1 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-[12px] font-bold" style={{ color: previewPalette.text }}>Genel Bakış</p>
-                    <p className="truncate text-[9px]" style={{ color: previewPalette.muted }}>{previewBusinessName} • Bugün</p>
-                  </div>
-                  <span className="shrink-0 rounded-lg px-2.5 py-1.5 text-[9px] font-bold shadow-sm" style={{ background: previewColor, color: previewTextColor }}>
-                    + Yeni Masa
-                  </span>
-                </div>
-
-                <div className="mt-3 grid grid-cols-3 gap-1.5">
-                  {[
-                    { label: 'Açık Masa', value: '6' },
-                    { label: 'Bekleyen Çağrı', value: '2' },
-                    { label: 'Bugünkü Sipariş', value: '31' },
-                  ].map((stat) => (
-                    <div key={stat.label} className="rounded-xl border p-2 shadow-sm" style={{ background: previewPalette.surface, borderColor: previewPalette.borderSoft }}>
-                      <p className="text-[8px]" style={{ color: previewPalette.muted }}>{stat.label}</p>
-                      <p className="mt-0.5 text-[13px] font-bold" style={{ color: previewColor }}>{stat.value}</p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-2 rounded-xl border p-2.5 shadow-sm" style={{ background: previewPalette.surface, borderColor: previewPalette.borderSoft }}>
-                  <div className="flex items-center justify-between">
-                    <p className="text-[9px] font-bold" style={{ color: previewPalette.text }}>Son Çağrılar</p>
-                    <span className="rounded-full px-1.5 py-0.5 text-[8px] font-bold" style={{ background: previewPalette.primarySoft, color: previewPalette.primarySoftForeground }}>
-                      2 bekliyor
-                    </span>
-                  </div>
-                  <div className="mt-1.5 space-y-1">
-                    {[
-                      { table: 'Masa 3', type: 'Sipariş', tone: 'primary' as const },
-                      { table: 'Masa 7', type: 'Hesap', tone: 'muted' as const },
-                    ].map((call) => (
-                      <div key={call.table} className="flex items-center justify-between rounded-lg px-2 py-1.5" style={{ background: previewPalette.surfaceMuted }}>
-                        <span className="flex items-center gap-1.5 text-[9px] font-semibold" style={{ color: previewPalette.text }}>
-                          <Bell size={9} style={{ color: previewColor }} />
-                          {call.table}
-                        </span>
-                        <span className="text-[8px] font-semibold" style={{ color: call.tone === 'primary' ? previewColor : previewPalette.muted }}>
-                          {call.type}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <span className="mt-2 flex items-center justify-center rounded-lg border px-2 py-1.5 text-[9px] font-semibold" style={{ borderColor: withAlpha(previewColor, 0.35), color: previewColor }}>
-                    Tümünü Gör
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <p className="mt-4 text-center text-xs text-gray-400">
-            Panel rengi değişiklikleri önizlemeye anında, kaydettikten sonra yönetim ve garson paneline yansır.
-          </p>
-        </div>
 
         {/* Subscription Info Card */}
         <div className="theme-card rounded-2xl p-6">

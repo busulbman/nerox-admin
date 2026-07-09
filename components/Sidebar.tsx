@@ -2,8 +2,7 @@
 
 import { useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { signOut } from 'firebase/auth'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -13,14 +12,13 @@ import {
   Users,
   Settings,
   Gift,
-  LogOut,
   X,
   ChefHat,
+  LifeBuoy,
 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import ViewMenuButton from '@/components/dashboard/ViewMenuButton'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
-import { auth } from '@/lib/firebase'
 import { resolveRestaurantBusinessName, resolveRestaurantLogoUrl, getContrastColor } from '@/lib/restaurant-settings'
 import { useFeatures } from '@/lib/use-features'
 import type { RestaurantFeatures } from '@/lib/types'
@@ -51,17 +49,9 @@ interface SidebarProps {
   onClose?: () => void
 }
 
-const ACTIVE_ITEM_STYLE = {
-  background: '#7c3aed',
-  color: '#ffffff',
-  fontWeight: 600,
-  boxShadow: '0 12px 24px rgba(124, 58, 237, 0.22)',
-} as const
-
 export default function Sidebar({ isOpen = false, isCollapsed = false, onClose }: SidebarProps) {
   const { profile } = useAuth()
   const pathname = usePathname()
-  const router = useRouter()
   const { settings, primaryColor, restaurant } = useRestaurantSettingsContext()
   const features = useFeatures(restaurant)
 
@@ -71,6 +61,15 @@ export default function Sidebar({ isOpen = false, isCollapsed = false, onClose }
   const textColor = getContrastColor(primaryColor)
   const panelTitle = `${businessName} Yönetim Paneli`
   const businessInitial = businessName.trim().charAt(0).toUpperCase() || 'N'
+
+  // Active item highlight: a translucent overlay of the sidebar's text color so
+  // it reads clearly on top of any panelPrimaryColor background.
+  const activeItemStyle = {
+    background: textColor === '#ffffff' ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.12)',
+    color: textColor,
+    fontWeight: 600,
+    boxShadow: '0 12px 24px rgba(0,0,0,0.12)',
+  } as const
 
   const visibleNav = NAV.filter((item) => {
     if (!item.featureKey) return true
@@ -96,11 +95,6 @@ export default function Sidebar({ isOpen = false, isCollapsed = false, onClose }
       document.documentElement.style.overflow = previousHtmlOverflow
     }
   }, [isOpen])
-
-  async function handleLogout() {
-    await signOut(auth).catch(() => {})
-    router.replace('/login')
-  }
 
   return (
     <>
@@ -189,7 +183,7 @@ export default function Sidebar({ isOpen = false, isCollapsed = false, onClose }
                     'flex items-center rounded-xl text-sm transition-all duration-300 ease-in-out',
                     isCollapsed ? 'gap-3 px-4 py-2.5 md:justify-center md:px-0 md:py-3' : 'gap-3 px-4 py-2.5',
                   ].join(' ')}
-                  style={active ? ACTIVE_ITEM_STYLE : { color: `${textColor}bf` }}
+                  style={active ? activeItemStyle : { color: `${textColor}bf` }}
                   title={isCollapsed ? item.label : undefined}
                 >
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center">
@@ -218,29 +212,35 @@ export default function Sidebar({ isOpen = false, isCollapsed = false, onClose }
         />
 
         <div className={['border-t px-3 py-4', isCollapsed ? 'md:px-2' : ''].join(' ')} style={{ borderColor: `${textColor}20` }}>
-          <div className="group relative">
-            <button
-              onClick={handleLogout}
-              className={[
-                'w-full rounded-xl text-sm transition-all duration-300 ease-in-out hover:opacity-80',
-                isCollapsed ? 'flex items-center gap-3 px-4 py-2.5 md:justify-center md:px-0 md:py-3' : 'flex items-center gap-3 px-4 py-2.5',
-              ].join(' ')}
-              style={{ color: `${textColor}80` }}
-              title={isCollapsed ? 'Çıkış Yap' : undefined}
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                <LogOut size={18} />
-              </span>
-              <span className={isCollapsed ? 'md:hidden' : ''}>Çıkış Yap</span>
-            </button>
+          {(() => {
+            const active = pathname === '/dashboard/support' || pathname.startsWith('/dashboard/support/')
+            return (
+              <div className="group relative">
+                <Link
+                  href="/dashboard/support"
+                  onClick={onClose}
+                  className={[
+                    'flex items-center rounded-xl text-sm transition-all duration-300 ease-in-out',
+                    isCollapsed ? 'gap-3 px-4 py-2.5 md:justify-center md:px-0 md:py-3' : 'gap-3 px-4 py-2.5',
+                  ].join(' ')}
+                  style={active ? activeItemStyle : { color: `${textColor}bf` }}
+                  title={isCollapsed ? 'İletişim & Destek' : undefined}
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                    <LifeBuoy size={18} />
+                  </span>
+                  <span className={isCollapsed ? 'md:hidden' : ''}>İletişim &amp; Destek</span>
+                </Link>
 
-            {isCollapsed && (
-              <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-lg bg-[var(--text)] px-3 py-1.5 text-xs font-medium text-white shadow-lg md:block md:translate-x-1 md:opacity-0 md:transition-all md:duration-200 md:ease-out md:group-hover:translate-x-0 md:group-hover:opacity-100">
-                Çıkış Yap
-                <div className="absolute left-0 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-[var(--text)]" />
+                {isCollapsed && (
+                  <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-lg bg-[var(--text)] px-3 py-1.5 text-xs font-medium text-white shadow-lg md:block md:translate-x-1 md:opacity-0 md:transition-all md:duration-200 md:ease-out md:group-hover:translate-x-0 md:group-hover:opacity-100">
+                    İletişim &amp; Destek
+                    <div className="absolute left-0 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-[var(--text)]" />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            )
+          })()}
         </div>
       </aside>
     </>

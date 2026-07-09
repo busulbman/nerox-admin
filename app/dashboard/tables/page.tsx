@@ -9,6 +9,7 @@ import {
   Timestamp, getDocs, runTransaction, serverTimestamp, writeBatch,
 } from 'firebase/firestore'
 import { useAuth } from '@/components/AuthProvider'
+import { SkeletonGrid } from '@/components/Skeleton'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
@@ -30,8 +31,31 @@ const STATUS_META: Record<TableStatus, {
   kapalı:          { label: 'Kapalı',        badgeBg: '#fee2e2', badgeText: '#b91c1c', border: '#fca5a5', cardBg: '#fff5f5' },
 }
 
-function formatOpenMinutes(openedAt: number): string {
-  return `${Math.max(0, Math.floor((Date.now() - openedAt) / 60000))} dk açık`
+function formatOpenDuration(openedAt: number): string {
+  const totalMinutes = Math.max(0, Math.floor((Date.now() - openedAt) / 60000))
+  const days = Math.floor(totalMinutes / 1440)
+  const hours = Math.floor((totalMinutes % 1440) / 60)
+  const minutes = totalMinutes % 60
+
+  if (days > 0) {
+    return hours > 0 ? `${days} gün ${hours} saattir açık` : `${days} gündür açık`
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} saat ${minutes} dakikadır açık` : `${hours} saattir açık`
+  }
+  return `${minutes} dakikadır açık`
+}
+
+function formatOpenedAt(openedAt: number): string {
+  return new Intl.DateTimeFormat('tr-TR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+    .format(openedAt)
+    .replace(',', '')
 }
 
 function createSessionId(): string {
@@ -57,6 +81,7 @@ export default function TablesPage() {
   const router = useRouter()
   const [count,         setCount]        = useState(10)
   const [tables,        setTables]       = useState<Table[]>([])
+  const [tablesLoading, setTablesLoading] = useState(true)
   const [qrMap,         setQrMap]        = useState<Record<string, string>>({})
   const [creating,      setCreating]     = useState(false)
   const [busyKey,       setBusyKey]      = useState<string | null>(null)
@@ -85,8 +110,12 @@ export default function TablesPage() {
   const loadTables = useCallback(async () => {
     if (!restaurantId) return
     logFirestoreRead('dashboard/tables', restaurantId)
-    const snap = await getDocs(getRestaurantTablesQuery(restaurantId))
-    setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
+    try {
+      const snap = await getDocs(getRestaurantTablesQuery(restaurantId))
+      setTables(snap.docs.map((d) => normalizeTable(d.id, d.data() as Record<string, unknown>)).sort((a, b) => a.number - b.number))
+    } finally {
+      setTablesLoading(false)
+    }
   }, [restaurantId])
 
   useEffect(() => {
@@ -473,7 +502,9 @@ export default function TablesPage() {
         </div>
 
         {/* Table grid */}
-        {tables.length === 0 ? (
+        {tablesLoading ? (
+          <SkeletonGrid count={6} className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-5" />
+        ) : tables.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-100 p-16 text-center text-gray-400 text-sm">
             Önce masa sayısını girip masaları oluşturun.
           </div>
@@ -482,8 +513,14 @@ export default function TablesPage() {
             {tables.map((table) => {
               const effectiveStatus = getEffectiveStatus(table)
               const meta = STATUS_META[effectiveStatus]
-              const openDuration = effectiveStatus === 'aktif' && table.openedAt ? formatOpenMinutes(table.openedAt) : null
-              const busy = busyKey !== null
+              const showOpenInfo = effectiveStatus === 'aktif' && !!table.openedAt
+              const openDuration = showOpenInfo ? formatOpenDuration(table.openedAt as number) : null
+              const openedAtLabel = showOpenInfo ? formatOpenedAt(table.openedAt as number) : null
+              // Only the table currently being acted on should show a loading state.
+              const tableBusy =
+                busyKey === `open-${table.id}` ||
+                busyKey === `close-${table.id}` ||
+                busyKey === `clean-${table.id}`
 
               return (
                 <div
@@ -512,6 +549,7 @@ export default function TablesPage() {
                       <div>
                         <h2 className="font-bold text-xl" style={{ color: primaryText }}>Masa {table.number}</h2>
                         {openDuration && <p className="text-sm mt-0.5" style={{ color: '#4b5563' }}>{openDuration}</p>}
+                        {openedAtLabel && <p className="text-xs mt-0.5" style={{ color: '#9ca3af' }}>Açılış: {openedAtLabel}</p>}
                       </div>
                     </div>
                     <span
@@ -538,7 +576,7 @@ export default function TablesPage() {
                       <ActionBtn
                         label={busyKey === `open-${table.id}` ? 'Açılıyor...' : 'Aç'}
                         color="#22c55e"
-                        busy={busy}
+                        busy={tableBusy}
                         onClick={() => handleOpenTable(table.id)}
                       />
                     )}
@@ -546,7 +584,7 @@ export default function TablesPage() {
                       <ActionBtn
                         label={busyKey === `close-${table.id}` ? 'Kapatılıyor...' : 'Masayı Kapat'}
                         color="#f59e0b"
-                        busy={busy}
+                        busy={tableBusy}
                         onClick={() => handleCloseTable(table.id)}
                       />
                     )}
@@ -570,7 +608,7 @@ export default function TablesPage() {
                       <ActionBtn
                         label={busyKey === `clean-${table.id}` ? 'Kaydediliyor...' : 'Temizlendi'}
                         color="#3b82f6"
-                        busy={busy}
+                        busy={tableBusy}
                         onClick={() => handleMarkCleaned(table.id)}
                       />
                     )}

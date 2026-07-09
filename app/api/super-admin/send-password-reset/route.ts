@@ -5,6 +5,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const FIREBASE_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY
+const isDev = process.env.NODE_ENV === 'development'
 
 export async function POST(request: NextRequest) {
   try {
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      console.error('[send-password-reset] Firebase error:', errorCode)
+      if (isDev) console.error('[send-password-reset] Firebase error:', errorCode)
       return NextResponse.json(
         { error: 'Şifre sıfırlama maili gönderilemedi.' },
         { status: 500 }
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
       message: 'Şifre sıfırlama bağlantısı gönderildi.',
     })
   } catch (error) {
-    console.error('[send-password-reset] Error:', error)
+    if (isDev) console.error('[send-password-reset] Error:', error)
 
     if (error instanceof SuperAdminApiError) {
       return NextResponse.json(

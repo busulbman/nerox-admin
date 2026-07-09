@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { deleteDoc, doc, getDocs, writeBatch } from 'firebase/firestore'
 import { CircleCheckBig, ClipboardList } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
+import { SkeletonGrid } from '@/components/Skeleton'
 import { useOpenCalls } from '@/components/dashboard/OpenCallsProvider'
 import CustomerRewards from '@/components/orders/CustomerRewards'
 import LoyaltyPreviewBadge from '@/components/orders/LoyaltyPreviewBadge'
@@ -321,10 +322,7 @@ export default function CallsPage() {
       )}
 
       {tab === 'completed' && completedLoading ? (
-        <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-          <ClipboardList className="mx-auto mb-3 h-10 w-10 animate-pulse text-[var(--primary)]" />
-          <p className="text-gray-400 text-sm">Tamamlanan çağrılar yükleniyor</p>
-        </div>
+        <SkeletonGrid count={6} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" />
       ) : visibleCalls.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
           {tab === 'open' ? (

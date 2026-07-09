@@ -180,6 +180,30 @@ async function uploadToImgBB(file: File): Promise<{ success: true; url: string }
   }
 }
 
+type MenuContactForm = {
+  wifiEnabled: boolean
+  wifiName: string
+  wifiPassword: string
+  instagramUrl: string
+  whatsappNumber: string
+  phoneNumber: string
+  googleMapsUrl: string
+  googleReviewUrl: string
+  websiteUrl: string
+}
+
+const EMPTY_MENU_CONTACT_FORM: MenuContactForm = {
+  wifiEnabled: false,
+  wifiName: '',
+  wifiPassword: '',
+  instagramUrl: '',
+  whatsappNumber: '',
+  phoneNumber: '',
+  googleMapsUrl: '',
+  googleReviewUrl: '',
+  websiteUrl: '',
+}
+
 export default function MenuPage() {
   const { profile, loading: authLoading } = useAuth()
   const restaurantId = profile?.restaurantId || ''
@@ -211,6 +235,8 @@ export default function MenuPage() {
   const systemPrefersDark = useSystemPrefersDark()
   const [menuColor, setMenuColor] = useState('')
   const [menuMode, setMenuMode] = useState<MenuThemeMode>('system')
+  // Wi-Fi + contact/social fields for the QR menu (moved here from Genel Ayarlar).
+  const [contactForm, setContactForm] = useState<MenuContactForm>(EMPTY_MENU_CONTACT_FORM)
   const [appearanceSaving, setAppearanceSaving] = useState(false)
   const [appearanceMessage, setAppearanceMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const appearanceInitRef = useRef<string | null>(null)
@@ -223,6 +249,17 @@ export default function MenuPage() {
     if (!settingsLoading && appearanceInitRef.current !== restaurantId) {
       setMenuColor(resolveMenuPrimaryColor(settings))
       setMenuMode(settings.menuThemeMode ?? 'system')
+      setContactForm({
+        wifiEnabled: settings.wifiEnabled ?? false,
+        wifiName: settings.wifiName ?? '',
+        wifiPassword: settings.wifiPassword ?? '',
+        instagramUrl: settings.instagramUrl ?? '',
+        whatsappNumber: settings.whatsappNumber ?? '',
+        phoneNumber: settings.phoneNumber ?? '',
+        googleMapsUrl: settings.googleMapsUrl ?? '',
+        googleReviewUrl: settings.googleReviewUrl ?? '',
+        websiteUrl: settings.websiteUrl ?? '',
+      })
       appearanceInitRef.current = restaurantId
     }
   }, [restaurantId, settings, settingsLoading])
@@ -371,6 +408,15 @@ export default function MenuPage() {
         {
           menuPrimaryColor: trimmedColor || DEFAULT_PRIMARY_COLOR,
           menuThemeMode: menuMode,
+          wifiEnabled: contactForm.wifiEnabled,
+          wifiName: contactForm.wifiName.trim(),
+          wifiPassword: contactForm.wifiPassword,
+          instagramUrl: contactForm.instagramUrl.trim(),
+          whatsappNumber: contactForm.whatsappNumber.trim(),
+          phoneNumber: contactForm.phoneNumber.trim(),
+          googleMapsUrl: contactForm.googleMapsUrl.trim(),
+          googleReviewUrl: contactForm.googleReviewUrl.trim(),
+          websiteUrl: contactForm.websiteUrl.trim(),
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -504,9 +550,12 @@ export default function MenuPage() {
   const menuPreviewDark = menuMode === 'dark' || (menuMode === 'system' && systemPrefersDark)
   const menuPalette = buildThemePalette(menuPreviewColor, menuPreviewDark ? 'dark' : 'light')
   const menuPreviewTextColor = getContrastColor(menuPreviewColor)
+  // Merge live edits over the saved settings so Wi-Fi / social / contact changes
+  // show in the preview instantly, before the user saves.
+  const draftSettings = { ...settings, ...contactForm }
   const previewBusinessName = resolveRestaurantBusinessName(settings)
   const previewLogoUrl = settings.logoUrl?.trim() || DEFAULT_BRAND_LOGO_PATH
-  const previewContactLinks = buildRestaurantContactLinks(settings)
+  const previewContactLinks = buildRestaurantContactLinks(draftSettings)
   const previewSocialIcons = [
     { key: 'instagram', Icon: InstagramIcon, visible: !!previewContactLinks.instagram },
     { key: 'whatsapp', Icon: MessageCircle, visible: !!previewContactLinks.whatsapp },
@@ -871,6 +920,129 @@ export default function MenuPage() {
                 </p>
               </div>
 
+              {/* Wi-Fi */}
+              <div className="border-t pt-5" style={{ borderColor: BORDER_SOFT }}>
+                <div className="mb-3 flex items-center gap-2">
+                  <Wifi size={18} className="text-gray-500" />
+                  <h3 className="text-sm font-semibold" style={{ color: TEXT }}>Wi-Fi</h3>
+                </div>
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={contactForm.wifiEnabled}
+                    onChange={(event) => setContactForm((current) => ({ ...current, wifiEnabled: event.target.checked }))}
+                    className="h-5 w-5 rounded border-gray-300 text-[var(--primary)] focus:ring-[var(--primary)]"
+                  />
+                  <span className="text-sm" style={{ color: TEXT }}>Wi-Fi bilgilerini QR menüde göster</span>
+                </label>
+                {contactForm.wifiEnabled && (
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>Wi-Fi Adı (SSID)</label>
+                      <input
+                        className={inputCls}
+                        value={contactForm.wifiName}
+                        onChange={(event) => setContactForm((current) => ({ ...current, wifiName: event.target.value }))}
+                        placeholder="Örnek: LocalCafe_WiFi"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>Wi-Fi Şifresi</label>
+                      <input
+                        className={inputCls}
+                        value={contactForm.wifiPassword}
+                        onChange={(event) => setContactForm((current) => ({ ...current, wifiPassword: event.target.value }))}
+                        placeholder="Wi-Fi şifrenizi girin"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* İletişim ve Sosyal Medya */}
+              <div className="border-t pt-5" style={{ borderColor: BORDER_SOFT }}>
+                <div className="mb-1 flex items-center gap-2">
+                  <MessageCircle size={18} className="text-gray-500" />
+                  <h3 className="text-sm font-semibold" style={{ color: TEXT }}>İletişim ve Sosyal Medya</h3>
+                </div>
+                <p className="mb-4 text-xs text-gray-400">
+                  Yalnızca doldurduğunuz alanlar QR menüde &quot;İşletme Bilgileri&quot; kartında gösterilir.
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                      <span className="inline-flex items-center gap-1.5"><InstagramIcon size={14} /> Instagram Linki</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      value={contactForm.instagramUrl}
+                      onChange={(event) => setContactForm((current) => ({ ...current, instagramUrl: event.target.value }))}
+                      placeholder="https://instagram.com/isletmeniz"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                      <span className="inline-flex items-center gap-1.5"><MessageCircle size={14} /> WhatsApp Numarası</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      value={contactForm.whatsappNumber}
+                      onChange={(event) => setContactForm((current) => ({ ...current, whatsappNumber: event.target.value }))}
+                      placeholder="0542 123 45 67"
+                      inputMode="tel"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                      <span className="inline-flex items-center gap-1.5"><Phone size={14} /> Telefon Numarası</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      value={contactForm.phoneNumber}
+                      onChange={(event) => setContactForm((current) => ({ ...current, phoneNumber: event.target.value }))}
+                      placeholder="0212 123 45 67"
+                      inputMode="tel"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                      <span className="inline-flex items-center gap-1.5"><MapPin size={14} /> Google Maps Linki</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      value={contactForm.googleMapsUrl}
+                      onChange={(event) => setContactForm((current) => ({ ...current, googleMapsUrl: event.target.value }))}
+                      placeholder="https://maps.app.goo.gl/..."
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                      <span className="inline-flex items-center gap-1.5"><Star size={14} /> Google Yorum / Puan Verme Linki</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      value={contactForm.googleReviewUrl}
+                      onChange={(event) => setContactForm((current) => ({ ...current, googleReviewUrl: event.target.value }))}
+                      placeholder="https://g.page/r/.../review"
+                    />
+                    <p className="mt-1 text-xs text-gray-400">
+                      Doldurulursa QR menüde &quot;Google&apos;da Puan Ver&quot; butonu gösterilir.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                      <span className="inline-flex items-center gap-1.5"><Globe size={14} /> Website Linki (opsiyonel)</span>
+                    </label>
+                    <input
+                      className={inputCls}
+                      value={contactForm.websiteUrl}
+                      onChange={(event) => setContactForm((current) => ({ ...current, websiteUrl: event.target.value }))}
+                      placeholder="https://isletmeniz.com"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {appearanceMessage && (
                 <div
                   className="rounded-xl px-4 py-3 text-sm"
@@ -963,11 +1135,11 @@ export default function MenuPage() {
                     </div>
 
                     {/* Wi-Fi kartı */}
-                    {settings.wifiEnabled && (
+                    {draftSettings.wifiEnabled && (
                       <div className="mt-2 flex items-center gap-2 rounded-2xl border px-3 py-2 shadow-sm" style={{ borderColor: menuPalette.borderSoft, background: menuPalette.surface }}>
                         <Wifi size={12} className="shrink-0" style={{ color: menuPreviewColor }} />
                         <p className="min-w-0 flex-1 truncate text-[10px] font-semibold" style={{ color: menuPalette.text }}>
-                          {settings.wifiName?.trim() || 'Isletme_WiFi'}
+                          {draftSettings.wifiName?.trim() || 'Isletme_WiFi'}
                         </p>
                         <span className="shrink-0 rounded-full px-2 py-0.5 text-[8px] font-medium" style={{ background: menuPalette.surfaceMuted, color: menuPalette.text }}>
                           Kopyala

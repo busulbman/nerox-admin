@@ -28,6 +28,7 @@ import {
 import { useAuth } from '@/components/AuthProvider'
 import { useRestaurantSettingsContext } from '@/components/RestaurantSettingsProvider'
 import { FeatureLockedPage } from '@/components/FeatureGate'
+import { SkeletonGrid } from '@/components/Skeleton'
 import { useFeatures } from '@/lib/use-features'
 import { db } from '@/lib/firebase'
 import { normalizeLoyaltyCampaign } from '@/lib/firestore-models'
@@ -585,9 +586,7 @@ export default function LoyaltyPage() {
           </div>
 
           {loading ? (
-            <div className="flex min-h-56 items-center justify-center">
-              <LoaderCircle className="h-7 w-7 animate-spin text-[var(--primary)]" />
-            </div>
+            <SkeletonGrid count={4} className="grid grid-cols-1 gap-4 md:grid-cols-2" />
           ) : campaigns.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--border-soft)] bg-white px-5 py-12 text-center">
               <Gift className="mx-auto mb-3 h-9 w-9 text-[var(--primary)]" />

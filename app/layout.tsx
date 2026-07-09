@@ -4,6 +4,7 @@ import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
 import { DEFAULT_BRAND_LOGO_PATH } from '@/lib/restaurant-settings'
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const montserrat = Montserrat({ subsets: ['latin'], variable: '--font-sans' })
 
@@ -39,6 +40,7 @@ export default function RootLayout({
       <body className="min-h-full overflow-x-hidden">
         <AuthProvider>{children}</AuthProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )

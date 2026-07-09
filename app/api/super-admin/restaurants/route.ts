@@ -20,29 +20,23 @@ export const dynamic = 'force-dynamic'
 const isDev = process.env.NODE_ENV === 'development'
 
 function toErrorResponse(error: unknown, context: string) {
-  console.error(`[super-admin/restaurants] ${context} failed:`, error)
+  if (isDev) console.error(`[super-admin/restaurants] ${context} failed:`, error)
 
   const normalizedError = mapFirebaseAdminError(error)
 
   if (normalizedError instanceof SuperAdminApiError) {
-    console.error(`[super-admin/restaurants] SuperAdminApiError: ${normalizedError.message} (status: ${normalizedError.status})`)
     return NextResponse.json(
-      {
-        error: normalizedError.message,
-        code: 'SUPER_ADMIN_ERROR',
-        status: normalizedError.status,
-      },
+      { error: normalizedError.message },
       { status: normalizedError.status }
     )
   }
 
   if (normalizedError instanceof FirebaseAdminError) {
-    console.error(`[super-admin/restaurants] FirebaseAdminError: ${normalizedError.code} - ${normalizedError.message}`)
     return NextResponse.json(
       {
-        error: normalizedError.message,
-        code: normalizedError.code,
-        details: normalizedError.details,
+        error: 'İşlem altyapısı şu anda kullanılamıyor.',
+        code: isDev ? normalizedError.code : undefined,
+        details: isDev ? normalizedError.details : undefined,
       },
       { status: 500 }
     )
@@ -50,19 +44,11 @@ function toErrorResponse(error: unknown, context: string) {
 
   const errorMessage = normalizedError instanceof Error ? normalizedError.message : String(normalizedError)
   const errorStack = normalizedError instanceof Error ? normalizedError.stack : undefined
-  const errorName = normalizedError instanceof Error ? normalizedError.name : 'UnknownError'
-
-  console.error(`[super-admin/restaurants] Unexpected error:`, {
-    name: errorName,
-    message: errorMessage,
-    stack: errorStack,
-  })
 
   return NextResponse.json(
     {
       error: 'İşlem sırasında beklenmeyen bir hata oluştu.',
-      code: errorName,
-      message: errorMessage,
+      message: isDev ? errorMessage : undefined,
       stack: isDev ? errorStack : undefined,
     },
     { status: 500 }
@@ -70,27 +56,18 @@ function toErrorResponse(error: unknown, context: string) {
 }
 
 export async function GET(request: NextRequest) {
-  console.log('[super-admin/restaurants] GET request received')
-
   try {
     const authHeader = request.headers.get('authorization')
-    console.log('[super-admin/restaurants] Auth header present:', !!authHeader)
 
     if (!authHeader) {
-      console.error('[super-admin/restaurants] No authorization header')
       return NextResponse.json(
-        { error: 'Authorization header eksik', code: 'NO_AUTH_HEADER' },
+        { error: 'Authorization header eksik' },
         { status: 401 }
       )
     }
 
-    console.log('[super-admin/restaurants] Calling requireSuperAdmin...')
-    const adminUser = await requireSuperAdmin(request)
-    console.log('[super-admin/restaurants] requireSuperAdmin success, uid:', adminUser.uid)
-
-    console.log('[super-admin/restaurants] Calling listRestaurantsSummary...')
+    await requireSuperAdmin(request)
     const restaurants = await listRestaurantsSummary()
-    console.log('[super-admin/restaurants] listRestaurantsSummary success, count:', restaurants.length)
 
     return NextResponse.json({ restaurants })
   } catch (error) {
@@ -99,8 +76,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  console.log('[super-admin/restaurants] PATCH request received')
-
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader) {

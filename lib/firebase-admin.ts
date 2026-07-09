@@ -40,8 +40,8 @@ function getFirebaseAdminEnv() {
 
   if (!privateKey.includes('-----BEGIN') || !privateKey.includes('PRIVATE KEY-----')) {
     const errorMessage = 'FIREBASE_ADMIN_PRIVATE_KEY formatı geçersiz. PEM formatında olmalı.'
+    // Never log the key (or any part of it), even in development.
     console.error('[firebase-admin] PRIVATE KEY ERROR:', errorMessage)
-    console.error('[firebase-admin] Key starts with:', privateKey.substring(0, 50))
     throw new FirebaseAdminError(errorMessage, 'env/invalid-key')
   }
 
@@ -65,7 +65,7 @@ async function getAdminApp(): Promise<App> {
 
   try {
     const firebaseAdminEnv = getFirebaseAdminEnv()
-    console.log('[firebase-admin] Initializing with project:', firebaseAdminEnv.projectId)
+    if (isDev) console.log('[firebase-admin] Initializing with project:', firebaseAdminEnv.projectId)
 
     cachedAdminApp = initializeApp(
       {
@@ -75,7 +75,7 @@ async function getAdminApp(): Promise<App> {
       'firebase-admin-app',
     )
 
-    console.log('[firebase-admin] Initialized successfully')
+    if (isDev) console.log('[firebase-admin] Initialized successfully')
     return cachedAdminApp
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'

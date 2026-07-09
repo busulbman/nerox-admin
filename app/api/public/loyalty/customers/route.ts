@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getAdminDb, getFieldValue } from '@/lib/firebase-admin'
 import { normalizeRestaurantCustomer } from '@/lib/firestore-models'
 import { getRestaurantAccessBlockMessage, normalizeRestaurantDocument } from '@/lib/restaurant-settings'
+import { getClientIp, rateLimit, rateLimitResponse } from '@/lib/server-rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -68,6 +69,13 @@ function toErrorResponse(error: unknown) {
 
 export async function POST(request: Request) {
   try {
+    // Abuse protection: 10 loyalty registrations per IP per hour.
+    const ip = getClientIp(request)
+    const limit = await rateLimit(`loyalty-customer:${ip}`, 10, 60 * 60)
+    if (!limit.success) {
+      return rateLimitResponse(limit)
+    }
+
     const body = await request.json()
     const restaurantId = parseRequiredString(body.restaurantId, 'İşletme')
     const name = parseRequiredString(body.name, 'İsim')

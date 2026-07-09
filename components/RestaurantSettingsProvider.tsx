@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo } from 'react'
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
-import { DEFAULT_PRIMARY_COLOR, getContrastColor } from '@/lib/restaurant-settings'
+import { DEFAULT_PRIMARY_COLOR, getContrastColor, resolvePanelPrimaryColor } from '@/lib/restaurant-settings'
 import type { Restaurant, RestaurantGeneralSettings } from '@/lib/types'
 
 interface RestaurantSettingsContextValue {
@@ -10,6 +10,7 @@ interface RestaurantSettingsContextValue {
   restaurant: Restaurant | null
   loading: boolean
   error: string
+  /** Panel (yönetim/garson) tema rengi; QR menü rengi settings.menuPrimaryColor üzerinden okunur. */
   primaryColor: string
   textColor: string
 }
@@ -26,7 +27,7 @@ export function RestaurantSettingsProvider({
   const { settings, restaurant, loading, error } = useRestaurantSettings(restaurantId)
 
   const value = useMemo(() => {
-    const primaryColor = settings.primaryColor || DEFAULT_PRIMARY_COLOR
+    const primaryColor = resolvePanelPrimaryColor(settings)
 
     return {
       settings,

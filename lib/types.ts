@@ -126,15 +126,29 @@ export interface MenuThemeSettings {
   updatedAt?: number | null
 }
 
+export type MenuThemeMode = 'system' | 'light' | 'dark'
+
 export interface RestaurantGeneralSettings {
   businessName: string
   slug: string
   logoUrl: string
+  /** Eski tek renk alanı; panel/menü renkleri boşsa geriye dönük uyumluluk için kullanılır. */
   primaryColor: string
+  /** Yönetim paneli, garson paneli, sidebar ve panel butonlarının rengi. */
+  panelPrimaryColor?: string
+  /** Müşterinin gördüğü QR menünün rengi. */
+  menuPrimaryColor?: string
   wifiEnabled?: boolean
   wifiName?: string
   wifiPassword?: string
   tableSessionDurationMinutes?: number
+  instagramUrl?: string
+  whatsappNumber?: string
+  phoneNumber?: string
+  googleMapsUrl?: string
+  googleReviewUrl?: string
+  websiteUrl?: string
+  menuThemeMode?: MenuThemeMode
   updatedAt?: number | null
 }
 

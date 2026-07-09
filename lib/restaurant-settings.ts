@@ -1,4 +1,4 @@
-import type { Restaurant, RestaurantGeneralSettings, RestaurantPlan, RestaurantStatus } from '@/lib/types'
+import type { MenuThemeMode, Restaurant, RestaurantGeneralSettings, RestaurantPlan, RestaurantStatus } from '@/lib/types'
 import { DEFAULT_TABLE_SESSION_DURATION_MINUTES, resolveTableSessionDurationMinutes } from '@/lib/table-session'
 
 const HEX_COLOR_PATTERN = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
@@ -14,11 +14,24 @@ export const EMPTY_RESTAURANT_GENERAL_SETTINGS: RestaurantGeneralSettings = {
   slug: '',
   logoUrl: '',
   primaryColor: '',
+  panelPrimaryColor: '',
+  menuPrimaryColor: '',
   wifiEnabled: false,
   wifiName: '',
   wifiPassword: '',
   tableSessionDurationMinutes: DEFAULT_TABLE_SESSION_DURATION_MINUTES,
+  instagramUrl: '',
+  whatsappNumber: '',
+  phoneNumber: '',
+  googleMapsUrl: '',
+  googleReviewUrl: '',
+  websiteUrl: '',
+  menuThemeMode: 'system',
   updatedAt: null,
+}
+
+export function normalizeMenuThemeMode(value: unknown): MenuThemeMode {
+  return value === 'light' || value === 'dark' ? value : 'system'
 }
 
 function toMillis(value: unknown): number | null {
@@ -102,10 +115,11 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
   const businessName = typeof data.businessName === 'string' ? data.businessName.trim() : ''
   const slug = typeof data.slug === 'string' ? data.slug.trim().toLowerCase() : ''
   const logoUrl = typeof data.logoUrl === 'string' ? data.logoUrl.trim() : ''
-  const primaryColor =
-    typeof data.primaryColor === 'string' && isValidRestaurantThemeColor(data.primaryColor)
-      ? data.primaryColor.trim()
-      : ''
+  const normalizeThemeColor = (colorValue: unknown) =>
+    typeof colorValue === 'string' && isValidRestaurantThemeColor(colorValue) ? colorValue.trim() : ''
+  const primaryColor = normalizeThemeColor(data.primaryColor)
+  const panelPrimaryColor = normalizeThemeColor(data.panelPrimaryColor)
+  const menuPrimaryColor = normalizeThemeColor(data.menuPrimaryColor)
   const wifiEnabled = data.wifiEnabled === true
   const wifiName = typeof data.wifiName === 'string' ? data.wifiName.trim() : ''
   const wifiPassword = typeof data.wifiPassword === 'string' ? data.wifiPassword : ''
@@ -119,10 +133,19 @@ export function normalizeRestaurantGeneralSettings(value: unknown): RestaurantGe
     slug,
     logoUrl,
     primaryColor,
+    panelPrimaryColor,
+    menuPrimaryColor,
     wifiEnabled,
     wifiName,
     wifiPassword,
     tableSessionDurationMinutes,
+    instagramUrl: typeof data.instagramUrl === 'string' ? data.instagramUrl.trim() : '',
+    whatsappNumber: typeof data.whatsappNumber === 'string' ? data.whatsappNumber.trim() : '',
+    phoneNumber: typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '',
+    googleMapsUrl: typeof data.googleMapsUrl === 'string' ? data.googleMapsUrl.trim() : '',
+    googleReviewUrl: typeof data.googleReviewUrl === 'string' ? data.googleReviewUrl.trim() : '',
+    websiteUrl: typeof data.websiteUrl === 'string' ? data.websiteUrl.trim() : '',
+    menuThemeMode: normalizeMenuThemeMode(data.menuThemeMode),
     updatedAt: toMillis(data.updatedAt),
   }
 }
@@ -190,16 +213,61 @@ export function mergeRestaurantGeneralSettings(
   const settings = normalizeRestaurantGeneralSettings(settingsValue)
   const restaurant = normalizeRestaurantDocument(restaurantValue)
 
+  // Geriye dönük uyumluluk: yeni panel/menü renkleri yoksa eski primaryColor kullanılır.
+  const legacyPrimaryColor = settings.primaryColor || restaurant.primaryColor || DEFAULT_PRIMARY_COLOR
+
   return {
     businessName: settings.businessName || restaurant.name,
     slug: settings.slug || restaurant.slug,
     logoUrl: settings.logoUrl || restaurant.logoUrl || '',
-    primaryColor: settings.primaryColor || restaurant.primaryColor || DEFAULT_PRIMARY_COLOR,
+    primaryColor: legacyPrimaryColor,
+    panelPrimaryColor: settings.panelPrimaryColor || legacyPrimaryColor,
+    menuPrimaryColor: settings.menuPrimaryColor || legacyPrimaryColor,
     wifiEnabled: settings.wifiEnabled ?? false,
     wifiName: settings.wifiName ?? '',
     wifiPassword: settings.wifiPassword ?? '',
     tableSessionDurationMinutes: resolveTableSessionDurationMinutes(settings),
+    instagramUrl: settings.instagramUrl ?? '',
+    whatsappNumber: settings.whatsappNumber ?? '',
+    phoneNumber: settings.phoneNumber ?? '',
+    googleMapsUrl: settings.googleMapsUrl ?? '',
+    googleReviewUrl: settings.googleReviewUrl ?? '',
+    websiteUrl: settings.websiteUrl ?? '',
+    menuThemeMode: normalizeMenuThemeMode(settings.menuThemeMode),
     updatedAt: settings.updatedAt,
+  }
+}
+
+/** İletişim linklerini tıklanabilir hedeflere çevirir; boş alanlar null döner. */
+export function buildRestaurantContactLinks(
+  settings: Pick<
+    RestaurantGeneralSettings,
+    'instagramUrl' | 'whatsappNumber' | 'phoneNumber' | 'googleMapsUrl' | 'googleReviewUrl' | 'websiteUrl'
+  >,
+) {
+  const ensureHttps = (url?: string) => {
+    const trimmed = url?.trim() ?? ''
+    if (!trimmed) return null
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  }
+
+  const whatsappDigits = (settings.whatsappNumber ?? '').replace(/\D+/g, '')
+  // 05xx... yazılan Türkiye numaralarını uluslararası biçime çevir (905xx...).
+  const whatsappTarget = whatsappDigits
+    ? whatsappDigits.startsWith('0')
+      ? `9${whatsappDigits}`
+      : whatsappDigits
+    : null
+
+  const phone = (settings.phoneNumber ?? '').replace(/[^\d+]+/g, '')
+
+  return {
+    instagram: ensureHttps(settings.instagramUrl),
+    whatsapp: whatsappTarget ? `https://wa.me/${whatsappTarget}` : null,
+    phone: phone ? `tel:${phone}` : null,
+    maps: ensureHttps(settings.googleMapsUrl),
+    review: ensureHttps(settings.googleReviewUrl),
+    website: ensureHttps(settings.websiteUrl),
   }
 }
 
@@ -242,6 +310,18 @@ export function resolveRestaurantLogoUrl(
   settings: Pick<RestaurantGeneralSettings, 'logoUrl'> | null | undefined
 ) {
   return settings?.logoUrl?.trim() || ''
+}
+
+export function resolvePanelPrimaryColor(
+  settings: Pick<RestaurantGeneralSettings, 'primaryColor' | 'panelPrimaryColor'> | null | undefined
+) {
+  return settings?.panelPrimaryColor || settings?.primaryColor || DEFAULT_PRIMARY_COLOR
+}
+
+export function resolveMenuPrimaryColor(
+  settings: Pick<RestaurantGeneralSettings, 'primaryColor' | 'menuPrimaryColor'> | null | undefined
+) {
+  return settings?.menuPrimaryColor || settings?.primaryColor || DEFAULT_PRIMARY_COLOR
 }
 
 export function getContrastColor(hexColor: string): string {

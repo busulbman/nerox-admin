@@ -51,6 +51,7 @@ import {
 import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
 import {
   DEFAULT_PRIMARY_COLOR,
+  resolvePanelPrimaryColor,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { createTableSessionWindow } from '@/lib/table-session'
@@ -115,7 +116,7 @@ export default function WaiterPage() {
   const restaurantId = profile?.restaurantId || ''
   const { settings: restaurantSettings } = useRestaurantSettings(restaurantId)
 
-  const themePalette = buildThemePalette(restaurantSettings?.primaryColor)
+  const themePalette = buildThemePalette(resolvePanelPrimaryColor(restaurantSettings))
   const themeVars = buildThemeStyleVars(themePalette.primary)
   const BROWN = themePalette.primary
   const PRIMARY_FOREGROUND = themePalette.primaryForeground

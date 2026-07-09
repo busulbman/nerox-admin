@@ -120,7 +120,9 @@ export interface ThemePalette {
   infoSoft: string
 }
 
-export function buildThemePalette(colorValue?: string | null): ThemePalette {
+export type ThemeMode = 'light' | 'dark'
+
+export function buildThemePalette(colorValue?: string | null, mode: ThemeMode = 'light'): ThemePalette {
   const primary = resolveThemePrimaryColor(colorValue)
   const luminance = getLuminance(primary)
   const isLight = luminance > 0.55
@@ -134,6 +136,42 @@ export function buildThemePalette(colorValue?: string | null): ThemePalette {
   const primarySoftForeground = isLight ? darken(primary, 0.5) : primary
   const primaryBorder = withAlpha(primary, isLight ? 0.25 : 0.2)
   const primaryGlow = withAlpha(primary, isLight ? 0.22 : 0.18)
+
+  if (mode === 'dark') {
+    // Koyu mod: yüzeyler laciverte yakın koyu tonlar; işletme rengi vurgu
+    // olarak korunur ve kart/sayfa zeminlerine hafifçe karıştırılır.
+    return {
+      primary,
+      primaryForeground,
+      primaryHover,
+      primaryActive,
+      primarySoft: withAlpha(primary, 0.22),
+      primarySoftForeground: adjustBrightness(primary, 0.35),
+      primaryBorder: withAlpha(primary, 0.32),
+      primaryGlow: withAlpha(primary, 0.28),
+      surface: mixHexColors('#1b2230', primary, 0.05),
+      surfaceMuted: mixHexColors('#151b27', primary, 0.06),
+      surfaceHover: mixHexColors('#232b3b', primary, 0.06),
+      text: mixHexColors('#f3f4f6', primary, 0.04),
+      textSecondary: '#cbd5e1',
+      muted: '#94a3b8',
+      border: 'rgba(255, 255, 255, 0.08)',
+      borderSoft: withAlpha(primary, 0.26),
+      pageBg: mixHexColors('#0e1420', primary, 0.05),
+      success: '#34d399',
+      successForeground: '#052e1c',
+      successSoft: 'rgba(16, 185, 129, 0.18)',
+      warning: '#fbbf24',
+      warningForeground: '#1a1a1a',
+      warningSoft: 'rgba(245, 158, 11, 0.18)',
+      error: '#f87171',
+      errorForeground: '#2c0b0b',
+      errorSoft: 'rgba(239, 68, 68, 0.18)',
+      info: '#60a5fa',
+      infoForeground: '#0b1c33',
+      infoSoft: 'rgba(59, 130, 246, 0.18)',
+    }
+  }
 
   const text = mixHexColors('#0f172a', primary, 0.06)
   const textSecondary = mixHexColors('#475569', primary, 0.08)
@@ -179,8 +217,8 @@ export function buildThemePalette(colorValue?: string | null): ThemePalette {
   }
 }
 
-export function buildThemeStyleVars(colorValue?: string | null): CSSProperties {
-  const p = buildThemePalette(colorValue)
+export function buildThemeStyleVars(colorValue?: string | null, mode: ThemeMode = 'light'): CSSProperties {
+  const p = buildThemePalette(colorValue, mode)
 
   return {
     '--primary': p.primary,

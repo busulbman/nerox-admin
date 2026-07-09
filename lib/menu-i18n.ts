@@ -172,6 +172,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     orderStatusReady: 'Hazır',
     orderStatusDelivered: 'Teslim edildi',
     orderStatusPaid: 'Ödendi',
+    businessInfoTitle: 'İşletme Bilgileri',
+    callBtn: 'Ara',
+    directionsBtn: 'Yol Tarifi',
+    reviewOnGoogle: 'Google\u2019da Puan Ver',
+    websiteBtn: 'Website',
   },
   en: {
     selectLanguage: 'Select language',
@@ -335,6 +340,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     orderStatusReady: 'Ready',
     orderStatusDelivered: 'Delivered',
     orderStatusPaid: 'Paid',
+    businessInfoTitle: 'Business Info',
+    callBtn: 'Call',
+    directionsBtn: 'Directions',
+    reviewOnGoogle: 'Rate us on Google',
+    websiteBtn: 'Website',
   },
   ru: {
     selectLanguage: 'Выберите язык',
@@ -498,6 +508,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     orderStatusReady: 'Готов',
     orderStatusDelivered: 'Доставлен',
     orderStatusPaid: 'Оплачен',
+    businessInfoTitle: 'О заведении',
+    callBtn: 'Позвонить',
+    directionsBtn: 'Маршрут',
+    reviewOnGoogle: 'Оценить в Google',
+    websiteBtn: 'Сайт',
   },
   ar: {
     selectLanguage: 'اختر اللغة',
@@ -661,6 +676,11 @@ const translations: Record<MenuLanguage, Record<string, string>> = {
     orderStatusReady: 'جاهز',
     orderStatusDelivered: 'تم التسليم',
     orderStatusPaid: 'مدفوع',
+    businessInfoTitle: 'معلومات المتجر',
+    callBtn: 'اتصال',
+    directionsBtn: 'الاتجاهات',
+    reviewOnGoogle: 'قيّمنا على Google',
+    websiteBtn: 'الموقع الإلكتروني',
   },
 }
 

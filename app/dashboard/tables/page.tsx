@@ -15,7 +15,7 @@ import { logFirestoreRead, logFirestoreWrite } from '@/lib/firestore-debug'
 import { normalizeTable } from '@/lib/firestore-models'
 import { getRestaurantTablesQuery } from '@/lib/firestore-queries'
 import { db, rd } from '@/lib/firebase'
-import { DEFAULT_PRIMARY_COLOR, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
+import { resolveMenuPrimaryColor, resolvePanelPrimaryColor, resolveRestaurantBusinessName } from '@/lib/restaurant-settings'
 import { createTableSessionWindow } from '@/lib/table-session'
 import type { Table, TableStatus, WaiterCall } from '@/lib/types'
 
@@ -69,7 +69,9 @@ export default function TablesPage() {
   const restaurantId = profile?.restaurantId || ''
   const menuSlug = settings?.slug?.trim() || restaurantId
   const businessName = resolveRestaurantBusinessName(settings)
-  const primaryColor = settings?.primaryColor || DEFAULT_PRIMARY_COLOR
+  const primaryColor = resolvePanelPrimaryColor(settings)
+  // Basılan QR kartları müşteriye dönük olduğundan menü rengiyle üretilir.
+  const qrColor = resolveMenuPrimaryColor(settings)
   const primaryText = 'var(--text)'
   const primaryForeground = 'var(--primary-foreground)'
   const tableDocRef = (tableId: string) => rd(restaurantId, 'tables', tableId)
@@ -124,14 +126,14 @@ export default function TablesPage() {
     Promise.all(
       tables.map(async (t) => {
         const url = `${origin}/menu/${menuSlug}/${t.number}`
-        const dataUrl = await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: primaryColor, light: '#ffffff' } })
+        const dataUrl = await QRCode.toDataURL(url, { width: 260, margin: 2, color: { dark: qrColor, light: '#ffffff' } })
         return [t.id, dataUrl] as const
       })
     ).then((entries) => {
       if (!cancelled) setQrMap(Object.fromEntries(entries))
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [menuSlug, origin, primaryColor, tables])
+  }, [menuSlug, origin, qrColor, tables])
 
   function getTableLink(tableNumber: number) {
     return `${origin || ''}/menu/${menuSlug}/${tableNumber}`
@@ -284,7 +286,7 @@ export default function TablesPage() {
         const table = tables[i]
         const link = getTableLink(table.number)
         const qrDataUrl = await QRCode.toDataURL(link, {
-          width: 600, margin: 2, color: { dark: primaryColor, light: '#ffffff' },
+          width: 600, margin: 2, color: { dark: qrColor, light: '#ffffff' },
         })
         const qrSize  = 120
         const xOffset = (210 - qrSize) / 2

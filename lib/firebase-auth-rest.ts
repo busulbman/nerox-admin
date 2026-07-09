@@ -87,22 +87,14 @@ export async function createUser(email: string, password: string, displayName?: 
 
   const data = await response.json() as { localId: string; email: string }
 
-  // Update display name if provided
-  if (displayName) {
-    await updateUserProfile(data.localId, displayName).catch((err) => {
-      console.warn('[firebase-auth-rest] Failed to update displayName:', err)
-    })
-  }
+  // Display name is persisted in the Firestore user doc (not the Auth profile),
+  // so nothing extra to do here with `displayName`.
+  void displayName
 
   return {
     uid: data.localId,
     email: data.email,
   }
-}
-
-async function updateUserProfile(uid: string, displayName: string): Promise<void> {
-  // Display name is stored in Firestore user doc, not in Auth profile
-  console.log('[firebase-auth-rest] displayName stored in Firestore for uid:', uid, displayName)
 }
 
 export async function deleteUser(uid: string): Promise<void> {

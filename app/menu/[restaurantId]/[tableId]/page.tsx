@@ -28,15 +28,20 @@ import {
   Gift,
   Globe,
   LoaderCircle,
+  MapPin,
+  MessageCircle,
   Phone,
   SearchX,
   ShoppingBag,
+  Star,
+  Store,
   ShoppingCart,
   UserRound,
   UtensilsCrossed,
   Wifi,
   X,
 } from 'lucide-react'
+import InstagramIcon from '@/components/icons/InstagramIcon'
 import { useAuth } from '@/components/AuthProvider'
 import UserAvatar from '@/components/UserAvatar'
 import LoadingScreen from '@/components/LoadingScreen'
@@ -56,8 +61,10 @@ import {
 } from '@/lib/menu-theme'
 import {
   EMPTY_RESTAURANT_GENERAL_SETTINGS,
+  buildRestaurantContactLinks,
   getRestaurantAccessBlockMessage,
   mergeRestaurantGeneralSettings,
+  resolveMenuPrimaryColor,
   resolveRestaurantBusinessName,
 } from '@/lib/restaurant-settings'
 import { calculateCartTotal, groupCartItemsByCustomer } from '@/lib/order-utils'
@@ -101,6 +108,7 @@ import type {
   WaiterCall,
 } from '@/lib/types'
 import { formatPriceWithConversion, getExchangeRates, type ExchangeRates } from '@/lib/currency'
+import { useSystemPrefersDark } from '@/hooks/useSystemPrefersDark'
 import { calculatePendingRewards } from '@/lib/loyalty-rewards'
 
 type CallTip = 'sipariş' | 'hesap' | 'yardım'
@@ -477,6 +485,8 @@ export default function MenuPage() {
   const [languageModal, setLanguageModal] = useState(false)
   const [demoTourOpen, setDemoTourOpen] = useState(false)
   const [exchangeRates, setExchangeRates] = useState<ExchangeRates | null>(null)
+  // menuThemeMode "system" iken cihaz temasını takip et
+  const systemPrefersDark = useSystemPrefersDark()
   const [currentSessionTime, setCurrentSessionTime] = useState(() => Date.now())
   const previousSessionCallStates = useRef<Map<string, WaiterCall['durum']>>(new Map())
   const previousPaidCallIds = useRef<Set<string>>(new Set())
@@ -1712,14 +1722,18 @@ export default function MenuPage() {
   const hasGeneralSettings = Boolean(generalSettings.businessName || generalSettings.logoUrl)
   const menuDisplayName = hasGeneralSettings ? resolveRestaurantBusinessName(generalSettings) : resolveMenuDisplayName(menuSettings)
   const menuLogoUrl = hasGeneralSettings && generalSettings.logoUrl ? generalSettings.logoUrl : menuSettings.logoUrl
-  const menuPrimaryColor = generalSettings.primaryColor || DEFAULT_MENU_PRIMARY_COLOR
-  const palette = buildThemePalette(menuPrimaryColor)
-  const menuThemeVars = buildThemeStyleVars(menuPrimaryColor)
+  const menuPrimaryColor = resolveMenuPrimaryColor(generalSettings) || DEFAULT_MENU_PRIMARY_COLOR
+  const menuThemeMode = generalSettings.menuThemeMode ?? 'system'
+  const menuDark = menuThemeMode === 'dark' || (menuThemeMode === 'system' && systemPrefersDark)
+  const palette = buildThemePalette(menuPrimaryColor, menuDark ? 'dark' : 'light')
+  const menuThemeVars = buildThemeStyleVars(menuPrimaryColor, menuDark ? 'dark' : 'light')
   const menuPrimaryTextColor = palette.primaryForeground
   const menuTextColor = palette.text
   const menuMutedColor = palette.muted
   const menuSurfaceMuted = palette.surfaceMuted
   const menuBorderColor = palette.borderSoft
+  const contactLinks = buildRestaurantContactLinks(generalSettings)
+  const hasContactLinks = Object.values(contactLinks).some((link) => link !== null)
 
   const hasActiveHelpRequest = sessionCalls.some((call) => call.tip === 'yardım')
   const hasActivePaymentRequest = sessionCalls.some((call) => call.tip === 'hesap')
@@ -1795,7 +1809,7 @@ export default function MenuPage() {
   if (restaurantAccessReason) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--page-bg)] px-6" dir={isRtl ? 'rtl' : 'ltr'}>
-        <div className="w-full max-w-md rounded-[2rem] border bg-white px-6 py-10 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)]" style={{ borderColor: menuBorderColor }}>
+        <div className="w-full max-w-md rounded-[2rem] border bg-[var(--surface)] px-6 py-10 text-center shadow-[0_18px_50px_rgba(15,23,42,0.08)]" style={{ borderColor: menuBorderColor }}>
           <p className="text-[1.5rem] font-semibold text-[var(--text)]">{t(language, 'menuUnavailable')}</p>
           <p className="mt-3 text-sm leading-6" style={{ color: menuMutedColor }}>{restaurantAccessReason}</p>
         </div>
@@ -1811,7 +1825,7 @@ export default function MenuPage() {
           <div className="text-center mb-8">
             {menuLogoUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={menuLogoUrl} alt={menuDisplayName} className="h-16 w-16 mx-auto rounded-2xl object-cover border border-black/5 bg-white shadow-lg mb-4" />
+              <img src={menuLogoUrl} alt={menuDisplayName} className="h-16 w-16 mx-auto rounded-2xl object-cover border border-[var(--border)] bg-[var(--surface)] shadow-lg mb-4" />
             )}
             <h1 className="text-2xl font-bold" style={{ color: menuTextColor }}>{t(DEFAULT_LANGUAGE, 'selectLanguage')}</h1>
             <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>{t(DEFAULT_LANGUAGE, 'selectLanguageDescription')}</p>
@@ -1821,7 +1835,7 @@ export default function MenuPage() {
               <button
                 key={lang.code}
                 onClick={() => handleSelectLanguage(lang.code)}
-                className="w-full rounded-2xl bg-white px-5 py-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.06)] border transition-all hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)]"
+                className="w-full rounded-2xl bg-[var(--surface)] px-5 py-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.06)] border transition-all hover:shadow-[0_12px_32px_rgba(0,0,0,0.1)]"
                 style={{ borderColor: menuBorderColor }}
                 dir={lang.dir}
               >
@@ -1843,7 +1857,7 @@ export default function MenuPage() {
           <div className="text-center mb-8">
             {menuLogoUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={menuLogoUrl} alt={menuDisplayName} className="h-16 w-16 mx-auto rounded-2xl object-cover border border-black/5 bg-white shadow-lg mb-4" />
+              <img src={menuLogoUrl} alt={menuDisplayName} className="h-16 w-16 mx-auto rounded-2xl object-cover border border-[var(--border)] bg-[var(--surface)] shadow-lg mb-4" />
             )}
             <h1 className="text-2xl font-bold" style={{ color: menuTextColor }}>{t(language, 'nameChangeTitle')}</h1>
             <p className="mt-2 text-sm" style={{ color: menuMutedColor }}>{t(language, 'nameChangeDescription')}</p>
@@ -1854,14 +1868,14 @@ export default function MenuPage() {
             onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCustomerNameOnboarding() }}
             placeholder={t(language, 'namePlaceholder')}
             autoFocus
-            className="w-full rounded-2xl border border-black/8 bg-white px-5 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)] mb-4"
+            className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)] mb-4"
             style={{ color: menuTextColor }}
           />
           <div className="flex gap-3">
             <button
               onClick={handleContinueWithoutNameOnboarding}
               className="flex-1 rounded-2xl px-4 py-4 text-sm font-semibold border"
-              style={{ background: '#fff', color: menuTextColor, borderColor: menuBorderColor }}
+              style={{ background: 'var(--surface)', color: menuTextColor, borderColor: menuBorderColor }}
             >
               {t(language, 'continueWithoutName')}
             </button>
@@ -1886,21 +1900,21 @@ export default function MenuPage() {
         @keyframes menu-modal-pop { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
       `}</style>
 
-      <div className="min-h-screen overflow-x-hidden pb-44 text-[#1a1a1a]" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
-        <header className="sticky top-0 z-20 border-b border-black/5 backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
+      <div className="min-h-screen overflow-x-hidden pb-44 text-[var(--text)]" style={{ ...menuThemeVars, background: 'var(--page-bg)' }} dir={isRtl ? 'rtl' : 'ltr'}>
+        <header className="sticky top-0 z-20 border-b border-[var(--border)] backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
           <div className="max-w-2xl mx-auto px-4 pt-5 pb-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 {menuLogoUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={menuLogoUrl} alt={menuDisplayName} className="h-11 w-11 rounded-2xl object-cover border border-black/5 bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]" />
+                  <img src={menuLogoUrl} alt={menuDisplayName} className="h-11 w-11 rounded-2xl object-cover border border-[var(--border)] bg-[var(--surface)] shadow-[0_4px_14px_rgba(0,0,0,0.08)]" />
                 )}
                 <p className="truncate text-[1.2rem] font-semibold leading-none" style={{ color: menuTextColor }}>{menuDisplayName}</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button
                   onClick={() => setLanguageModal(true)}
-                  className="flex h-10 items-center justify-center gap-1 rounded-full bg-white px-3 shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                  className="flex h-10 items-center justify-center gap-1 rounded-full bg-[var(--surface)] px-3 shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
                   style={{ color: menuTextColor }}
                   aria-label="Change language"
                 >
@@ -1911,7 +1925,7 @@ export default function MenuPage() {
                   <div className="relative">
                     <button
                       onClick={() => { setActionMessage(null); setOrdersModal(true) }}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_4px_14px_rgba(0,0,0,0.08)]"
                       style={{ color: menuTextColor }}
                       aria-label={t(language, 'myOrders')}
                     >
@@ -1928,7 +1942,7 @@ export default function MenuPage() {
                   <button
                     onClick={openCartDrawer}
                     disabled={!canUseSessionActions}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_4px_14px_rgba(0,0,0,0.08)] disabled:opacity-50"
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_4px_14px_rgba(0,0,0,0.08)] disabled:opacity-50"
                     style={{ color: menuTextColor }}
                     aria-label={t(language, 'cart')}
                   >
@@ -1943,7 +1957,7 @@ export default function MenuPage() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-[22px] bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
+            <div className="mt-4 rounded-[22px] bg-[var(--surface)] px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'table')} {displayTableLabel} • {t(language, 'welcome')}</p>
@@ -1985,7 +1999,7 @@ export default function MenuPage() {
             </div>
 
             {generalSettings.wifiEnabled && generalSettings.wifiName && (
-              <div className="mt-3 rounded-[18px] bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.05)] border" style={{ borderColor: menuBorderColor }}>
+              <div className="mt-3 rounded-[18px] bg-[var(--surface)] px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.05)] border" style={{ borderColor: menuBorderColor }}>
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: menuSurfaceMuted }}>
                     <Wifi size={18} style={{ color: menuPrimaryColor }} />
@@ -2019,7 +2033,7 @@ export default function MenuPage() {
                         key={category.id}
                         onClick={() => setActiveCat(category.id)}
                         className="shrink-0 rounded-full px-4 py-2.5 flex items-center gap-2 border transition-all whitespace-nowrap"
-                        style={active ? { background: menuPrimaryColor, color: menuPrimaryTextColor, borderColor: menuPrimaryColor } : { background: '#fff', color: menuMutedColor, borderColor: menuBorderColor }}
+                        style={active ? { background: menuPrimaryColor, color: menuPrimaryTextColor, borderColor: menuPrimaryColor } : { background: 'var(--surface)', color: menuMutedColor, borderColor: menuBorderColor }}
                       >
                         <span className="text-sm font-semibold">{category.name}</span>
                         <span className="min-w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center px-1.5" style={active ? { background: 'rgba(255,255,255,0.22)', color: '#fff' } : { background: menuSurfaceMuted, color: menuTextColor }}>
@@ -2057,7 +2071,7 @@ export default function MenuPage() {
                   return (
                     <div
                       key={campaign.id}
-                      className="rounded-[24px] border bg-white p-4 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
+                      className="rounded-[24px] border bg-[var(--surface)] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
                       style={{ borderColor: menuBorderColor }}
                     >
                       <div className="flex items-start gap-3">
@@ -2129,7 +2143,7 @@ export default function MenuPage() {
           )}
 
           {visibleProducts.length === 0 ? (
-            <div className="rounded-[28px] bg-white px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
+            <div className="rounded-[28px] bg-[var(--surface)] px-6 py-16 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
               <UtensilsCrossed className="mx-auto mb-3 h-9 w-9 text-[var(--primary)]" />
               {products.some((product) => product.available) ? (
                 <p className="text-sm" style={{ color: menuMutedColor }}>{t(language, 'noProductsInCategory')}</p>
@@ -2152,7 +2166,7 @@ export default function MenuPage() {
                     tabIndex={0}
                     onClick={() => openProduct(product)}
                     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openProduct(product) } }}
-                    className="flex items-center gap-4 rounded-2xl bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.06)] active:scale-[0.995] transition-transform cursor-pointer focus:outline-none"
+                    className="flex items-center gap-4 rounded-2xl bg-[var(--surface)] p-3 shadow-[0_2px_12px_rgba(0,0,0,0.06)] active:scale-[0.995] transition-transform cursor-pointer focus:outline-none"
                     style={{ border: `1px solid ${menuBorderColor}` }}
                   >
                     <MenuProductImage
@@ -2190,12 +2204,60 @@ export default function MenuPage() {
             </div>
           )}
 
+          {/* İşletme Bilgileri: yalnızca dolu alanlar gösterilir */}
+          {hasContactLinks && (
+            <section className="mt-8">
+              <div
+                className="rounded-[24px] border bg-[var(--surface)] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.06)]"
+                style={{ borderColor: menuBorderColor }}
+              >
+                <div className="flex items-center gap-2">
+                  <Store size={15} style={{ color: menuPrimaryColor }} />
+                  <h2 className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: menuTextColor }}>
+                    {t(language, 'businessInfoTitle')}
+                  </h2>
+                </div>
+
+                {contactLinks.review && (
+                  <a
+                    href={contactLinks.review}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 flex items-center justify-center gap-2 rounded-[18px] px-4 py-3.5 text-sm font-bold shadow-[0_10px_24px_rgba(0,0,0,0.12)] transition-transform active:scale-[0.98]"
+                    style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}
+                  >
+                    <Star size={16} fill="currentColor" />
+                    {t(language, 'reviewOnGoogle')}
+                  </a>
+                )}
+
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {contactLinks.instagram && (
+                    <ContactLinkButton href={contactLinks.instagram} icon={<InstagramIcon size={15} />} label="Instagram" textColor={menuTextColor} borderColor={menuBorderColor} surfaceColor={menuSurfaceMuted} />
+                  )}
+                  {contactLinks.whatsapp && (
+                    <ContactLinkButton href={contactLinks.whatsapp} icon={<MessageCircle size={15} />} label="WhatsApp" textColor={menuTextColor} borderColor={menuBorderColor} surfaceColor={menuSurfaceMuted} />
+                  )}
+                  {contactLinks.phone && (
+                    <ContactLinkButton href={contactLinks.phone} icon={<Phone size={15} />} label={t(language, 'callBtn')} textColor={menuTextColor} borderColor={menuBorderColor} surfaceColor={menuSurfaceMuted} />
+                  )}
+                  {contactLinks.maps && (
+                    <ContactLinkButton href={contactLinks.maps} icon={<MapPin size={15} />} label={t(language, 'directionsBtn')} textColor={menuTextColor} borderColor={menuBorderColor} surfaceColor={menuSurfaceMuted} />
+                  )}
+                  {contactLinks.website && (
+                    <ContactLinkButton href={contactLinks.website} icon={<Globe size={15} />} label={t(language, 'websiteBtn')} textColor={menuTextColor} borderColor={menuBorderColor} surfaceColor={menuSurfaceMuted} />
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
           {isDemoRestaurant && (
             <div className="mt-8 text-center">
               <button
                 type="button"
                 onClick={() => setDemoTourOpen(true)}
-                className="rounded-full border bg-white px-4 py-2 text-xs font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.06)]"
+                className="rounded-full border bg-[var(--surface)] px-4 py-2 text-xs font-semibold shadow-[0_4px_14px_rgba(0,0,0,0.06)]"
                 style={{ borderColor: menuBorderColor, color: menuMutedColor }}
               >
                 {t(language, 'demoTourShowAgain')}
@@ -2224,7 +2286,7 @@ export default function MenuPage() {
               </div>
             )}
             {infoMessage && (
-              <div className="mb-3 rounded-[20px] bg-white px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.08)] border border-black/5">
+              <div className="mb-3 rounded-[20px] bg-[var(--surface)] px-4 py-3 shadow-[0_10px_26px_rgba(0,0,0,0.08)] border border-[var(--border)]">
                 <p className="text-[13px] leading-5" style={{ color: menuTextColor }}>{infoMessage}</p>
               </div>
             )}
@@ -2246,7 +2308,7 @@ export default function MenuPage() {
                   type="button"
                   onClick={openCallModal}
                   disabled={callButtonDisabled}
-                  className="shrink-0 rounded-2xl border bg-white px-4 py-4 text-sm font-semibold disabled:opacity-50 flex items-center justify-center"
+                  className="shrink-0 rounded-2xl border bg-[var(--surface)] px-4 py-4 text-sm font-semibold disabled:opacity-50 flex items-center justify-center"
                   style={{ borderColor: menuBorderColor, color: menuTextColor }}
                   aria-label={t(language, 'callWaiter')}
                 >
@@ -2269,7 +2331,7 @@ export default function MenuPage() {
         {/* Product Detail Sheet */}
         {selectedProduct && (
           <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[2px] flex items-end">
-            <div className="relative w-full bg-[#fafafa] rounded-t-[32px] overflow-hidden max-h-[92vh]" style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
+            <div className="relative w-full bg-[var(--page-bg)] rounded-t-[32px] overflow-hidden max-h-[92vh]" style={{ animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               <div className="h-1.5 w-14 rounded-full bg-black/10 mx-auto mt-3 mb-3" />
               <div className="relative">
                 <MenuProductImage
@@ -2295,7 +2357,7 @@ export default function MenuPage() {
                         <div>
                           <h2 className="text-[24px] font-bold leading-tight" style={{ color: menuTextColor }}>{selectedProduct.name}</h2>
                           <div className="flex items-center gap-2 mt-3">
-                            <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }}>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--surface)] px-3 py-1 text-xs font-semibold shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }}>
                               <span style={{ color: menuPrimaryColor }}>★</span>
                               {meta.rating}
                             </span>
@@ -2317,11 +2379,11 @@ export default function MenuPage() {
                   )
                 })()}
               </div>
-              <div className="absolute inset-x-0 bottom-0 border-t border-black/6 px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
+              <div className="absolute inset-x-0 bottom-0 border-t border-[var(--border)] px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] backdrop-blur-xl" style={{ background: `${menuSurfaceMuted}f2` }}>
                 <div className="max-w-2xl mx-auto flex items-center gap-3">
-                  <div className="flex items-center rounded-full bg-white px-2 py-2 shadow-[0_10px_24px_rgba(0,0,0,0.08)] border border-black/5">
+                  <div className="flex items-center rounded-full bg-[var(--surface)] px-2 py-2 shadow-[0_10px_24px_rgba(0,0,0,0.08)] border border-[var(--border)]">
                     <button onClick={() => adjustDetailQuantity('dec')} className="flex h-9 w-9 items-center justify-center rounded-full text-xl" style={{ background: menuSurfaceMuted, color: menuTextColor }}>−</button>
-                    <span className="w-12 text-center text-base font-bold text-[#1a1a1a]">{detailQuantity}</span>
+                    <span className="w-12 text-center text-base font-bold text-[var(--text)]">{detailQuantity}</span>
                     <button onClick={() => adjustDetailQuantity('inc')} className="h-9 w-9 rounded-full text-xl flex items-center justify-center" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>+</button>
                   </div>
                   <button
@@ -2347,7 +2409,7 @@ export default function MenuPage() {
                   <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'myOrders')}</h2>
                   <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'myOrdersDescription')}</p>
                 </div>
-                <button onClick={() => setOrdersModal(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'close')}>
+                <button onClick={() => setOrdersModal(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }} aria-label={t(language, 'close')}>
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -2365,7 +2427,7 @@ export default function MenuPage() {
                     return (
                       <div
                         key={order.id}
-                        className="rounded-[22px] border bg-white p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                        className="rounded-[22px] border bg-[var(--surface)] p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
                         style={{ borderColor: menuBorderColor }}
                       >
                         <div className="flex items-center justify-between gap-3">
@@ -2425,7 +2487,7 @@ export default function MenuPage() {
                 </p>
               </div>
 
-              <div className="mt-5 rounded-[24px] border bg-white p-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.06)]" style={{ borderColor: menuBorderColor }}>
+              <div className="mt-5 rounded-[24px] border bg-[var(--surface)] p-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.06)]" style={{ borderColor: menuBorderColor }}>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: menuPrimaryColor }}>
                   {t(language, 'loyaltyCampaignLabel')}
                 </p>
@@ -2455,7 +2517,7 @@ export default function MenuPage() {
                 <button
                   onClick={dismissLoyaltyPrompt}
                   className="flex-1 rounded-[20px] px-5 py-4 text-sm font-semibold"
-                  style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
+                  style={{ background: 'var(--surface)', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
                 >
                   {t(language, 'loyaltyPromptLater')}
                 </button>
@@ -2486,7 +2548,7 @@ export default function MenuPage() {
               </div>
 
               {activeLoyaltyCampaign && loyaltyCampaignRule && (
-                <div className="mt-5 rounded-[22px] border bg-white px-4 py-3" style={{ borderColor: menuBorderColor }}>
+                <div className="mt-5 rounded-[22px] border bg-[var(--surface)] px-4 py-3" style={{ borderColor: menuBorderColor }}>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: menuPrimaryColor }}>
                     {t(language, 'loyaltyCampaignLabel')}
                   </p>
@@ -2512,7 +2574,7 @@ export default function MenuPage() {
                     value={loyaltyRegisterForm.name}
                     onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder={t(language, 'loyaltyNameLabel')}
-                    className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                    className="w-full rounded-[20px] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
                     style={{ color: menuTextColor }}
                   />
                 </label>
@@ -2527,7 +2589,7 @@ export default function MenuPage() {
                     onChange={(event) => setLoyaltyRegisterForm((current) => ({ ...current, phone: event.target.value }))}
                     placeholder={t(language, 'loyaltyPhoneLabel')}
                     inputMode="tel"
-                    className="w-full rounded-[20px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
+                    className="w-full rounded-[20px] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]"
                     style={{ color: menuTextColor }}
                   />
                 </label>
@@ -2558,7 +2620,7 @@ export default function MenuPage() {
                     type="button"
                     onClick={dismissLoyaltyPrompt}
                     className="flex-1 rounded-[20px] px-5 py-4 text-sm font-semibold"
-                    style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
+                    style={{ background: 'var(--surface)', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}
                   >
                     {t(language, 'loyaltyPromptLater')}
                   </button>
@@ -2578,15 +2640,15 @@ export default function MenuPage() {
                   <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'nameChangeDescription')}</p>
                 </div>
                 {canDismissCustomerModal && (
-                  <button onClick={() => setCustomerNameModal(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                  <button onClick={() => setCustomerNameModal(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                     <X className="h-5 w-5" />
                   </button>
                 )}
               </div>
-              <input value={customerNameInput} onChange={(event) => setCustomerNameInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleSaveCustomerName() } }} placeholder={t(language, 'namePlaceholder')} autoFocus className="w-full rounded-[22px] border border-black/8 bg-white px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }} />
+              <input value={customerNameInput} onChange={(event) => setCustomerNameInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); handleSaveCustomerName() } }} placeholder={t(language, 'namePlaceholder')} autoFocus className="w-full rounded-[22px] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-base outline-none shadow-[0_8px_20px_rgba(0,0,0,0.05)]" style={{ color: menuTextColor }} />
               <div className="mt-5 flex gap-3">
-                {canDismissCustomerModal && <button onClick={() => setCustomerNameModal(false)} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold" style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'cancel')}</button>}
-                <button onClick={handleContinueWithoutName} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold" style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'continueWithoutName')}</button>
+                {canDismissCustomerModal && <button onClick={() => setCustomerNameModal(false)} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold" style={{ background: 'var(--surface)', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'cancel')}</button>}
+                <button onClick={handleContinueWithoutName} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-semibold" style={{ background: 'var(--surface)', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'continueWithoutName')}</button>
                 <button onClick={handleSaveCustomerName} disabled={!customerNameInput.trim()} className="flex-1 rounded-[20px] px-4 py-3.5 text-sm font-bold disabled:opacity-50" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>{t(language, 'saveName')}</button>
               </div>
             </div>
@@ -2610,7 +2672,7 @@ export default function MenuPage() {
                       <h2 className="text-[24px] font-bold" style={{ color: menuTextColor }}>{t(language, 'callWaiterTitle')}</h2>
                       <p className="mt-1 text-sm" style={{ color: menuMutedColor }}>{t(language, 'callWaiterDescription')}</p>
                     </div>
-                    <button onClick={closeCallModal} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                    <button onClick={closeCallModal} className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                       <X className="h-5 w-5" />
                     </button>
                   </div>
@@ -2627,7 +2689,7 @@ export default function MenuPage() {
                           onClick={() => { if (!tipDisabled) { setSelectedTip(tip); setActionMessage(null) } }}
                           disabled={tipDisabled}
                           className="w-full rounded-[22px] px-4 py-4 flex items-center gap-4 border shadow-[0_8px_20px_rgba(0,0,0,0.05)] transition-all disabled:opacity-60"
-                          style={selectedTip === tip && !tipDisabled ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor } : { background: '#fff', borderColor: menuBorderColor, color: menuTextColor }}
+                          style={selectedTip === tip && !tipDisabled ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor } : { background: 'var(--surface)', borderColor: menuBorderColor, color: menuTextColor }}
                         >
                           <div className="flex h-12 w-12 items-center justify-center rounded-2xl shrink-0" style={{ background: selectedTip === tip && !tipDisabled ? 'rgba(255,255,255,0.14)' : tipUi.surface, color: selectedTip === tip && !tipDisabled ? menuPrimaryTextColor : tipUi.accent }}>
                             <TipIcon className="h-5 w-5" />
@@ -2645,7 +2707,7 @@ export default function MenuPage() {
                       )
                     })}
                   </div>
-                  <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder={t(language, 'addOptionalNote')} className="mt-4 w-full resize-none rounded-[22px] border border-black/6 bg-white px-4 py-4 text-sm outline-none shadow-[0_8px_20px_rgba(0,0,0,0.04)]" style={{ color: menuTextColor }} rows={3} />
+                  <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder={t(language, 'addOptionalNote')} className="mt-4 w-full resize-none rounded-[22px] border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm outline-none shadow-[0_8px_20px_rgba(0,0,0,0.04)]" style={{ color: menuTextColor }} rows={3} />
                   {(selectedTipLockMessage || actionMessage) && <p className="text-sm mt-3 text-[#c2410c]">{selectedTipLockMessage ?? actionMessage}</p>}
                   <button onClick={sendCall} disabled={modalSendDisabled} className="w-full mt-4 rounded-[22px] px-5 py-4 font-bold text-sm disabled:opacity-50" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>
                     {sending ? t(language, 'sending') : t(language, 'sendRequest')}
@@ -2675,11 +2737,11 @@ export default function MenuPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {customerName && (
-                        <button onClick={() => { setCustomerNameInput(customerName); setCustomerNameModal(true) }} className="rounded-full bg-white px-3 py-2 text-xs font-medium shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                        <button onClick={() => { setCustomerNameInput(customerName); setCustomerNameModal(true) }} className="rounded-full bg-[var(--surface)] px-3 py-2 text-xs font-medium shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                           {t(language, 'changeName')}
                         </button>
                       )}
-                      <button onClick={() => setCartDrawer(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                      <button onClick={() => setCartDrawer(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_8px_18px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                         <X className="h-5 w-5" />
                       </button>
                     </div>
@@ -2694,7 +2756,7 @@ export default function MenuPage() {
                     <>
                       <div className="space-y-3">
                         {Object.entries(cartGrouped).map(([groupName, group]) => (
-                            <div key={groupName} className="rounded-[20px] bg-white p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)] border border-black/5">
+                            <div key={groupName} className="rounded-[20px] bg-[var(--surface)] p-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)] border border-[var(--border)]">
                               <div className="flex items-center justify-between gap-3 mb-3">
                                 <div>
                                   <p className="font-semibold text-base" style={{ color: menuTextColor }}>{groupName}</p>
@@ -2721,12 +2783,12 @@ export default function MenuPage() {
                                               <button
                                                 onClick={() => handleUpdateCartItemQuantity(item, -1)}
                                                 disabled={!canUseSessionActions}
-                                                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-lg disabled:opacity-50"
+                                                className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface)] text-lg disabled:opacity-50"
                                                 style={{ color: menuTextColor }}
                                               >
                                                 −
                                               </button>
-                                              <span className="w-8 text-center text-sm font-bold text-[#1a1a1a]">{item.quantity}</span>
+                                              <span className="w-8 text-center text-sm font-bold text-[var(--text)]">{item.quantity}</span>
                                               <button
                                                 onClick={() => handleUpdateCartItemQuantity(item, 1)}
                                                 disabled={!canUseSessionActions}
@@ -2774,7 +2836,7 @@ export default function MenuPage() {
 
                       {actionMessage && <p className="text-sm mt-4 text-[#c2410c]">{actionMessage}</p>}
 
-                      <div className="mt-5 pt-4 border-t border-black/6">
+                      <div className="mt-5 pt-4 border-t border-[var(--border)]">
                         <div className="space-y-2 mb-4">
                           {Object.entries(cartGrouped).map(([groupName, group]) => (
                             <div key={`${groupName}-summary`} className="flex items-center justify-between text-sm">
@@ -2782,7 +2844,7 @@ export default function MenuPage() {
                               <span className="font-semibold" style={{ color: menuTextColor }}>{renderPrice(group.total, { inline: true })}</span>
                             </div>
                           ))}
-                          <div className="flex items-center justify-between pt-2 border-t border-black/6">
+                          <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
                             <span className="text-sm font-semibold" style={{ color: menuTextColor }}>{t(language, 'tableTotal')}</span>
                             <span className="text-xl font-bold" style={{ color: menuPrimaryColor }}>{renderPrice(cartTotal, { large: true })}</span>
                           </div>
@@ -2828,12 +2890,12 @@ export default function MenuPage() {
                     <StarRatingField label={t(language, 'waiterRating')} value={ratingForm.waiterRating} activeColor={menuPrimaryColor} notSelectedText={t(language, 'notSelected')} onChange={(value) => setRatingForm((current) => ({ ...current, waiterRating: value }))} />
                     <div>
                       <p className="mb-2 text-sm font-semibold" style={{ color: menuTextColor }}>{t(language, 'yourComment')}</p>
-                      <textarea value={ratingForm.comment} onChange={(event) => setRatingForm((current) => ({ ...current, comment: event.target.value }))} placeholder={t(language, 'optionalComment')} className="w-full rounded-2xl resize-none text-sm" rows={4} style={{ background: '#fff', border: `1px solid ${menuBorderColor}`, padding: '14px', color: menuTextColor, outline: 'none' }} />
+                      <textarea value={ratingForm.comment} onChange={(event) => setRatingForm((current) => ({ ...current, comment: event.target.value }))} placeholder={t(language, 'optionalComment')} className="w-full rounded-2xl resize-none text-sm" rows={4} style={{ background: 'var(--surface)', border: `1px solid ${menuBorderColor}`, padding: '14px', color: menuTextColor, outline: 'none' }} />
                     </div>
                   </div>
                   {ratingMessage && <p className="text-sm mt-4" style={{ color: '#c2410c' }}>{ratingMessage}</p>}
                   <div className="flex gap-3 mt-5">
-                    <button onClick={closeRatingModal} className="flex-1 py-3.5 rounded-2xl font-semibold text-sm" style={{ background: '#fff', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'later')}</button>
+                    <button onClick={closeRatingModal} className="flex-1 py-3.5 rounded-2xl font-semibold text-sm" style={{ background: 'var(--surface)', color: menuTextColor, border: `1px solid ${menuBorderColor}` }}>{t(language, 'later')}</button>
                     <button onClick={submitRating} disabled={ratingSubmitDisabled} className="flex-1 py-3.5 rounded-2xl font-bold text-sm disabled:opacity-50" style={{ background: menuPrimaryColor, color: menuPrimaryTextColor }}>{ratingSending ? t(language, 'sending') : t(language, 'send')}</button>
                   </div>
                 </>
@@ -2875,7 +2937,7 @@ export default function MenuPage() {
                 <button
                   onClick={() => setOrderConfirmModal(false)}
                   className="flex-1 rounded-2xl px-4 py-3.5 text-sm font-semibold border transition-all active:scale-[0.98]"
-                  style={{ borderColor: menuBorderColor, color: menuTextColor, background: '#fff' }}
+                  style={{ borderColor: menuBorderColor, color: menuTextColor, background: 'var(--surface)' }}
                 >
                   {t(language, 'orderConfirmCancel')}
                 </button>
@@ -2902,7 +2964,7 @@ export default function MenuPage() {
             <div className="w-full rounded-t-[32px] px-5 pt-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:max-w-sm sm:rounded-[28px] sm:pb-6" style={{ background: 'var(--page-bg)', animation: 'menu-sheet-in 280ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold" style={{ color: menuTextColor }}>{t(language, 'selectLanguage')}</h2>
-                <button onClick={() => setLanguageModal(false)} className="flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
+                <button onClick={() => setLanguageModal(false)} className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--surface)] shadow-[0_4px_12px_rgba(0,0,0,0.08)]" style={{ color: menuTextColor }}>
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -2914,7 +2976,7 @@ export default function MenuPage() {
                     className="w-full rounded-2xl px-4 py-3.5 text-left border transition-all"
                     style={language === lang.code
                       ? { background: menuPrimaryColor, borderColor: menuPrimaryColor, color: menuPrimaryTextColor }
-                      : { background: '#fff', borderColor: menuBorderColor, color: menuTextColor }}
+                      : { background: 'var(--surface)', borderColor: menuBorderColor, color: menuTextColor }}
                     dir={lang.dir}
                   >
                     <p className="font-semibold">{lang.nativeName}</p>
@@ -2969,8 +3031,8 @@ function WaiterAssistToast({
 
   return (
     <div
-      className="w-full max-w-sm rounded-[24px] border bg-white p-4 shadow-[0_14px_36px_rgba(15,23,42,0.14)]"
-      style={{ borderColor, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(10px)' }}
+      className="w-full max-w-sm rounded-[24px] border bg-[var(--surface)] p-4 shadow-[0_14px_36px_rgba(15,23,42,0.14)]"
+      style={{ borderColor, background: 'var(--surface)', backdropFilter: 'blur(10px)' }}
     >
       <div className="flex items-start gap-3">
         <UserAvatar
@@ -3051,10 +3113,40 @@ function MenuProductImage({ imageUrl, alt, fallbackEmoji, heightClass, roundedCl
   )
 }
 
+function ContactLinkButton({
+  href,
+  icon,
+  label,
+  textColor,
+  borderColor,
+  surfaceColor,
+}: {
+  href: string
+  icon: React.ReactNode
+  label: string
+  textColor: string
+  borderColor: string
+  surfaceColor: string
+}) {
+  const isExternal = !href.startsWith('tel:')
+
+  return (
+    <a
+      href={href}
+      {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      className="flex items-center justify-center gap-1.5 rounded-[16px] border px-3 py-3 text-xs font-semibold transition-transform active:scale-[0.97]"
+      style={{ background: surfaceColor, borderColor, color: textColor }}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </a>
+  )
+}
+
 function InfoTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[22px] bg-white px-4 py-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)]">
-      <p className="text-xs uppercase tracking-[0.18em] text-[#888888]">{label}</p>
+    <div className="rounded-[22px] bg-[var(--surface)] px-4 py-4 shadow-[0_8px_20px_rgba(0,0,0,0.05)]">
+      <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">{label}</p>
       <p className="mt-2 text-lg font-bold text-[var(--text)]">{value}</p>
     </div>
   )

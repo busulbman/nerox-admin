@@ -2,11 +2,24 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, updateDoc, writeBatch } from 'firebase/firestore'
-import { Upload, Trash2, Image as ImageIcon, FileUp, Settings, Pencil, Trash, Check, Square } from 'lucide-react'
+import { addDoc, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import { Upload, Trash2, Image as ImageIcon, FileUp, Settings, Pencil, Trash, Check, Square, Monitor, Sun, Moon, Globe, ShoppingBag, UtensilsCrossed, Wifi, Star, Gift, Receipt, MessageCircle, Phone, MapPin, Smartphone } from 'lucide-react'
+import InstagramIcon from '@/components/icons/InstagramIcon'
 import { db, rc, rd } from '@/lib/firebase'
 import { useAuth } from '@/components/AuthProvider'
-import type { Category, Product } from '@/lib/types'
+import { useRestaurantSettings } from '@/hooks/useRestaurantSettings'
+import { useSystemPrefersDark } from '@/hooks/useSystemPrefersDark'
+import {
+  DEFAULT_BRAND_LOGO_PATH,
+  DEFAULT_PRIMARY_COLOR,
+  buildRestaurantContactLinks,
+  getContrastColor,
+  isValidRestaurantThemeColor,
+  resolveMenuPrimaryColor,
+  resolveRestaurantBusinessName,
+} from '@/lib/restaurant-settings'
+import { buildThemePalette, withAlpha } from '@/lib/ui-theme'
+import type { Category, MenuThemeMode, Product } from '@/lib/types'
 
 type ProdForm = { name: string; description: string; price: string; categoryId: string; available: boolean; image: string }
 type ParsedItem = {
@@ -33,6 +46,42 @@ const TEXT = 'var(--text)'
 const BORDER_SOFT = 'var(--border-soft)'
 
 const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || ''
+
+const MENU_THEME_MODE_OPTIONS: { value: MenuThemeMode; label: string; Icon: typeof Monitor }[] = [
+  { value: 'system', label: 'Sistem', Icon: Monitor },
+  { value: 'light', label: 'Açık Mod', Icon: Sun },
+  { value: 'dark', label: 'Koyu Mod', Icon: Moon },
+]
+
+const MENU_PREVIEW_CATEGORIES = ['Kahveler', 'Tatlılar', 'Fırından']
+
+// Gerçek fotoğraf görünümlü örnek ürünler; görsel yüklenemezse gradient fallback gösterilir.
+const MENU_PREVIEW_PRODUCTS = [
+  {
+    name: 'Latte',
+    desc: 'Çift shot espresso, ipeksi süt köpüğü',
+    price: 120,
+    image: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&w=180&q=70',
+  },
+  {
+    name: 'San Sebastian',
+    desc: 'Bask usulü fırınlanmış cheesecake',
+    price: 210,
+    image: 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?auto=format&fit=crop&w=180&q=70',
+  },
+  {
+    name: 'Kruvasan',
+    desc: 'Tereyağlı, günlük taze fırından',
+    price: 95,
+    image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=180&q=70',
+  },
+  {
+    name: 'Ice Americano',
+    desc: 'Bol buzlu, yoğun espresso',
+    price: 105,
+    image: 'https://images.unsplash.com/photo-1517959105821-eaf2591984ca?auto=format&fit=crop&w=180&q=70',
+  },
+]
 
 function isValidImageUrl(url: string): boolean {
   if (!url.trim()) return false
@@ -156,6 +205,27 @@ export default function MenuPage() {
   const [prodImageUploading, setProdImageUploading] = useState(false)
   const [prodImageError, setProdImageError] = useState('')
   const prodFileInputRef = useRef<HTMLInputElement>(null)
+
+  // QR menü görünüm ayarları (menuPrimaryColor + menuThemeMode)
+  const { settings, loading: settingsLoading } = useRestaurantSettings(restaurantId)
+  const systemPrefersDark = useSystemPrefersDark()
+  const [menuColor, setMenuColor] = useState('')
+  const [menuMode, setMenuMode] = useState<MenuThemeMode>('system')
+  const [appearanceSaving, setAppearanceSaving] = useState(false)
+  const [appearanceMessage, setAppearanceMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const appearanceInitRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!restaurantId) {
+      appearanceInitRef.current = null
+      return
+    }
+    if (!settingsLoading && appearanceInitRef.current !== restaurantId) {
+      setMenuColor(resolveMenuPrimaryColor(settings))
+      setMenuMode(settings.menuThemeMode ?? 'system')
+      appearanceInitRef.current = restaurantId
+    }
+  }, [restaurantId, settings, settingsLoading])
 
   const [bulkModal, setBulkModal] = useState(false)
   const [bulkInput, setBulkInput] = useState('')
@@ -283,6 +353,37 @@ export default function MenuPage() {
     await updateDoc(productDocRef(product.id), { available: !product.available })
   }
 
+  async function saveMenuAppearance() {
+    if (!restaurantId) return
+
+    const trimmedColor = menuColor.trim()
+    if (trimmedColor && !isValidRestaurantThemeColor(trimmedColor)) {
+      setAppearanceMessage({ tone: 'error', text: 'Menü rengi geçerli bir hex renk olmalı. Örnek: #7c3aed' })
+      return
+    }
+
+    setAppearanceSaving(true)
+    setAppearanceMessage(null)
+
+    try {
+      await setDoc(
+        doc(db, 'restaurants', restaurantId, 'settings', 'general'),
+        {
+          menuPrimaryColor: trimmedColor || DEFAULT_PRIMARY_COLOR,
+          menuThemeMode: menuMode,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
+      setAppearanceMessage({ tone: 'success', text: 'QR menü görünümü kaydedildi.' })
+    } catch (error) {
+      console.error('Menu appearance save error:', error)
+      setAppearanceMessage({ tone: 'error', text: 'Kaydedilemedi. Lütfen tekrar deneyin.' })
+    } finally {
+      setAppearanceSaving(false)
+    }
+  }
+
   function handleBulkParse() {
     const { items, errors } = parseMenuInput(bulkInput)
     setBulkParsed(items)
@@ -396,6 +497,25 @@ export default function MenuPage() {
   const inputCls = 'theme-input rounded-xl text-sm'
   const validItemsCount = bulkParsed.filter((i) => i.valid).length
   const invalidItemsCount = bulkParsed.filter((i) => !i.valid).length
+
+  // QR menü canlı önizleme değerleri — renk/mod değişiminde anında güncellenir
+  const trimmedMenuColor = menuColor.trim()
+  const menuPreviewColor = isValidRestaurantThemeColor(trimmedMenuColor) ? trimmedMenuColor : DEFAULT_PRIMARY_COLOR
+  const menuPreviewDark = menuMode === 'dark' || (menuMode === 'system' && systemPrefersDark)
+  const menuPalette = buildThemePalette(menuPreviewColor, menuPreviewDark ? 'dark' : 'light')
+  const menuPreviewTextColor = getContrastColor(menuPreviewColor)
+  const previewBusinessName = resolveRestaurantBusinessName(settings)
+  const previewLogoUrl = settings.logoUrl?.trim() || DEFAULT_BRAND_LOGO_PATH
+  const previewContactLinks = buildRestaurantContactLinks(settings)
+  const previewSocialIcons = [
+    { key: 'instagram', Icon: InstagramIcon, visible: !!previewContactLinks.instagram },
+    { key: 'whatsapp', Icon: MessageCircle, visible: !!previewContactLinks.whatsapp },
+    { key: 'phone', Icon: Phone, visible: !!previewContactLinks.phone },
+    { key: 'maps', Icon: MapPin, visible: !!previewContactLinks.maps },
+    { key: 'website', Icon: Globe, visible: !!previewContactLinks.website },
+  ].filter((item) => item.visible)
+  const previewCartCount = 2
+  const previewCartTotal = MENU_PREVIEW_PRODUCTS[0].price + MENU_PREVIEW_PRODUCTS[2].price
 
   return (
     <div className="overflow-x-hidden p-4 md:p-8">
@@ -686,6 +806,260 @@ export default function MenuPage() {
         </div>
       </div>
 
+      {/* ── QR Menü Görünümü ──────────────────────────────────────────────── */}
+      <div className="theme-card mt-8 rounded-2xl p-6">
+        <div className="grid grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+          <div>
+            <div className="flex items-center gap-2">
+              <Smartphone size={20} style={{ color: menuPreviewColor }} />
+              <h2 className="text-lg font-semibold" style={{ color: TEXT }}>QR Menü Görünümü</h2>
+            </div>
+            <p className="mt-1 text-sm text-gray-400">
+              Müşterinin telefonunda açılan QR menünün rengi ve açık/koyu modu buradan ayarlanır.
+              Panel rengini etkilemez; panel rengi Genel Ayarlar sayfasındadır.
+            </p>
+
+            <div className="mt-5 space-y-5">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                  Menü Tema Rengi
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={menuPreviewColor}
+                    onChange={(event) => setMenuColor(event.target.value)}
+                    className="h-11 w-14 cursor-pointer rounded-lg border border-gray-200 bg-white p-1"
+                  />
+                  <input
+                    className={inputCls}
+                    value={menuColor}
+                    onChange={(event) => setMenuColor(event.target.value)}
+                    placeholder={DEFAULT_PRIMARY_COLOR}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-400">
+                  Kategori butonları, sepet, kampanya kartları ve tüm menü vurguları bu rengi kullanır.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium" style={{ color: TEXT }}>
+                  Görünüm Modu
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {MENU_THEME_MODE_OPTIONS.map(({ value, label, Icon }) => {
+                    const selected = menuMode === value
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setMenuMode(value)}
+                        className="flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3 text-sm font-semibold transition-all"
+                        style={selected
+                          ? { background: menuPreviewColor, borderColor: menuPreviewColor, color: menuPreviewTextColor }
+                          : { background: SURFACE, borderColor: BORDER_SOFT, color: TEXT }}
+                      >
+                        <Icon size={18} />
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1 text-xs text-gray-400">
+                  &quot;Sistem&quot; seçiliyse müşterinin cihaz teması kullanılır.
+                </p>
+              </div>
+
+              {appearanceMessage && (
+                <div
+                  className="rounded-xl px-4 py-3 text-sm"
+                  style={
+                    appearanceMessage.tone === 'success'
+                      ? { background: '#f0fdf4', color: '#15803d', border: '1px solid #86efac' }
+                      : { background: '#fff7ed', color: '#c2410c', border: '1px solid #fdba74' }
+                  }
+                >
+                  {appearanceMessage.text}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  onClick={() => void saveMenuAppearance()}
+                  disabled={appearanceSaving || settingsLoading}
+                  className="rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-50"
+                  style={{ background: menuPreviewColor, color: menuPreviewTextColor }}
+                >
+                  {appearanceSaving ? 'Kaydediliyor...' : 'Görünümü Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.18em] text-gray-400">Canlı Önizleme</p>
+              <span className="rounded-full px-2.5 py-1 text-[10px] font-semibold" style={{ background: menuPalette.surfaceMuted, color: menuPalette.text }}>
+                {menuPreviewDark ? 'Koyu Mod' : 'Açık Mod'}
+              </span>
+            </div>
+
+            {/* Phone mockup — gerçek telefon oranında (9:19.5), gerçek QR menü düzenini taklit eder */}
+            <div className="mx-auto w-full max-w-[340px]">
+              <div className="overflow-hidden rounded-[3rem] border-[10px] border-[#1c1c1e] bg-[#1c1c1e] shadow-[0_24px_60px_rgba(15,23,42,0.28)]">
+                <div className="relative flex aspect-[9/19.5] flex-col overflow-hidden rounded-[2.4rem]" style={{ background: menuPalette.pageBg }}>
+                  <div className="absolute left-1/2 top-2 z-10 h-4 w-20 -translate-x-1/2 rounded-full bg-[#1c1c1e]" />
+
+                  <div className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-9">
+                    {/* Menü header: logo + işletme adı + dil + sepet */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={previewLogoUrl}
+                          alt={previewBusinessName}
+                          className="h-9 w-9 shrink-0 rounded-xl border border-black/5 bg-white object-cover shadow-sm"
+                        />
+                        <p className="truncate text-[13px] font-semibold" style={{ color: menuPalette.text }}>
+                          {previewBusinessName}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <span className="flex h-7 items-center gap-1 rounded-full px-2 shadow-sm" style={{ color: menuPalette.text, background: menuPalette.surface }}>
+                          <Globe size={11} />
+                          <span className="text-[9px] font-semibold">TR</span>
+                        </span>
+                        <span className="relative flex h-7 w-7 items-center justify-center rounded-full shadow-sm" style={{ color: menuPalette.text, background: menuPalette.surface }}>
+                          <ShoppingBag size={12} />
+                          <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-bold" style={{ background: menuPreviewColor, color: menuPreviewTextColor }}>
+                            {previewCartCount}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Karşılama kartı */}
+                    <div className="mt-2.5 rounded-2xl px-3 py-2 shadow-sm" style={{ background: menuPalette.surface }}>
+                      <p className="text-[9px]" style={{ color: menuPalette.muted }}>Masa 1 • Hoş geldiniz</p>
+                      <p className="mt-0.5 text-[11px] font-semibold" style={{ color: menuPalette.text }}>
+                        Günün favorilerini keşfedin
+                      </p>
+                    </div>
+
+                    {/* Kampanya kartı */}
+                    <div className="mt-2 rounded-2xl border p-2.5 shadow-sm" style={{ borderColor: withAlpha(menuPreviewColor, 0.3), background: withAlpha(menuPreviewColor, menuPreviewDark ? 0.16 : 0.08) }}>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl" style={{ background: menuPreviewColor, color: menuPreviewTextColor }}>
+                          <Gift size={14} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[8px] font-bold uppercase tracking-[0.16em]" style={{ color: menuPreviewDark ? menuPalette.primarySoftForeground : menuPreviewColor }}>Kampanya</p>
+                          <p className="truncate text-[10px] font-semibold" style={{ color: menuPalette.text }}>
+                            2 Latte alana 1 Kruvasan hediye
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Wi-Fi kartı */}
+                    {settings.wifiEnabled && (
+                      <div className="mt-2 flex items-center gap-2 rounded-2xl border px-3 py-2 shadow-sm" style={{ borderColor: menuPalette.borderSoft, background: menuPalette.surface }}>
+                        <Wifi size={12} className="shrink-0" style={{ color: menuPreviewColor }} />
+                        <p className="min-w-0 flex-1 truncate text-[10px] font-semibold" style={{ color: menuPalette.text }}>
+                          {settings.wifiName?.trim() || 'Isletme_WiFi'}
+                        </p>
+                        <span className="shrink-0 rounded-full px-2 py-0.5 text-[8px] font-medium" style={{ background: menuPalette.surfaceMuted, color: menuPalette.text }}>
+                          Kopyala
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Kategori butonları */}
+                    <div className="mt-2.5 flex gap-1.5 overflow-hidden">
+                      {MENU_PREVIEW_CATEGORIES.map((category, index) => (
+                        <span
+                          key={category}
+                          className="shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-[10px] font-semibold"
+                          style={index === 0
+                            ? { background: menuPreviewColor, color: menuPreviewTextColor, borderColor: menuPreviewColor }
+                            : { background: menuPalette.surface, color: menuPalette.muted, borderColor: menuPalette.borderSoft }}
+                        >
+                          {category}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Ürün kartları */}
+                    <div className="mt-2.5 space-y-1.5">
+                      {MENU_PREVIEW_PRODUCTS.map((product) => (
+                        <div key={product.name} className="flex items-center gap-2.5 rounded-2xl border p-2 shadow-sm" style={{ borderColor: menuPalette.borderSoft, background: menuPalette.surface }}>
+                          <MenuPreviewProductImage image={product.image} name={product.name} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[11px] font-bold" style={{ color: menuPalette.text }}>{product.name}</p>
+                            <p className="truncate text-[9px]" style={{ color: menuPalette.muted }}>{product.desc}</p>
+                            <p className="mt-0.5 text-[11px] font-bold" style={{ color: menuPreviewDark ? menuPalette.primarySoftForeground : menuPreviewColor }}>₺{product.price}</p>
+                          </div>
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow" style={{ background: menuPreviewColor, color: menuPreviewTextColor }}>
+                            +
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Sosyal medya / iletişim */}
+                    {previewSocialIcons.length > 0 && (
+                      <div className="mt-2 flex items-center justify-center gap-1.5">
+                        {previewSocialIcons.map(({ key, Icon }) => (
+                          <span key={key} className="flex h-6 w-6 items-center justify-center rounded-full border shadow-sm" style={{ background: menuPalette.surface, borderColor: menuPalette.borderSoft, color: menuPalette.text }}>
+                            <Icon size={10} />
+                          </span>
+                        ))}
+                        {previewContactLinks.review && (
+                          <span className="flex h-6 items-center gap-1 rounded-full px-2 text-[8px] font-bold shadow-sm" style={{ background: menuPreviewColor, color: menuPreviewTextColor }}>
+                            <Star size={9} fill="currentColor" />
+                            Puan Ver
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Alt aksiyonlar: sepet + garson çağır + hesap iste */}
+                    <div className="mt-auto flex gap-1.5 pt-2.5">
+                      <span
+                        className="flex flex-1 items-center justify-between rounded-xl px-3 py-2.5 text-[10px] font-bold"
+                        style={{ background: menuPreviewColor, color: menuPreviewTextColor, boxShadow: `0 8px 18px ${withAlpha(menuPreviewColor, 0.3)}` }}
+                      >
+                        <span className="flex items-center gap-1">
+                          <ShoppingBag size={11} />
+                          Sipariş Ver ({previewCartCount})
+                        </span>
+                        <span>₺{previewCartTotal}</span>
+                      </span>
+                      <span className="flex shrink-0 items-center justify-center rounded-xl border px-2.5" style={{ borderColor: menuPalette.borderSoft, color: menuPalette.text, background: menuPalette.surface }} title="Garson Çağır">
+                        <UtensilsCrossed size={13} />
+                      </span>
+                      <span className="flex shrink-0 items-center justify-center rounded-xl border px-2.5" style={{ borderColor: menuPalette.borderSoft, color: menuPalette.text, background: menuPalette.surface }} title="Hesap İste">
+                        <Receipt size={13} />
+                      </span>
+                    </div>
+
+                    {/* Footer */}
+                    <p className="mt-2 text-center text-[7px] font-semibold uppercase tracking-[0.22em]" style={{ color: menuPalette.muted, opacity: 0.8 }}>
+                      Nerox Studio
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p className="mt-4 text-center text-xs text-gray-400">
+              Renk ve görünüm modu değişiklikleri önizlemeye anında yansır; kaydedince QR menüde yayınlanır.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {catModal.open && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
@@ -955,6 +1329,30 @@ export default function MenuPage() {
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function MenuPreviewProductImage({ image, name }: { image: string; name: string }) {
+  const [failed, setFailed] = useState(false)
+
+  return (
+    <div
+      className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl"
+      style={{ background: 'linear-gradient(160deg, #e9e1d2 0%, #c9b998 100%)' }}
+    >
+      {!failed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={image}
+          alt={name}
+          loading="lazy"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="text-sm font-bold text-white">{name.charAt(0)}</span>
       )}
     </div>
   )

@@ -5,6 +5,8 @@ import {
   type SelfServiceBusinessType,
 } from '@/lib/self-service-registration-config'
 import { registerRestaurantAccount } from '@/lib/self-service-registration'
+import { getClientIp, rateLimit, rateLimitResponse } from '@/lib/server-rate-limit'
+import { verifyCaptcha } from '@/lib/captcha'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -114,7 +116,19 @@ function toErrorResponse(error: unknown) {
 
 export async function POST(request: Request) {
   try {
+    // Abuse protection: 3 registrations per IP per hour.
+    const ip = getClientIp(request)
+    const limit = await rateLimit(`register:${ip}`, 3, 60 * 60)
+    if (!limit.success) {
+      return rateLimitResponse(limit)
+    }
+
     const body = await request.json()
+
+    const captcha = await verifyCaptcha(body?.captchaToken, ip)
+    if (!captcha.success) {
+      return NextResponse.json({ error: captcha.message }, { status: 400 })
+    }
 
     const result = await registerRestaurantAccount({
       businessName: parseRequiredString(body.businessName, 'İşletme adı'),

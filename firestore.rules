@@ -284,6 +284,46 @@ service cloud.firestore {
         ]);
     }
 
+    // ─── Public rating validation ───────────────────────────────────────────────
+
+    function ratingTargetTableData(rid) {
+      return get(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId)).data;
+    }
+
+    function ratingTargetsLiveTableSession(rid) {
+      return request.resource.data.tableId is string
+        && request.resource.data.tableId.size() > 0
+        && request.resource.data.sessionId is string
+        && request.resource.data.sessionId.size() > 0
+        && exists(/databases/$(database)/documents/restaurants/$(rid)/tables/$(request.resource.data.tableId))
+        && ratingTargetTableData(rid).sessionId == request.resource.data.sessionId
+        && tableSessionIsLive(ratingTargetTableData(rid));
+    }
+
+    function ratingTargetCallData(rid) {
+      return get(/databases/$(database)/documents/restaurants/$(rid)/calls/$(request.resource.data.callId)).data;
+    }
+
+    function ratingTargetsValidCall(rid) {
+      return request.resource.data.callId is string
+        && request.resource.data.callId.size() > 0
+        && exists(/databases/$(database)/documents/restaurants/$(rid)/calls/$(request.resource.data.callId))
+        && ratingTargetCallData(rid).restaurantId == rid
+        && ratingTargetCallData(rid).tip == 'hesap'
+        && ratingTargetCallData(rid).durum == 'tamamlandı'
+        && ratingTargetCallData(rid).tableId == request.resource.data.tableId
+        && ratingTargetCallData(rid).sessionId == request.resource.data.sessionId;
+    }
+
+    function ratingWaiterMatchesCall(rid) {
+      // The client fills waiterId/waiterName from the call's assigned waiter
+      // (falling back to whoever completed it). The public writer may not
+      // substitute an arbitrary staff member.
+      let call = ratingTargetCallData(rid);
+      let expectedWaiterId = call.waiterId != null ? call.waiterId : (call.completedById != null ? call.completedById : null);
+      return request.resource.data.waiterId == expectedWaiterId;
+    }
+
     // ─── Users collection ───────────────────────────────────────────────────────
 
     match /users/{uid} {
@@ -361,23 +401,7 @@ service cloud.firestore {
         allow write: if isAdmin(rid);
       }
 
-      // ── Loyalty Campaigns ─────────────────────────────────────────────────────
-
-      match /loyaltyCampaigns/{campaignId} {
-        allow read: if isAdmin(rid) || (
-          restaurantAllowsPublicAccess(rid)
-          && resource.data.active == true
-        );
-        allow write: if isAdmin(rid);
-      }
-
-      // ── Customers ─────────────────────────────────────────────────────────────
-
-      match /customers/{customerId} {
-        allow read: if isAdmin(rid);
-        allow write: if isAdmin(rid);
-        allow create: if validPublicCustomerCreate(rid);
-      }
+      // Loyalty campaigns and customers are defined once, further below.
 
       // ── Tables ────────────────────────────────────────────────────────────────
 
@@ -525,8 +549,16 @@ service cloud.firestore {
         // Staff can do any write
         allow write: if isAdmin(rid);
 
-        // Public rating create (QR menu customers, signed-in or not)
+        // Public rating create (QR menu customers, signed-in or not).
+        // Only allowed for a rating tied to a live table session and a real
+        // completed payment ("hesap") call, with the waiter taken from that
+        // call — so a public writer can't fabricate ratings or target an
+        // arbitrary waiter.
         allow create: if restaurantAllowsPublicAccess(rid)
+          && request.resource.data.restaurantId == rid
+          && ratingTargetsLiveTableSession(rid)
+          && ratingTargetsValidCall(rid)
+          && ratingWaiterMatchesCall(rid)
           && request.resource.data.serviceRating is int
           && request.resource.data.serviceRating >= 1
           && request.resource.data.serviceRating <= 5
@@ -535,7 +567,8 @@ service cloud.firestore {
           && request.resource.data.waiterRating <= 5
           && request.resource.data.status in ['approved', 'suspicious']
           && request.resource.data.comment is string
-          && request.resource.data.keys().hasAll(['restaurantId', 'tableId', 'tableNumber', 'sessionId', 'callId', 'waiterId', 'waiterName', 'serviceRating', 'waiterRating', 'comment', 'status', 'createdAt']);
+          && request.resource.data.keys().hasAll(['restaurantId', 'tableId', 'tableNumber', 'sessionId', 'callId', 'waiterId', 'waiterName', 'serviceRating', 'waiterRating', 'comment', 'status', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['restaurantId', 'tableId', 'tableNumber', 'sessionId', 'callId', 'waiterId', 'waiterName', 'serviceRating', 'waiterRating', 'comment', 'status', 'createdAt']);
       }
 
       // ── Loyalty Campaigns ─────────────────────────────────────────────────────
@@ -564,13 +597,9 @@ service cloud.firestore {
         // Public can create customer record when registering for loyalty.
         // Public reads go through the server API (admin SDK); no direct public
         // read so customer records can't be enumerated by phone number.
-        allow create: if restaurantAllowsPublicAccess(rid)
-          && request.resource.data.name is string
-          && request.resource.data.phone is string
-          && request.resource.data.loyaltyEnabled == true
-          && request.resource.data.points == 0
-          && request.resource.data.totalOrders == 0
-          && request.resource.data.totalSpent == 0;
+        // Uses the strict field allow-list so extra/unexpected fields (and any
+        // non-zero starting balances) are rejected.
+        allow create: if validPublicCustomerCreate(rid);
 
         // ── Customer Rewards ──────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getAdminDb } from '@/lib/firebase-admin'
 import { getRestaurantAccessBlockMessage, normalizeRestaurantDocument } from '@/lib/restaurant-settings'
+import { getClientIp, rateLimit, rateLimitResponse } from '@/lib/server-rate-limit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,14 @@ export async function GET(request: Request) {
 
     if (!restaurantId || !customerId) {
       return NextResponse.json({ error: 'restaurantId ve customerId gerekli.' }, { status: 400 })
+    }
+
+    // Abuse protection: 30 reward-status reads per IP + restaurant per hour
+    // (guards against enumerating customer rewards by id).
+    const ip = getClientIp(request)
+    const limit = await rateLimit(`loyalty-status:${ip}:${restaurantId}`, 30, 60 * 60)
+    if (!limit.success) {
+      return rateLimitResponse(limit)
     }
 
     const adminDb = await getAdminDb()

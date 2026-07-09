@@ -11,7 +11,7 @@ import { auth, rtdb } from "@/lib/firebase";
 import { useAuth } from "@/components/AuthProvider";
 import UserAvatar from "@/components/UserAvatar";
 import { useRestaurantSettings } from "@/hooks/useRestaurantSettings";
-import { resolveRestaurantBusinessName } from "@/lib/restaurant-settings";
+import { resolvePanelPrimaryColor, resolveRestaurantBusinessName } from "@/lib/restaurant-settings";
 import { buildThemePalette, buildThemeStyleVars } from "@/lib/ui-theme";
 import type { UserProfile } from "@/lib/types";
 
@@ -55,7 +55,7 @@ export default function LeaderboardPage() {
   const [dataError, setDataError] = useState("");
 
   const businessName = resolveRestaurantBusinessName(settings);
-  const themePalette = buildThemePalette(settings.primaryColor);
+  const themePalette = buildThemePalette(resolvePanelPrimaryColor(settings));
   const themeVars = buildThemeStyleVars(themePalette.primary);
   const primary = themePalette.primary;
   const primaryForeground = themePalette.primaryForeground;

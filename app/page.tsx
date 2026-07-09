@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import type { Metadata } from 'next'
-import Image from 'next/image'
-import Link from 'next/link'
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -29,135 +29,146 @@ import {
   Store,
   UserRound,
   Users,
-} from 'lucide-react'
+} from "lucide-react";
 
 export const metadata: Metadata = {
-  title: 'Nerox Studio | QR Menü ve Sipariş Yönetim Sistemi',
-  description: 'Kafeler ve restoranlar için QR menü, sipariş, garson ve yönetim paneli sistemi.',
-  metadataBase: new URL('https://www.neroxstudio.com'),
+  title: "Nerox Studio | QR Menü ve Sipariş Yönetim Sistemi",
+  description:
+    "Kafeler ve restoranlar için QR menü, sipariş, garson ve yönetim paneli sistemi.",
+  metadataBase: new URL("https://www.neroxstudio.com"),
   openGraph: {
-    title: 'Nerox Studio | QR Menü ve Sipariş Yönetim Sistemi',
-    description: 'Kafeler ve restoranlar için QR menü, sipariş, garson ve yönetim paneli sistemi.',
-    url: 'https://www.neroxstudio.com',
-    siteName: 'Nerox Studio',
+    title: "Nerox Studio | QR Menü ve Sipariş Yönetim Sistemi",
+    description:
+      "Kafeler ve restoranlar için QR menü, sipariş, garson ve yönetim paneli sistemi.",
+    url: "https://www.neroxstudio.com",
+    siteName: "Nerox Studio",
   },
-}
+};
 
 const heroCards = [
   {
-    title: 'QR Menü',
-    description: 'Masaya özel hızlı menü erişimi',
+    title: "QR Menü",
+    description: "Masaya özel hızlı menü erişimi",
     icon: QrCode,
   },
   {
-    title: 'Garson Paneli',
-    description: 'Çağrılar ve siparişler tek akışta',
+    title: "Garson Paneli",
+    description: "Çağrılar ve siparişler tek akışta",
     icon: BellRing,
   },
   {
-    title: 'Yönetim Paneli',
-    description: 'Menü, masa ve ekip yönetimi',
+    title: "Yönetim Paneli",
+    description: "Menü, masa ve ekip yönetimi",
     icon: LayoutDashboard,
   },
   {
-    title: 'Masa Siparişi',
-    description: 'Müşteri deneyimi için sade akış',
+    title: "Masa Siparişi",
+    description: "Müşteri deneyimi için sade akış",
     icon: Receipt,
   },
-] as const
+] as const;
 
 const featureCards = [
   {
-    title: 'QR Menü',
-    description: 'Masalara yerleştirilen QR kod ile müşteriler menünüze anında erişir.',
+    title: "QR Menü",
+    description:
+      "Masalara yerleştirilen QR kod ile müşteriler menünüze anında erişir.",
     icon: QrCode,
   },
   {
-    title: 'Masadan Sipariş',
-    description: 'Ürün seçimi, sipariş akışı ve masa bazlı takip tek deneyimde ilerler.',
+    title: "Masadan Sipariş",
+    description:
+      "Ürün seçimi, sipariş akışı ve masa bazlı takip tek deneyimde ilerler.",
     icon: Receipt,
   },
   {
-    title: 'Garson Paneli',
-    description: 'Çağrılar, açık siparişler ve masa hareketleri operasyon ekranında toplanır.',
+    title: "Garson Paneli",
+    description:
+      "Çağrılar, açık siparişler ve masa hareketleri operasyon ekranında toplanır.",
     icon: BellRing,
   },
   {
-    title: 'Admin Panel',
-    description: 'Menü, fiyat, personel, masa ve ayarlar tek merkezden yönetilir.',
+    title: "Admin Panel",
+    description:
+      "Menü, fiyat, personel, masa ve ayarlar tek merkezden yönetilir.",
     icon: LayoutDashboard,
   },
   {
-    title: 'Masa Yönetimi',
-    description: 'Her masa için ayrı QR akışı ve durum takibiyle servis tarafı net kalır.',
+    title: "Masa Yönetimi",
+    description:
+      "Her masa için ayrı QR akışı ve durum takibiyle servis tarafı net kalır.",
     icon: ClipboardList,
   },
   {
-    title: 'Puanlama & Yorumlar',
-    description: 'Müşteri geri bildirimlerini toplayıp hizmet kalitesini izleyebilirsiniz.',
+    title: "Puanlama & Yorumlar",
+    description:
+      "Müşteri geri bildirimlerini toplayıp hizmet kalitesini izleyebilirsiniz.",
     icon: MessageSquareQuote,
   },
   {
-    title: 'Logo ve Renk Ayarı',
-    description: 'Her işletme kendi logosu, renkleri ve marka diliyle yayına çıkar.',
+    title: "Logo ve Renk Ayarı",
+    description:
+      "Her işletme kendi logosu, renkleri ve marka diliyle yayına çıkar.",
     icon: Palette,
   },
   {
-    title: 'Çoklu İşletme Desteği',
-    description: 'Tek kod tabanıyla birden fazla restoran ve kafe için ayrı sistem kurulabilir.',
+    title: "Çoklu İşletme Desteği",
+    description:
+      "Tek kod tabanıyla birden fazla restoran ve kafe için ayrı sistem kurulabilir.",
     icon: Building2,
   },
-] as const
+] as const;
 
 const steps = [
-  'İşletmeniz için hesap açılır.',
-  'Logo, renk, masa ve menü bilgileri eklenir.',
-  'Masalara özel QR kodlar oluşturulur.',
-  'Müşteri QR menüden ürün seçer ve sipariş gönderir.',
-  'Garson panelinden çağrılar takip edilir.',
-  'İşletme sahibi yönetim panelinden menüyü ve personeli yönetir.',
-] as const
+  "İşletmeniz için hesap açılır.",
+  "Logo, renk, masa ve menü bilgileri eklenir.",
+  "Masalara özel QR kodlar oluşturulur.",
+  "Müşteri QR menüden ürün seçer ve sipariş gönderir.",
+  "Garson panelinden çağrılar takip edilir.",
+  "İşletme sahibi yönetim panelinden menüyü ve personeli yönetir.",
+] as const;
 
-const WHATSAPP_TRIAL_URL = 'https://wa.me/905421320706?text=Merhaba%2C%20Nerox%20Restaurant%20i%C3%A7in%207%20g%C3%BCn%20%C3%BCcretsiz%20deneme%20hakk%C4%B1nda%20bilgi%20almak%20istiyorum.'
+const WHATSAPP_TRIAL_URL =
+  "https://wa.me/905421320706?text=Merhaba%2C%20Nerox%20Restaurant%20i%C3%A7in%207%20g%C3%BCn%20%C3%BCcretsiz%20deneme%20hakk%C4%B1nda%20bilgi%20almak%20istiyorum.";
 
 const pricingPlans = [
   {
-    name: 'Starter',
-    price: '1.990',
+    name: "Starter",
+    price: "1.990",
     popular: false,
     features: [
-      { text: 'QR Menü', icon: QrCode },
-      { text: 'Garson Çağırma', icon: BellRing },
-      { text: 'Masa Yönetimi', icon: ClipboardList },
-      { text: 'Yönetim Paneli', icon: LayoutDashboard },
+      { text: "QR Menü", icon: QrCode },
+      { text: "Garson Çağırma", icon: BellRing },
+      { text: "Masa Yönetimi", icon: ClipboardList },
+      { text: "Yönetim Paneli", icon: LayoutDashboard },
     ],
   },
   {
-    name: 'Pro',
-    price: '3.990',
+    name: "Pro",
+    price: "3.990",
     popular: true,
     features: [
       { text: "Starter'daki her şey", icon: CheckCircle2 },
-      { text: 'Garson Manuel Sipariş', icon: Users },
-      { text: 'Kampanya ve Sadakat Sistemi', icon: Star },
-      { text: 'Çoklu Dil Desteği', icon: Globe },
+      { text: "Garson Manuel Sipariş", icon: Users },
+      { text: "Kampanya ve Sadakat Sistemi", icon: Star },
+      { text: "Çoklu Dil Desteği", icon: Globe },
     ],
   },
   {
-    name: 'Premium',
-    price: '5.990',
+    name: "Premium",
+    price: "5.990",
     popular: false,
     features: [
       { text: "Pro'daki her şey", icon: CheckCircle2, comingSoon: false },
-      { text: 'Mutfak Ekranı', icon: Monitor, comingSoon: true },
-      { text: 'Gelişmiş Raporlar', icon: PieChart, comingSoon: false },
-      { text: 'Öncelikli Destek', icon: Headphones, comingSoon: false },
+      { text: "Mutfak Ekranı", icon: Monitor, comingSoon: true },
+      { text: "Gelişmiş Raporlar", icon: PieChart, comingSoon: false },
+      { text: "Öncelikli Destek", icon: Headphones, comingSoon: false },
     ],
   },
-] as const
+] as const;
 
-const hasBrandLogo = existsSync(join(process.cwd(), 'public', 'NeroxLogo.png'))
-const hasFounderPhoto = existsSync(join(process.cwd(), 'public', 'nurali.png'))
+const hasBrandLogo = existsSync(join(process.cwd(), "public", "NeroxLogo.png"));
+const hasFounderPhoto = existsSync(join(process.cwd(), "public", "nurali.jpg"));
 
 function InstagramIcon({ className }: { className?: string }) {
   return (
@@ -175,7 +186,7 @@ function InstagramIcon({ className }: { className?: string }) {
       <circle cx="12" cy="12" r="4.2" />
       <circle cx="17.6" cy="6.4" r="0.9" fill="currentColor" stroke="none" />
     </svg>
-  )
+  );
 }
 
 export default function HomePage() {
@@ -233,9 +244,12 @@ export default function HomePage() {
       <div className="relative mx-auto flex w-full max-w-7xl flex-col px-4 pb-8 pt-4 sm:px-8 sm:pb-16 sm:pt-5 lg:min-h-screen lg:px-10">
         <header
           className="landing-fade-up flex flex-wrap items-center justify-between gap-3 rounded-[1.75rem] border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-xl sm:rounded-full sm:px-5"
-          style={{ animationDelay: '60ms' }}
+          style={{ animationDelay: "60ms" }}
         >
-          <Link href="/" className="flex items-center gap-3 text-sm font-semibold tracking-[0.18em] text-white/90">
+          <Link
+            href="/"
+            className="flex items-center gap-3 text-sm font-semibold tracking-[0.18em] text-white/90"
+          >
             <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/5">
               {hasBrandLogo ? (
                 <Image
@@ -247,7 +261,9 @@ export default function HomePage() {
                   priority
                 />
               ) : (
-                  <span className="px-2 text-center text-[10px] tracking-[0.2em] text-white">NEROX</span>
+                <span className="px-2 text-center text-[10px] tracking-[0.2em] text-white">
+                  NEROX
+                </span>
               )}
             </span>
             <span className="hidden sm:inline">Nerox Studio</span>
@@ -274,7 +290,7 @@ export default function HomePage() {
           <div className="max-w-3xl min-w-0">
             <div
               className="landing-fade-up inline-flex items-center gap-2 rounded-full border border-[#7c3aed]/30 bg-[#11061f]/80 px-4 py-2 text-sm font-medium text-[#d8c3ff]"
-              style={{ animationDelay: '140ms' }}
+              style={{ animationDelay: "140ms" }}
             >
               <ShieldCheck className="h-4 w-4" />
               Modern QR menü ve operasyon altyapısı
@@ -282,24 +298,24 @@ export default function HomePage() {
 
             <h1
               className="landing-fade-up mt-5 text-4xl font-semibold leading-tight tracking-[-0.05em] text-white sm:text-5xl lg:text-7xl"
-              style={{ animationDelay: '220ms' }}
+              style={{ animationDelay: "220ms" }}
             >
               Restoran ve kafeler için akıllı QR menü sistemi
             </h1>
 
             <p
               className="landing-fade-up mt-5 max-w-2xl text-base leading-8 text-white/72 sm:text-lg"
-              style={{ animationDelay: '300ms' }}
+              style={{ animationDelay: "300ms" }}
             >
-              Menünüzü dijitalleştirin, masalardan sipariş alın, garson çağrılarını yönetin ve tüm işletmenizi tek
-              panelden takip edin.
+              Menünüzü dijitalleştirin, masalardan sipariş alın, garson
+              çağrılarını yönetin ve tüm işletmenizi tek panelden takip edin.
             </p>
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <Link
                 href="/menu/demo/1"
                 className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#7c3aed] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_20px_60px_rgba(124,58,237,0.35)] transition hover:bg-[#6d28d9] sm:w-auto"
-                style={{ animationDelay: '380ms' }}
+                style={{ animationDelay: "380ms" }}
               >
                 Demo Menüyü Gör
                 <ArrowRight className="h-4 w-4" />
@@ -310,7 +326,7 @@ export default function HomePage() {
                 target="_blank"
                 rel="noreferrer"
                 className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-6 py-3.5 text-sm font-semibold text-[#12061f] transition hover:bg-white/90 sm:w-auto"
-                style={{ animationDelay: '440ms' }}
+                style={{ animationDelay: "440ms" }}
               >
                 Hesap Oluştur
                 <Building2 className="h-4 w-4" />
@@ -319,7 +335,7 @@ export default function HomePage() {
               <Link
                 href="/login"
                 className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10 sm:w-auto"
-                style={{ animationDelay: '500ms' }}
+                style={{ animationDelay: "500ms" }}
               >
                 Yönetim Paneline Giriş
                 <ArrowUpRight className="h-4 w-4" />
@@ -328,7 +344,7 @@ export default function HomePage() {
 
             <div
               className="landing-fade-up mt-8 flex flex-wrap gap-2.5 text-sm text-white/70"
-              style={{ animationDelay: '540ms' }}
+              style={{ animationDelay: "540ms" }}
             >
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-2">
                 <CheckCircle2 className="h-4 w-4 text-[#c084fc]" />
@@ -348,13 +364,17 @@ export default function HomePage() {
           {/* Hero visual card - hidden on mobile */}
           <div
             className="landing-fade-up landing-float relative hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(23,10,42,0.94),rgba(9,4,18,0.98))] p-4 shadow-[0_30px_100px_rgba(10,4,24,0.55)] lg:block lg:p-6"
-            style={{ animationDelay: '320ms' }}
+            style={{ animationDelay: "320ms" }}
           >
             <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.03] p-5">
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#b998ff]">Nerox Studio</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-white">Tek ekranda restoran operasyonu</h2>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#b998ff]">
+                    Nerox Studio
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold text-white">
+                    Tek ekranda restoran operasyonu
+                  </h2>
                 </div>
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#7c3aed]/18 text-[#d8c3ff]">
                   <Sparkles className="h-6 w-6" />
@@ -371,10 +391,16 @@ export default function HomePage() {
                       <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7c3aed]/16 text-[#d8c3ff]">
                         <Icon className="h-5 w-5" />
                       </div>
-                      <span className="text-xs font-medium text-white/35">0{index + 1}</span>
+                      <span className="text-xs font-medium text-white/35">
+                        0{index + 1}
+                      </span>
                     </div>
-                    <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-white/62">{description}</p>
+                    <h3 className="mt-4 text-lg font-semibold text-white">
+                      {title}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-white/62">
+                      {description}
+                    </p>
                   </article>
                 ))}
               </div>
@@ -385,8 +411,13 @@ export default function HomePage() {
                     <Store className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-white">Her işletmeye özel kurulum</p>
-                    <p className="text-sm text-white/60">Marka renkleri, logo, masa yapısı ve menü verisi ayrı yönetilir.</p>
+                    <p className="text-sm font-semibold text-white">
+                      Her işletmeye özel kurulum
+                    </p>
+                    <p className="text-sm text-white/60">
+                      Marka renkleri, logo, masa yapısı ve menü verisi ayrı
+                      yönetilir.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -395,14 +426,19 @@ export default function HomePage() {
         </section>
 
         <section className="py-4 sm:py-5 lg:py-7">
-          <div className="landing-fade-up max-w-2xl" style={{ animationDelay: '120ms' }}>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">Özellikler</p>
+          <div
+            className="landing-fade-up max-w-2xl"
+            style={{ animationDelay: "120ms" }}
+          >
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">
+              Özellikler
+            </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
               İşletme operasyonu için tek platform
             </h2>
             <p className="mt-4 text-base leading-7 text-white/70">
-              Nerox Studio, müşteriden garsona ve yöneticiye kadar tüm akışların aynı sistemde toplanması için
-              tasarlandı.
+              Nerox Studio, müşteriden garsona ve yöneticiye kadar tüm akışların
+              aynı sistemde toplanması için tasarlandı.
             </p>
           </div>
 
@@ -416,16 +452,25 @@ export default function HomePage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#7c3aed]/16 text-[#d8c3ff]">
                   <Icon className="h-5 w-5" />
                 </div>
-                <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
-                <p className="mt-2 text-sm leading-7 text-white/65">{description}</p>
+                <h3 className="mt-4 text-lg font-semibold text-white">
+                  {title}
+                </h3>
+                <p className="mt-2 text-sm leading-7 text-white/65">
+                  {description}
+                </p>
               </article>
             ))}
           </div>
         </section>
 
         <section id="pricing" className="py-4 sm:py-5 lg:py-7">
-          <div className="landing-fade-up text-center" style={{ animationDelay: '120ms' }}>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">Paketler</p>
+          <div
+            className="landing-fade-up text-center"
+            style={{ animationDelay: "120ms" }}
+          >
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">
+              Paketler
+            </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
               İşletmenize uygun paketi seçin
             </h2>
@@ -440,8 +485,8 @@ export default function HomePage() {
                 key={plan.name}
                 className={`landing-fade-up relative flex flex-col rounded-[1.75rem] border p-5 backdrop-blur-xl transition sm:p-6 ${
                   plan.popular
-                    ? 'border-[#7c3aed]/50 bg-gradient-to-b from-[#7c3aed]/20 to-[#0d0618]/90 shadow-[0_0_60px_-15px_rgba(124,58,237,0.4)]'
-                    : 'border-white/10 bg-white/[0.04]'
+                    ? "border-[#7c3aed]/50 bg-gradient-to-b from-[#7c3aed]/20 to-[#0d0618]/90 shadow-[0_0_60px_-15px_rgba(124,58,237,0.4)]"
+                    : "border-white/10 bg-white/[0.04]"
                 }`}
                 style={{ animationDelay: `${180 + index * 70}ms` }}
               >
@@ -454,27 +499,33 @@ export default function HomePage() {
                   </div>
                 )}
 
-                <div className={`text-center ${plan.popular ? 'pt-2' : ''}`}>
-                  <h3 className={`text-xl font-semibold ${plan.popular ? 'text-[#d8c3ff]' : 'text-white'}`}>
+                <div className={`text-center ${plan.popular ? "pt-2" : ""}`}>
+                  <h3
+                    className={`text-xl font-semibold ${plan.popular ? "text-[#d8c3ff]" : "text-white"}`}
+                  >
                     {plan.name}
                   </h3>
                   <div className="mt-3 flex items-baseline justify-center gap-1">
-                    <span className="text-4xl font-bold tracking-tight text-white">{plan.price}</span>
+                    <span className="text-4xl font-bold tracking-tight text-white">
+                      {plan.price}
+                    </span>
                     <span className="text-sm text-white/60">TL / Ay</span>
                   </div>
                 </div>
 
                 <ul className="mt-6 flex-1 space-y-3">
                   {plan.features.map((feature) => (
-                    <li key={feature.text} className="flex items-center gap-3 text-sm text-white/75">
-                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${plan.popular ? 'bg-[#7c3aed]/30 text-[#d8c3ff]' : 'bg-white/10 text-white/60'}`}>
+                    <li
+                      key={feature.text}
+                      className="flex items-center gap-3 text-sm text-white/75"
+                    >
+                      <div
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${plan.popular ? "bg-[#7c3aed]/30 text-[#d8c3ff]" : "bg-white/10 text-white/60"}`}
+                      >
                         <feature.icon className="h-4 w-4" />
                       </div>
                       <span className="flex items-center gap-2">
                         {feature.text}
-                        {'comingSoon' in feature && feature.comingSoon && (
-                          <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-medium text-amber-300">Yakında</span>
-                        )}
                       </span>
                     </li>
                   ))}
@@ -486,8 +537,8 @@ export default function HomePage() {
                   rel="noreferrer"
                   className={`mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition ${
                     plan.popular
-                      ? 'bg-[#7c3aed] text-white hover:bg-[#6d28d9]'
-                      : 'border border-white/12 bg-white/6 text-white hover:border-white/20 hover:bg-white/10'
+                      ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                      : "border border-white/12 bg-white/6 text-white hover:border-white/20 hover:bg-white/10"
                   }`}
                 >
                   7 Gün Ücretsiz Dene
@@ -502,13 +553,13 @@ export default function HomePage() {
           <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] p-6 backdrop-blur-xl sm:p-7"
-              style={{ animationDelay: '120ms' }}
+              style={{ animationDelay: "120ms" }}
             >
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
                 <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.5rem] border border-white/10 bg-white/5">
                   {hasFounderPhoto ? (
                     <Image
-                      src="/nurali.png"
+                      src="/nurali.jpg"
                       alt="Nurali"
                       width={96}
                       height={96}
@@ -519,10 +570,15 @@ export default function HomePage() {
                   )}
                 </div>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#c7a6ff]">Kurucu & Geliştirici</p>
-                  <h2 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">Nurali</h2>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#c7a6ff]">
+                    Kurucu & Geliştirici
+                  </p>
+                  <h2 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
+                    Nurali
+                  </h2>
                   <p className="mt-4 max-w-xl text-base leading-7 text-white/70">
-                    Kafeler ve restoranlar için modern QR menü ve sipariş sistemleri geliştiriyorum.
+                    Kafeler ve restoranlar için modern QR menü ve sipariş
+                    sistemleri geliştiriyorum.
                   </p>
                 </div>
               </div>
@@ -530,9 +586,11 @@ export default function HomePage() {
 
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[#0d0618]/90 p-6 shadow-[0_24px_80px_rgba(7,2,18,0.4)] sm:p-7"
-              style={{ animationDelay: '220ms' }}
+              style={{ animationDelay: "220ms" }}
             >
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">İletişim</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">
+                İletişim
+              </p>
               <div className="mt-5 grid gap-3 text-sm text-white/72">
                 <a
                   href="https://instagram.com/nurali.builder"
@@ -565,14 +623,17 @@ export default function HomePage() {
           <div className="grid gap-4 lg:grid-cols-[0.92fr_1.08fr]">
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[#0d0618]/90 p-6 sm:p-7"
-              style={{ animationDelay: '120ms' }}
+              style={{ animationDelay: "120ms" }}
             >
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">Nasıl kullanılır</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#c7a6ff]">
+                Nasıl kullanılır
+              </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
                 Kurulumdan yayına kısa bir akış
               </h2>
               <p className="mt-4 text-base leading-7 text-white/70">
-                İşletme kurulumu, menü tanımı ve masa bazlı kullanım akışı basit bir sırada ilerler.
+                İşletme kurulumu, menü tanımı ve masa bazlı kullanım akışı basit
+                bir sırada ilerler.
               </p>
             </div>
 
@@ -597,20 +658,24 @@ export default function HomePage() {
           <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div
               className="landing-fade-up rounded-[2rem] border border-white/10 bg-[linear-gradient(140deg,rgba(124,58,237,0.2),rgba(10,4,24,0.95))] p-6 sm:p-7"
-              style={{ animationDelay: '120ms' }}
+              style={{ animationDelay: "120ms" }}
             >
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#d8c3ff]">Demo</p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">Canlı akış yerine örnek deneyim</h2>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[#d8c3ff]">
+                Demo
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
+                Canlı akış yerine örnek deneyim
+              </h2>
               <p className="mt-4 max-w-3xl text-base leading-7 text-white/72">
-                Demo menü örnek içeriklerle hazırlanmıştır. Gerçek kullanımda işletme adı, logo, renkler ve ürünler size
-                özel olur.
+                Demo menü örnek içeriklerle hazırlanmıştır. Gerçek kullanımda
+                işletme adı, logo, renkler ve ürünler size özel olur.
               </p>
             </div>
 
             <Link
               href="/menu/demo/1"
               className="landing-fade-up inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/6 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/18 hover:bg-white/10 sm:w-auto"
-              style={{ animationDelay: '220ms' }}
+              style={{ animationDelay: "220ms" }}
             >
               Demo Menüyü Gör
               <MenuSquare className="h-4 w-4" />
@@ -621,7 +686,7 @@ export default function HomePage() {
         <section className="py-4 sm:py-5 lg:py-7">
           <div
             className="landing-fade-up rounded-[2rem] border border-white/10 bg-white/[0.04] p-6 text-center backdrop-blur-xl sm:p-8"
-            style={{ animationDelay: '120ms' }}
+            style={{ animationDelay: "120ms" }}
           >
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#7c3aed]/16 text-[#d8c3ff]">
               <Blocks className="h-6 w-6" />
@@ -630,7 +695,8 @@ export default function HomePage() {
               İşletmeniz için kendi QR menü sisteminizi hazırlayalım.
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-white/70">
-              Kurulumu hızlı, kullanımı net ve markanıza özel bir sistem için Nerox Studio altyapısını kullanabilirsiniz.
+              Kurulumu hızlı, kullanımı net ve markanıza özel bir sistem için
+              Nerox Studio altyapısını kullanabilirsiniz.
             </p>
 
             <div className="mt-7 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
@@ -668,5 +734,5 @@ export default function HomePage() {
         </footer>
       </div>
     </main>
-  )
+  );
 }

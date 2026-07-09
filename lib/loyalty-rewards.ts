@@ -3,9 +3,9 @@ import {
   doc,
   getDocs,
   query,
+  runTransaction,
   serverTimestamp,
   where,
-  writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import type { CartItem, LoyaltyCampaign, LoyaltyReward } from '@/lib/types'
@@ -84,56 +84,50 @@ export async function redeemReward(
   actor: { uid: string; name: string; role: 'admin' | 'waiter' }
 ): Promise<void> {
   const rewardRef = doc(db, 'restaurants', restaurantId, 'customers', customerId, 'rewards', rewardId)
-  const rewardSnap = await getDocs(
-    query(
-      collection(db, 'restaurants', restaurantId, 'customers', customerId, 'rewards'),
-      where('__name__', '==', rewardId)
-    )
-  )
+  const customerRef = doc(db, 'restaurants', restaurantId, 'customers', customerId)
 
-  if (rewardSnap.empty) {
-    throw new Error('Hediye bulunamadı.')
-  }
+  // Read the reward status and flip it to 'used' inside a single transaction so
+  // two concurrent redeems of the same reward can never both succeed.
+  await runTransaction(db, async (transaction) => {
+    const rewardSnap = await transaction.get(rewardRef)
+    if (!rewardSnap.exists()) {
+      throw new Error('Hediye bulunamadı.')
+    }
 
-  const reward = rewardSnap.docs[0].data() as Omit<LoyaltyReward, 'id'>
-  if (reward.status !== 'available') {
-    throw new Error('Bu hediye zaten kullanılmış.')
-  }
+    const reward = rewardSnap.data() as Omit<LoyaltyReward, 'id'>
+    if (reward.status !== 'available') {
+      throw new Error('Bu hediye zaten kullanılmış.')
+    }
 
-  const customerSnap = await getDocs(
-    query(collection(db, 'restaurants', restaurantId, 'customers'), where('__name__', '==', customerId))
-  )
+    const customerSnap = await transaction.get(customerRef)
+    const customerName =
+      (customerSnap.exists() ? (customerSnap.data().name as string) : '') || 'Müşteri'
 
-  const customerName = customerSnap.empty ? 'Müşteri' : (customerSnap.docs[0].data().name as string) || 'Müşteri'
+    transaction.update(rewardRef, {
+      status: 'used',
+      usedAt: serverTimestamp(),
+      usedById: actor.uid,
+      usedByName: actor.name,
+    })
 
-  const batch = writeBatch(db)
-
-  batch.update(rewardRef, {
-    status: 'used',
-    usedAt: serverTimestamp(),
-    usedById: actor.uid,
-    usedByName: actor.name,
+    const transactionRef = doc(collection(db, 'restaurants', restaurantId, 'loyaltyTransactions'))
+    transaction.set(transactionRef, {
+      customerId,
+      customerName,
+      campaignId: reward.campaignId,
+      campaignName: reward.campaignName,
+      callId: reward.earnedFromCallId,
+      action: 'redeem',
+      targetProductId: '',
+      targetProductName: '',
+      targetQuantity: 0,
+      rewardProductId: reward.rewardProductId,
+      rewardProductName: reward.rewardProductName,
+      rewardQuantity: reward.rewardQuantity,
+      createdAt: serverTimestamp(),
+      createdByRole: actor.role,
+      createdById: actor.uid,
+      createdByName: actor.name,
+    })
   })
-
-  const transactionRef = doc(collection(db, 'restaurants', restaurantId, 'loyaltyTransactions'))
-  batch.set(transactionRef, {
-    customerId,
-    customerName,
-    campaignId: reward.campaignId,
-    campaignName: reward.campaignName,
-    callId: reward.earnedFromCallId,
-    action: 'redeem',
-    targetProductId: '',
-    targetProductName: '',
-    targetQuantity: 0,
-    rewardProductId: reward.rewardProductId,
-    rewardProductName: reward.rewardProductName,
-    rewardQuantity: reward.rewardQuantity,
-    createdAt: serverTimestamp(),
-    createdByRole: actor.role,
-    createdById: actor.uid,
-    createdByName: actor.name,
-  })
-
-  await batch.commit()
 }

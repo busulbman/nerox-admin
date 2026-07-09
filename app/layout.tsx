@@ -3,6 +3,7 @@ import { Montserrat } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
 import { DEFAULT_BRAND_LOGO_PATH } from '@/lib/restaurant-settings'
+import { Analytics } from "@vercel/analytics/next";
 
 const montserrat = Montserrat({ subsets: ['latin'], variable: '--font-sans' })
 
@@ -37,6 +38,7 @@ export default function RootLayout({
     <html lang="tr" className={`${montserrat.variable} h-full overflow-x-hidden antialiased`}>
       <body className="min-h-full overflow-x-hidden">
         <AuthProvider>{children}</AuthProvider>
+        <Analytics />
       </body>
     </html>
   )
